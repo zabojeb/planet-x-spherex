@@ -98,6 +98,10 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(exports.router)
     app.include_router(releases.router)
     app.include_router(spectral.router)
+    if os.environ.get("SPHEREX_MCP", "1") != "0":  # MCP endpoint for AI agents at /mcp (docs/mcp.md)
+        from spherex_mcp.http import attach
+
+        attach(app)
     if web_dist is not None and web_dist.exists():
         app.mount("/", WebFiles(directory=web_dist, html=True), name="web")
     return app

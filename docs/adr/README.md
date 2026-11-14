@@ -64,3 +64,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0050](0050-track-and-stack.md) | Track & Stack within one visit, and require two of three sub-stacks in the synthetic-tracking search | Accepted | 2026-11-14 |
 | [0051](0051-real-bogus-boosted-stumps.md) | Rank difference-image detections with NumPy boosted stumps trained on injections, validated leaving one field out | Accepted | 2026-11-14 |
 | [0052](0052-verification-and-ades.md) | Verify candidates with free-position ePSF fits and export ADES for station 288 as follow-up data | Accepted | 2026-11-14 |
+| [0055](0055-mcp-server-for-discovery-agents.md) | MCP server (stdio + streamable HTTP at /mcp) so an AI agent can run a discovery search over the services facade | Accepted | 2026-11-14 |
