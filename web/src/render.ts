@@ -6,6 +6,7 @@ export type BandSel = BandId | "all";
 
 /** No-data pixels: a slate tone that cannot be mistaken for dark sky. */
 export const NAN_RGB: [number, number, number] = [38, 44, 54];
+export const OUTSIDE_RGB: [number, number, number] = [0, 0, 0];
 
 function hex(h: string): [number, number, number] {
   const v = parseInt(h.slice(1), 16);
@@ -396,9 +397,11 @@ export function paintScalar(img: ArrayLike<number>, n: number, lo: number, hi: n
       const v = img[y * n + x];
       const o = (r * n + x) * 4;
       if (!Number.isFinite(v)) {
-        d[o] = NAN_RGB[0];
-        d[o + 1] = NAN_RGB[1];
-        d[o + 2] = NAN_RGB[2];
+        // -Infinity marks "outside this image" (an inset on a wider grid): drawn as the black stage.
+        const c = v === -Infinity ? OUTSIDE_RGB : NAN_RGB;
+        d[o] = c[0];
+        d[o + 1] = c[1];
+        d[o + 2] = c[2];
       } else {
         const t = applyStretch(Math.min(1, Math.max(0, (v - lo) / span)), stretch);
         const li = Math.round(t * 255) * 3;
@@ -421,9 +424,11 @@ export function paintDiverging(img: ArrayLike<number>, n: number, lim: number, s
       const v = img[y * n + x];
       const o = (r * n + x) * 4;
       if (!Number.isFinite(v)) {
-        d[o] = NAN_RGB[0];
-        d[o + 1] = NAN_RGB[1];
-        d[o + 2] = NAN_RGB[2];
+        // -Infinity marks "outside this image" (an inset on a wider grid): drawn as the black stage.
+        const c = v === -Infinity ? OUTSIDE_RGB : NAN_RGB;
+        d[o] = c[0];
+        d[o + 1] = c[1];
+        d[o + 2] = c[2];
       } else {
         let t = Math.min(1, Math.max(-1, v / (lim || 1)));
         if (soft) t = Math.asinh(soft * t) / norm;

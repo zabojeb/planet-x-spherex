@@ -23,6 +23,17 @@ export interface Target {
   /** Optional display hints from the API (e.g. a target only visible at long wavelengths). */
   default_band?: string | null;
   default_mode?: string | null;
+  /** A solar-system object: the sequence is built co-moving with it (stars trail). */
+  moving?: MovingRequest | null;
+}
+
+/** The co-moving fields of a sequence request (from /api/moving/search's suggested_request). */
+export interface MovingRequest {
+  object_name: string;
+  object_type?: string | null;
+  naif_id?: number | null;
+  obs_begin?: string | null;
+  obs_end?: string | null;
 }
 
 export interface TrackPoint {
@@ -116,6 +127,8 @@ export interface Grid {
   n: number;
   pixscale_arcsec: number;
   fov_arcmin: number;
+  /** "comoving" when every exposure was resampled on a grid centred on a moving object. */
+  frame?: string;
 }
 
 export interface Meta {
@@ -228,4 +241,157 @@ export interface SourcePhotometry {
 export interface ExposureStack {
   data: Float32Array;
   indices: number[];
+}
+
+// ------------------------------------------------------------------ archival epochs (2MASS, AllWISE, NEOWISE)
+export interface ArchivalFrame {
+  index: number;
+  survey: string;
+  survey_id: string;
+  band: string;
+  label: string;
+  wl_um: number;
+  mjd: number;
+  mjd_min: number;
+  mjd_max: number;
+  date: string;
+  epoch_year: number;
+  n_images: number;
+  coverage: number;
+  target_px: [number, number] | null;
+  target_in_field: boolean;
+}
+
+export interface ArchivalMeta {
+  sequence: string;
+  grid: Grid;
+  surveys: string[];
+  frames: ArchivalFrame[];
+  array: { shape: number[]; unit?: string };
+  stats?: { errors?: string[] };
+}
+
+// ------------------------------------------------------------------ solar-system objects
+export interface MovingSearch {
+  object: string;
+  n_exposures: number;
+  date_min: string;
+  date_max: string;
+  ephemeris: [number, number, number][];
+  suggested_request: { ra: number; dec: number; name: string; fov_arcmin: number } & MovingRequest;
+}
+
+export interface MovingChoice {
+  name: string;
+  type?: string;
+  naif_id: number;
+  designation?: string;
+}
+
+// ------------------------------------------------------------------ spectral analysis
+export interface SpecBin {
+  band: BandId;
+  bin: number;
+  wl: number;
+  wl_lo: number;
+  wl_hi: number;
+  flux_mjy: number;
+  err_mjy: number | null;
+  n: number;
+  n_rejected?: number;
+  chi2?: number | null;
+  relative: boolean;
+  epochs?: number[];
+  continuum_mjy?: number | null;
+}
+
+export interface SpecFeature {
+  id: string;
+  name: string;
+  species: string;
+  kind: "absorption" | "emission" | string;
+  center: number;
+  band: [number, number];
+  depth: number | null;
+  depth_err: number | null;
+  ew_um?: number | null;
+  significance: number | null;
+  detected: boolean;
+}
+
+export interface SpecIndex {
+  value: number | null;
+  err: number | null;
+  numerator_um?: [number, number];
+  denominator_um?: [number, number];
+  description?: string;
+}
+
+export interface SpectrumResult {
+  version?: number;
+  target?: string;
+  n_measurements: number;
+  bins: SpecBin[];
+  relative_bins: SpecBin[];
+  features: SpecFeature[];
+  detections?: { kind: string; wl_min: number; wl_max: number; wl_center: number; significance: number; identified_as: string[] }[];
+  continuum?: { available: boolean; reliable: boolean; note?: string };
+  indices: Record<string, SpecIndex>;
+  notes?: string[];
+}
+
+export interface TemplateFit {
+  name: string;
+  sptype: string;
+  family: string;
+  source: string;
+  chi2_red: number;
+  probability: number;
+  n_bins: number;
+}
+
+export interface SynthMag {
+  coverage: number;
+  extrapolated: boolean;
+  flux_mjy: number | null;
+  mag: number | null;
+  mag_err: number | null;
+}
+
+export interface ClassifyResult {
+  available: boolean;
+  reason?: string;
+  summary?: { label: string | null; family: string | null; notes: string[] };
+  templates?: { best: TemplateFit | null; ranked: TemplateFit[]; class_probabilities?: Record<string, number>; max_wl_um?: number };
+  template_error?: string | null;
+  blackbody?: { teff_k: number; teff_range_k?: [number, number]; chi2_red: number } | null;
+  ir_index?: { alpha: number; alpha_err: number; lada_class: string; note?: string } | null;
+  model_curves?: Record<string, { source?: string; wl: number[]; flux_mjy: (number | null)[] }>;
+  synthetic_photometry: Record<string, SynthMag>;
+  catalog_comparison: {
+    bands: Record<string, { synthetic: number | null; catalog: number | null; delta_mag: number | null; suspect?: boolean; catalog_id?: string }>;
+    errors?: unknown;
+  } | null;
+  notes?: string[];
+}
+
+export interface VariabilityResult {
+  available: boolean;
+  reason?: string;
+  reference_epoch?: number;
+  systematic?: number;
+  epochs: {
+    epoch: number;
+    variable?: boolean;
+    significant_bands?: string[];
+    chi2_red_constant?: number | null;
+    per_band?: Record<string, { ratio: number; err: number; z: number; n_bins: number; kind: string }>;
+    ratios?: { band: BandId; bin: number; wl: number; kind: string; ratio: number; err: number; z: number }[];
+  }[];
+}
+
+export interface SpectralAnalysis {
+  spectrum: SpectrumResult | null;
+  classification: ClassifyResult | null;
+  variability: VariabilityResult | null;
 }

@@ -261,6 +261,7 @@ textarea { background: var(--layer-1); border: 1px solid var(--hair-2); border-r
 .swatch.hollow { border-radius: 50%; border: 1.5px solid currentColor; }
 .swatch.hollow-square { border: 1.5px solid currentColor; transform: rotate(45deg) scale(0.8); }
 .swatch.line { width: 16px; height: 2px; background: currentColor; }
+.swatch.dash { width: 16px; height: 2px; background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 8px); }
 
 /* ------------------------------------------------------------------ data panel */
 .target-name { font-family: var(--display); font-size: 34px; font-weight: 400; line-height: 1.05; letter-spacing: -0.005em; }
@@ -725,6 +726,51 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 .layer-tip .layer-tip-drawn { color: var(--text-3); font-size: 12px; }
 .layer-tip-status { font-size: 12px; color: var(--err); }
 @media (hover: none) { .layer-tip { display: none; } }
+
+/* ---- spectral analysis (drawer Spectrum tab) */
+.spectral { display: flex; flex-direction: column; gap: 10px; }
+.spectral > .segmented { align-self: flex-start; }
+.feature-band { fill: rgba(217, 89, 38, 0.10); stroke: rgba(217, 89, 38, 0.35); stroke-width: 1; }
+.spectral-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; }
+.class-view, .var-view, .spectral-view { display: flex; flex-direction: column; gap: 12px; }
+.class-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--hair-2); border-radius: var(--r-sm); background: var(--layer-1); }
+.class-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.class-label { font-family: var(--display); font-size: 26px; line-height: 1.1; color: var(--text-1); margin: 2px 0; }
+.class-facts { display: grid; grid-template-columns: auto auto; gap: 2px 12px; margin: 0; font-size: 12px; align-content: start; }
+.class-facts dt { color: var(--text-3); }
+.class-facts dd { margin: 0; color: var(--text-1); }
+.prob-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-width: 460px; }
+.prob-list li { display: grid; grid-template-columns: 70px 1fr 48px; align-items: center; gap: 10px; font-size: 12px; }
+.prob-name { font-family: var(--mono); color: var(--text-1); }
+.prob-bar { height: 8px; background: var(--layer-2); border-radius: 2px; overflow: hidden; }
+.prob-bar span { display: block; height: 100%; background: #3987e5; border-radius: 2px; }
+.prob-val { text-align: right; color: var(--text-2); }
+.tbl tr.suspect td { background: rgba(250, 178, 25, 0.06); }
+.suspect-mark { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--warning); font-size: 11px; }
+.var-view .swatch.dot { display: inline-block; width: 8px; height: 8px; vertical-align: middle; }
+
+/* ---- long baseline: archival strip left of the SPHEREx scrubber, controls in Layers */
+.arch-strip { display: flex; align-items: flex-start; flex: 0 0 44%; min-width: 130px; max-width: 280px; }
+.arch-axis { position: relative; flex: 1; height: 38px; cursor: pointer; touch-action: none; user-select: none; }
+.arch-tick { position: absolute; top: 13.5px; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; padding: 0; border: 1px solid var(--text-2); background: transparent; border-radius: 0; }
+.arch-tick.diamond { transform: rotate(45deg) scale(0.9); }
+.arch-tick.out { border-style: dotted; opacity: 0.55; }
+.arch-tick.cur { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border: 2px solid var(--accent); background: #000; opacity: 1; z-index: 2; }
+.arch-break { align-self: flex-start; margin-top: 4px; padding: 0 6px; color: var(--text-3); font-size: 13px; }
+.arch-status { position: absolute; left: 8px; right: 0; top: 20px; font-family: var(--mono); font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.longbase { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hair); }
+.longbase-bands { display: flex; gap: 8px; flex-wrap: wrap; }
+.form-hint.err { color: var(--err); }
+.dock-scrub.with-arch { display: flex; align-items: flex-start; min-width: 240px; } .dock-scrub.with-arch .scrubber { flex: 1; min-width: 100px; }
+
+/* ---- solar-system lookup card */
+.moving-card { position: absolute; z-index: 35; top: 128px; left: 20px; width: min(380px, calc(100vw - 40px)); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; animation: pop var(--t) var(--ease); }
+.moving-card .micro { display: inline-flex; align-items: center; gap: 6px; }
+.moving-line { margin: 0; font-size: 13px; color: var(--text-1); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.moving-line.err { color: var(--err); }
+.moving-choices { display: flex; flex-direction: column; max-height: 40vh; overflow: auto; }
+@media (max-width: 760px) { .moving-card { top: 120px; left: 12px; right: 12px; width: auto; } }
+@media (min-width: 761px) { .floating-bottom:has(.with-arch) { width: min(980px, calc(100vw - 340px)); } }
 
 /* ---- phones: roomier dock with finger-sized targets (after the base rules so it wins the cascade) */
 @media (max-width: 760px) {

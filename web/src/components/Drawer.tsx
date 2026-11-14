@@ -7,7 +7,7 @@ import type { Mode } from "../state";
 import type { Meta, Photometry, Target } from "../types";
 import { Segmented } from "./ui/primitives";
 
-const SpectrumChart = lazy(() => import("./chart/SpectrumChart").then((m) => ({ default: m.SpectrumChart })));
+const SpectralPanel = lazy(() => import("./chart/SpectralPanel").then((m) => ({ default: m.SpectralPanel })));
 const LightCurveChart = lazy(() => import("./chart/LightCurveChart").then((m) => ({ default: m.LightCurveChart })));
 const PeriodogramChart = lazy(() => import("./chart/PeriodogramChart").then((m) => ({ default: m.PeriodogramChart })));
 const SidePanel = lazy(() => import("./SidePanel").then((m) => ({ default: m.SidePanel })));
@@ -34,6 +34,8 @@ interface Props {
   /** A measured catalogue source shown instead of the target. */
   source?: { key: string; label: string; photometry: Photometry[] } | null;
   onClearSource?: () => void;
+  /** The spectrum tab fell back to the per-exposure chart and needs the photometry table. */
+  onNeedPhotometry?: () => void;
 }
 
 export function Drawer(p: Props) {
@@ -81,10 +83,12 @@ export function Drawer(p: Props) {
       <div className="drawer-body">
         <Suspense fallback={<div className="skeleton" style={{ height: 260 }} />}>
           {p.tab === "periodogram" && <PeriodogramChart id={p.meta.id} source={p.source} />}
-          {p.tab !== "periodogram" && !p.tablesReady && (p.tablesError
+          {p.tab === "spectrum" && (
+            <SpectralPanel meta={p.meta} epoch={p.epoch} ylog={p.ylog} target={p.target} source={p.source} photometryReady={p.tablesReady} onNeedPhotometry={p.onNeedPhotometry} />
+          )}
+          {p.tab !== "periodogram" && p.tab !== "spectrum" && !p.tablesReady && (p.tablesError
             ? <p className="chart-empty static">{p.tablesError}</p>
             : <div className="skeleton" style={{ height: 260 }} aria-label="Loading measurements" />)}
-          {!p.tablesReady ? null : p.tab === "spectrum" && <SpectrumChart meta={p.meta} epoch={p.epoch} ylog={p.ylog} />}
           {p.tablesReady && p.tab === "lightcurve" && <LightCurveChart meta={p.meta} epoch={p.epoch} />}
           {p.tablesReady && p.tab === "details" && (
             <SidePanel

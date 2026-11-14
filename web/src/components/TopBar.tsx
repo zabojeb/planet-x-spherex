@@ -26,6 +26,7 @@ export function TopLeft(p: {
   onPick: (pick: Pick, recent: Recent) => void;
   onRandom: (what: Facet | "field" | null) => void;
   onWarm: () => void;
+  onMoving?: (name: string) => void;
   onFov: (fov: number) => void;
   /** The editable field-centre coordinates, under the search row. */
   coords?: ReactNode;
@@ -35,7 +36,7 @@ export function TopLeft(p: {
     <div className="topleft">
       <Wordmark />
       <div className="search-row">
-        <CommandSearch space={p.space} indexReady={p.indexReady} current={p.current} recents={p.recents} onPick={p.onPick} onRandom={p.onRandom} onWarm={p.onWarm} />
+        <CommandSearch space={p.space} indexReady={p.indexReady} current={p.current} recents={p.recents} onPick={p.onPick} onRandom={p.onRandom} onWarm={p.onWarm} onMoving={p.onMoving} />
         <label className="fov glass" title="Field of view. Larger fields show faster movers but load more data.">
           <span className="micro">FOV</span>
           <select value={p.fov} onChange={(e) => p.onFov(Number(e.target.value))} aria-label="Field of view in arcminutes">
