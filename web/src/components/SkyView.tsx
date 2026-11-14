@@ -8,8 +8,7 @@
 import { LocateFixed, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Progress } from "../api";
-import { setCursorReadout } from "../cursor";
-import { compassPoint, formatAngle, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, totalPm, worldToPixel } from "../astro";
+import { compassPoint, formatAngle, formatDec, formatDeg, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, toGalactic, totalPm, worldToPixel } from "../astro";
 import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
@@ -549,19 +548,9 @@ export function SkyView(p: Props) {
     p.selection?.kind === "target" ? p.targetPx : selWorld && p.grid ? worldToPixel(p.grid, ...selWorld) : null;
   const selPos = selPx ? toScreen(...selPx) : null;
   const hl = p.highlight ? markers.find((m) => sourceKey(m.cat, m.src) === p.highlight) : null;
-  // The position under the mouse goes to the coordinate box at the top left (src/cursor.ts); the target, a pin
-  // or a selected source show their coordinates there and in the pick card, so the HUD carries none.
-  const cursorRa = world?.[0] ?? null;
-  const cursorDec = world?.[1] ?? null;
-  const tw0 = p.targetWorld?.[0] ?? null;
-  const tw1 = p.targetWorld?.[1] ?? null;
-  useEffect(() => {
-    if (cursorRa == null || cursorDec == null) return setCursorReadout(null);
-    const sep = tw0 != null && tw1 != null ? separation(tw0, tw1, cursorRa, cursorDec) : null;
-    const offset = sep != null && sep > 1e-5 ? `${formatAngle(sep)} ${compassPoint(positionAngle(tw0!, tw1!, cursorRa, cursorDec))} of target` : null;
-    setCursorReadout({ pos: [cursorRa, cursorDec], value, offset });
-  }, [cursorRa, cursorDec, value, tw0, tw1]);
-  useEffect(() => () => setCursorReadout(null), []);
+  const readout = world ? { label: "Cursor", pos: world } : selWorld ? { label: p.selection?.kind === "point" ? "Pin" : "Selected", pos: selWorld } : p.targetWorld ? { label: "Target", pos: p.targetWorld } : null;
+  const gal = readout ? toGalactic(...readout.pos) : null;
+  const fromTarget = readout && p.targetWorld && readout.label !== "Target" ? separation(...p.targetWorld, ...readout.pos) : null;
 
   const cardLeft = selPos ? Math.max(12, Math.min(selPos[0] + 18, W - 300)) : 0;
   const cardTop = selPos ? Math.max(70, Math.min(selPos[1] - 24, H - 420)) : 0;
@@ -760,7 +749,7 @@ export function SkyView(p: Props) {
         );
       })()}
 
-      {/* HUD: navigation pad, compass and scale, date (coordinates live in the box at the top left) */}
+      {/* HUD: navigation pad, compass and scale, date, coordinate readout */}
       {n > 0 && (
         <div className="hud-min">
           <div className="hud-nav">
@@ -794,6 +783,31 @@ export function SkyView(p: Props) {
           <div className="hud-line" aria-hidden>
             <span>{p.dateLabel}</span>
           </div>
+          {readout && gal && (
+            <div className="readout" aria-live="off">
+              <div className="readout-head">
+                <span>{readout.label}</span>
+                {value && readout.label === "Cursor" && <span className="muted">{value}</span>}
+              </div>
+              <div className="readout-main">
+                <span><i>α</i>{formatRA(readout.pos[0])}</span>
+                <span><i>δ</i>{formatDec(readout.pos[1])}</span>
+              </div>
+              <div className="readout-sub">
+                <span>{formatDeg(readout.pos[0])}</span>
+                <span>{formatDeg(readout.pos[1], 5, true)}</span>
+              </div>
+              <div className="readout-sub">
+                <span><i>l</i>{formatDeg(gal[0], 4)}</span>
+                <span><i>b</i>{formatDeg(gal[1], 4, true)}</span>
+              </div>
+              {fromTarget != null && p.targetWorld && fromTarget > 1e-5 && (
+                <div className="readout-sub">
+                  <span>{formatAngle(fromTarget)} {compassPoint(positionAngle(...p.targetWorld, ...readout.pos))} of target</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
