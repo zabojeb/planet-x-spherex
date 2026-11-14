@@ -11,8 +11,10 @@
  * Every new endpoint has a fallback to the older full-meta / whole-cube API.
  */
 import type {
-  ArrayName, BandId, CatalogSource, Exposure, ExposureStack, Job, Meta, PeriodogramResult, Photometry, PlaneArray,
-  PlaneKey, PlaneSource, SequenceData, SourcePhotometry, Target,
+  ArchivalMeta, ArrayName, BandId, CatalogSource, ClassifyResult, Exposure, ExposureStack, Job, Meta, MovingChoice,
+  MovingRequest, MovingSearch, PeriodogramResult, Photometry, PlaneArray, PlaneKey, PlaneSource, SequenceData,
+  SourcePhotometry, SpectralAnalysis, SpectrumResult, Target, VariabilityResult, PointAnalysis, FieldResult,
+  KnownObjects, StackSearch, VerifyResult,
 } from "./types";
 import { parseIndex, type ObjectIndex } from "./search";
 
@@ -132,6 +134,12 @@ export interface SequenceRequest {
   fov_arcmin: number;
   gap_days?: number;
   max_epoch_days?: number;
+  // Co-moving with a solar-system object (fields of /api/moving/search's suggested_request).
+  object_name?: string;
+  object_type?: string | null;
+  naif_id?: number | null;
+  obs_begin?: string | null;
+  obs_end?: string | null;
 }
 
 /** stage "busy" = rate-limited by the server; retryIn says when the client tries again (seconds). */
@@ -603,3 +611,221 @@ export type ExportKind = "coadds.fits" | "photometry.csv" | "photometry.vot" | "
 
 /** Download links (plain navigations, served as attachments). */
 export const exportUrl = (id: string, kind: ExportKind) => `${BASE}/api/sequences/${id}/export/${kind}`;
+
+// ------------------------------------------------------------------ long-running GETs (202 = keep polling)
+/** GET a URL that answers 202 while the server works on it; poll it (a heartbeat) until it answers
+ *  anything else, and return that response. */
+async function pollUrl(path: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<Response> {
+  for (;;) {
+    const r = await withBackoff(() => request(path, { signal }), onProgress ?? (() => undefined), signal);
+    if (r.status !== 202) return r;
+    const j = (await r.json().catch(() => ({}))) as Partial<Job>;
+    onProgress?.({ stage: j.stage ?? "queued", done: j.done ?? 0, total: j.total ?? 0, elapsed: j.elapsed ?? 0, ahead: j.position ?? null });
+    await heartbeat(signal);
+  }
+}
+
+// ------------------------------------------------------------------ archival epochs
+const archivalMeta = new Map<string, ArchivalMeta>();
+const archivalFrames = new Map<string, Float32Array>(); // `${id}|${fov}|${index}`, small LRU
+const ARCHIVAL_FRAMES = 160;
+
+const archQuery = (fov: number | null) => (fov ? `fov_arcmin=${fov.toFixed(1)}` : "");
+
+/** 2MASS / AllWISE / NEOWISE images on the sequence's grid (a wider concentric grid with fov). Starts the
+ *  build on first call and polls until it is ready; 404 = not available (older server, co-moving). */
+export async function loadArchival(id: string, fov: number | null, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<ArchivalMeta> {
+  const key = `${id}|${fov ?? ""}`;
+  const hit = archivalMeta.get(key);
+  if (hit) return hit;
+  const q = archQuery(fov);
+  const r = await pollUrl(`/api/sequences/${id}/archival${q ? `?${q}` : ""}`, onProgress, signal);
+  if (r.status === 500) {
+    const j = await r.json().catch(() => ({}));
+    throw new ApiError((j as Job).error || "the archival images could not be built", 500);
+  }
+  if (!r.ok) throw new ApiError(r.status === 404 || r.status === 405 ? "Archival epochs are not available here." : await detail(r), r.status);
+  const m: ArchivalMeta = await r.json();
+  archivalMeta.set(key, m);
+  return m;
+}
+
+/** One archival frame [n, n] (NaN = no data), cached. */
+export async function fetchArchivalFrame(id: string, fov: number | null, index: number, signal?: AbortSignal): Promise<Float32Array> {
+  const key = `${id}|${fov ?? ""}|${index}`;
+  const hit = archivalFrames.get(key);
+  if (hit) return hit;
+  const q = [archQuery(fov), `index=${index}`].filter(Boolean).join("&");
+  const r = await request(`/api/sequences/${id}/archival.bin?${q}`, { signal });
+  if (!r.ok) throw new ApiError(await detail(r), r.status);
+  const a = new Float32Array(await r.arrayBuffer());
+  archivalFrames.set(key, a);
+  while (archivalFrames.size > ARCHIVAL_FRAMES) archivalFrames.delete(archivalFrames.keys().next().value as string);
+  return a;
+}
+
+export function cachedArchivalFrame(id: string, fov: number | null, index: number): Float32Array | undefined {
+  return archivalFrames.get(`${id}|${fov ?? ""}|${index}`);
+}
+
+// ------------------------------------------------------------------ solar-system objects (IRSA MOST)
+export class AmbiguousObject extends Error {
+  constructor(message: string, public choices: MovingChoice[]) {
+    super(message);
+  }
+}
+
+/** Find a comet or asteroid in SPHEREx exposures. Minutes for long windows (polled). 409 → AmbiguousObject. */
+export async function searchMoving(q: { name?: string; naif_id?: number }, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<MovingSearch> {
+  const params = q.naif_id ? `naif_id=${q.naif_id}` : `name=${encodeURIComponent(q.name ?? "")}`;
+  const r = await pollUrl(`/api/moving/search?${params}`, onProgress, signal);
+  if (r.status === 409) {
+    const j = await r.json().catch(() => ({}));
+    throw new AmbiguousObject(j.error || "Several objects match this name", j.choices ?? []);
+  }
+  if (r.status === 404 || r.status === 405) {
+    const msg = await detail(r);
+    throw new ApiError(msg === "Not Found" || msg === "Method Not Allowed" ? "Solar-system search is not available on this server yet." : msg, 404);
+  }
+  if (!r.ok) throw new ApiError(await detail(r), r.status);
+  return r.json();
+}
+
+/** The sequence request for a moving-object search result. */
+export function movingRequest(s: MovingSearch): { target: Target; moving: MovingRequest } {
+  const r = s.suggested_request;
+  const moving: MovingRequest = { object_name: r.object_name, object_type: r.object_type, naif_id: r.naif_id, obs_begin: r.obs_begin, obs_end: r.obs_end };
+  return { target: { ra: r.ra, dec: r.dec, pmra: 0, pmdec: 0, ref_epoch: 2000, name: r.name || s.object, fov_arcmin: r.fov_arcmin, moving }, moving };
+}
+
+// ------------------------------------------------------------------ spectral analysis
+const spectral = new Map<string, Promise<unknown>>();
+function memo<T>(key: string, make: () => Promise<T>): Promise<T> {
+  let p = spectral.get(key) as Promise<T> | undefined;
+  if (!p) {
+    p = make();
+    p.catch(() => spectral.delete(key));
+    spectral.set(key, p);
+  }
+  return p;
+}
+
+export const fetchSpectrum = (id: string) => memo(`s|${id}`, () => json<SpectrumResult>(`/api/sequences/${id}/spectrum`, undefined, 1));
+export const fetchClassification = (id: string, catalogs = true) =>
+  memo(`c|${id}|${catalogs}`, () => json<ClassifyResult>(`/api/sequences/${id}/classify?catalogs=${catalogs}`, undefined, 1));
+export const fetchVariability = (id: string) => memo(`v|${id}`, () => json<VariabilityResult>(`/api/sequences/${id}/spectral-variability`, undefined, 1));
+
+/** Everything at once for arbitrary photometry (a measured catalogue source). */
+export const analyzeSpectrum = (key: string, photometry: Photometry[], target: Target | null, catalogs = true) =>
+  memo(`a|${key}|${catalogs}`, () =>
+    json<SpectralAnalysis>("/api/spectrum/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        photometry,
+        target: target ? { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null } : null,
+        catalogs,
+      }),
+    }, 0),
+  );
+
+// ------------------------------------------------------------------ analysis jobs (point analysis, field analysis)
+/**
+ * POST a job, then poll it (each poll is a heartbeat) until it is done. 410 (cancelled) re-POSTs. Aborting
+ * withdraws this tab's interest with DELETE, so a job nobody waits for is cancelled on the server.
+ */
+async function runJob<T>(post: { path: string; body: unknown }, pollBase: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<T> {
+  const start = async () => {
+    const r = await withBackoff(
+      () => request(post.path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post.body), signal }, 0),
+      onProgress ?? (() => undefined),
+      signal,
+    );
+    if (r.status === 404 || r.status === 405) throw new ApiError(r.status === 405 || (await detail(r)) === "Not Found" ? "This analysis is not available on this server yet." : await detail(r), 404);
+    if (!r.ok) throw new ApiError(await detail(r), r.status);
+    return (await r.json()) as Job & Partial<T>;
+  };
+  let job = await start();
+  const id = job.id;
+  let finished = false;
+  const onAbort = () => !finished && void fetch(`${BASE}${pollBase}/${id}`, withClient({ method: "DELETE", keepalive: true })).catch(() => undefined);
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const onHide = () => !finished && onAbort();
+  window.addEventListener("pagehide", onHide);
+  try {
+    for (;;) {
+      onProgress?.({ stage: job.stage ?? "queued", done: job.done ?? 0, total: job.total ?? 0, elapsed: job.elapsed ?? 0, ahead: job.position ?? null });
+      const r = await withBackoff(() => request(`${pollBase}/${id}`, { signal }), onProgress ?? (() => undefined), signal);
+      if (r.status === 200) {
+        finished = true;
+        return (await r.json()) as T;
+      }
+      if (r.status === 410) job = await start();
+      else if (r.status === 202) job = await r.json();
+      else if (r.status === 500) {
+        const j = (await r.json().catch(() => ({}))) as Job;
+        finished = true;
+        throw new ApiError(j.error || "the analysis failed", 500);
+      } else throw new ApiError(await detail(r), r.status);
+      await heartbeat(signal);
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    window.removeEventListener("pagehide", onHide);
+  }
+}
+
+const pointCache = new Map<string, PointAnalysis>();
+
+/** Full automatic analysis of one sky position (any pixel, a catalogue source or the target). */
+export async function analyzePoint(
+  seqId: string,
+  pos: { ra: number; dec: number; pmra?: number; pmdec?: number; ref_epoch?: number; name?: string | null },
+  onProgress?: (p: Progress) => void,
+  signal?: AbortSignal,
+): Promise<PointAnalysis> {
+  const key = `${seqId}|${pos.ra.toFixed(6)}|${pos.dec.toFixed(6)}|${pos.pmra ?? 0}|${pos.pmdec ?? 0}`;
+  const hit = pointCache.get(key);
+  if (hit) return hit;
+  const res = await runJob<PointAnalysis>({ path: `/api/sequences/${seqId}/analyze`, body: pos }, "/api/analyses", onProgress, signal);
+  pointCache.set(key, res);
+  return res;
+}
+
+const fieldCache = new Map<string, unknown>();
+function fieldJob<T>(seqId: string, kind: string, body: unknown, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<T> {
+  const key = `${seqId}|${kind}|${JSON.stringify(body)}`;
+  if (fieldCache.has(key)) return Promise.resolve(fieldCache.get(key) as T);
+  return runJob<T>({ path: `/api/sequences/${seqId}/${kind}`, body }, "/api/field", onProgress, signal).then((r) => {
+    fieldCache.set(key, r);
+    return r;
+  });
+}
+
+/** "Analyze this field": movers, tracklets, variables, red-excess sources, anomalies. */
+export const analyzeField = (seqId: string, onProgress?: (p: Progress) => void, signal?: AbortSignal) => fieldJob<FieldResult>(seqId, "field", {}, onProgress, signal);
+/** Known asteroids and comets seen from SPHEREx at each epoch. */
+export const knownObjects = (seqId: string, onProgress?: (p: Progress) => void, signal?: AbortSignal) =>
+  fieldJob<KnownObjects>(seqId, "known-objects", { times: "epochs", vmag_lim: 21 }, onProgress, signal);
+/** Synthetic tracking (trial motions) in one visit. */
+export const stackSearch = (seqId: string, epoch: number, onProgress?: (p: Progress) => void, signal?: AbortSignal) =>
+  fieldJob<StackSearch>(seqId, "trackstack/search", { epoch }, onProgress, signal);
+
+/** Track & Stack of one visit at a trial rate (″/h) and position angle: one [n, n] float32 image. */
+export async function fetchTrackStack(seqId: string, q: { epoch: number; rate: number; pa: number; combine?: string; subtractStatic?: boolean }, signal?: AbortSignal): Promise<Float32Array> {
+  const params = `epoch=${q.epoch}&rate=${q.rate.toFixed(3)}&pa=${q.pa.toFixed(1)}&combine=${q.combine ?? "mean"}${q.subtractStatic ? "&subtract_static=true" : ""}`;
+  const r = await request(`/api/sequences/${seqId}/trackstack.bin?${params}`, { signal }, 0);
+  if (r.status === 404 || r.status === 405) throw new ApiError("Track & Stack is not available on this server yet.", 404);
+  if (!r.ok) throw new ApiError(await detail(r), r.status);
+  return new Float32Array(await r.arrayBuffer());
+}
+
+/** Per-exposure PSF fits and cutouts at a position (optionally moving), for checking a candidate. */
+export async function verifyPosition(seqId: string, body: { ra: number; dec: number; rate?: number; pa?: number; mjd_ref?: number; epoch?: number }, signal?: AbortSignal): Promise<VerifyResult> {
+  const r = await request(`/api/sequences/${seqId}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ max_exposures: 40, ...body }), signal }, 0);
+  if (r.status === 404 || r.status === 405) throw new ApiError("Verification is not available on this server yet.", 404);
+  if (!r.ok) throw new ApiError(await detail(r), r.status);
+  return r.json();
+}
+
+export const adesUrl = (fieldId: string) => `${BASE}/api/field/${fieldId}/ades.psv`;

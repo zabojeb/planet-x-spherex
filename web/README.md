@@ -104,6 +104,40 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   "Measure spectrum & light curve" on a catalogue source calls `POST .../photometry` and shows that source
   in the drawer; Share → Download links the `export/*` files.
 
+## Long baseline, solar system, spectral analysis
+
+- **Long baseline** (Layers → Long baseline, `lb=1`): `GET /api/sequences/{id}/archival` (polled while it
+  builds; a wider concentric grid via `fov_arcmin` when the target moved far since 1999) prepends 2MASS
+  (2000), AllWISE (2010) and NEOWISE (2014–2024) frames to the blink. They sit on their own compressed time
+  axis left of the SPHEREx scrubber (squares = 2MASS, diamonds = WISE, dotted = target outside the field);
+  bands are chosen as a 2MASS/WISE pair (`lbb=Ks,W1`), the frame on screen is `arch=<index>`. SPHEREx frames
+  are embedded in the archival grid (`archival.ts`); frames of one survey and band share a stretch. Only
+  shown/needed frames are fetched (`archival.bin?index=`), never carried over to a new target.
+- **Solar system**: the search box offers "Track … as a solar-system object" (first for designations like
+  3I, C/2025 N1, 2024 YR4, 433 Eros; "comets"/"asteroids" lists examples). `GET /api/moving/search` is polled;
+  409 shows a choice card; the suggested request builds a co-moving sequence (`obj=`, `objtype`, `naif`,
+  `ob`, `oe` in the URL). The HUD says "co-moving: stars trail"; catalogues and the long baseline are off.
+- **Spectral analysis** (drawer → Spectrum, lazy): Spectrum (binned spectrum with errors, continuum,
+  detected features, indices), Classification (label, template probabilities, best template + blackbody
+  over the bins, synthetic vs catalogue magnitudes with suspect marks) and Variability (ratio spectra per
+  epoch, |z| ≥ 3 full strength). A measured catalogue source uses `POST /api/spectrum/analyze`. Without the
+  endpoints the per-exposure spectrum from the photometry table is shown.
+
+## Point analysis and field tools
+
+- **Analyze** (pick card of any pinned point, catalogue source or the target): `POST /api/sequences/{id}/analyze`,
+  polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with DELETE). The Analysis tab shows the
+  verdict first (findings with a confidence bar, novelty badge), then expandable sections: identification,
+  spectrum + classification, motion vs catalogue, light curve + period, red excess, nearby tracklets. Each slot may
+  be `{error}` and says so.
+- **Verify** (pick card): `POST .../verify`, an 11×11 cutout and PSF-fit S/N per exposure, fixed or along a
+  candidate's motion.
+- **Field analysis** (rail → scan icon): `POST .../field` job with candidate lists (movers, tracklets, variables,
+  red excess, anomalies) as marks on the sky and a list; known asteroids and comets (`known-objects`) with labels
+  and 1-hour motion arrows; Track & Stack (`trackstack.bin`, rate/PA sliders, `trackstack/search` results); ADES
+  (`/api/field/{id}/ades.psv`) and CSV exports.
+- **Display → Tools**: invert (`inv=1`), magnifier (11×11 px), ruler (two clicks: distance and PA).
+
 ## Design
 
 Google-Earth model on black: the sky fills the viewport and every control floats over it as small glass

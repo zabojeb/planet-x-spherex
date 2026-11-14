@@ -3,14 +3,14 @@
  * on every keystroke; nothing is built or downloaded until a suggestion is picked. Names the local index
  * does not know are looked up after a short pause, only to show what they are.
  */
-import { CornerDownLeft, Crosshair, Dices, History, Loader2, Search, SearchX, X } from "lucide-react";
+import { CornerDownLeft, Crosshair, Dices, History, Loader2, Orbit, Search, SearchX, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, lookupName } from "../api";
 import { formatDec, formatRA } from "../astro";
 import { useDismiss, useMediaQuery } from "../hooks";
 import {
   describe, facetObjects, looksLikeCoords, matchFacet, nearby, normalize, parseCoords, pickCoords, pickFor, rankObjects,
-  type Facet, type Pick, type Recent, type SkyObject,
+  smallBodyName, solarSystemQuery, SOLAR_EXAMPLES, type Facet, type Pick, type Recent, type SkyObject,
 } from "../search";
 import type { Target } from "../types";
 
@@ -24,6 +24,8 @@ interface Props {
   onRandom: (what: Facet | "field" | null) => void;
   /** Start loading the object index now (first focus). */
   onWarm?: () => void;
+  /** Look up a comet or asteroid and open a co-moving sequence (IRSA MOST). */
+  onMoving?: (name: string) => void;
 }
 
 type Remote = { query: string; state: "loading" | "found" | "missing" | "error"; target?: Target; message?: string };
@@ -33,7 +35,8 @@ type Item =
   | { kind: "coords"; ra: number; dec: number }
   | { kind: "random"; what: Facet | "field" | null; label: string; sub: string }
   | { kind: "recent"; recent: Recent }
-  | { kind: "remote"; remote: Remote };
+  | { kind: "remote"; remote: Remote }
+  | { kind: "moving"; name: string; label: string; sub: string };
 
 type Section = { title: string; items: Item[] };
 
@@ -125,12 +128,13 @@ export function CommandSearch(p: Props) {
   const facet = useMemo(() => (coords ? null : matchFacet(query)), [coords, query]);
   const matches = useMemo(() => (query && !coords ? rankObjects(p.space, query, 7) : []), [p.space, query, coords]);
   const exact = matches.length > 0 && matches[0].score - matches[0].obj.pop >= 100;
+  const solar = useMemo(() => (p.onMoving && !coords ? solarSystemQuery(query) : null), [p.onMoving, coords, query]);
 
   // Names the index does not know: ask the resolver after a pause in typing (only to show what they are).
   // Not while good local suggestions exist, except for catalogue numbers (HD 12345 may not be in the index
   // even when HD 123… are).
   const weak = !matches.length || matches[0].score - matches[0].obj.pop < 60;
-  const wantRemote = query.length >= 2 && !coords && !exact && !facet && !looksLikeCoords(query) && (weak || /\d/.test(query));
+  const wantRemote = query.length >= 2 && !coords && !exact && !facet && solar !== "strong" && !looksLikeCoords(query) && (weak || /\d/.test(query));
   useEffect(() => {
     if (!wantRemote) {
       setRemote(null);
@@ -174,12 +178,23 @@ export function CommandSearch(p: Props) {
       });
       return out;
     }
+    if (solar === "term") {
+      out.push({
+        title: "Solar system · co-moving",
+        items: SOLAR_EXAMPLES.map((e): Item => ({ kind: "moving", name: e.name, label: e.label, sub: `${e.sub} · type any comet or asteroid name` })),
+      });
+      return out;
+    }
     if (coords) {
       out.push({ title: "Position", items: [{ kind: "coords", ra: coords.ra, dec: coords.dec }] });
       const near = nearby(p.space, coords.ra, coords.dec);
       if (near.length) out.push({ title: "Known objects nearby", items: near.map(({ obj, dist }) => ({ kind: "object", obj, via: null, text: obj.name, dist })) });
       return out;
     }
+    const movingItem: Item | null = p.onMoving && query.length >= 2 && /[a-z]/i.test(query) && !looksLikeCoords(query)
+      ? { kind: "moving", name: smallBodyName(query), label: `Track “${smallBodyName(query)}” as a solar-system object`, sub: "Comet or asteroid: images follow it, stars trail (IRSA MOST)" }
+      : null;
+    if (movingItem && solar === "strong" && !exact) out.push({ title: "Solar system", items: [movingItem] });
     // A name the resolver knows beats near misses: what was typed exists, so it goes first.
     const literal = remote && remote.query === query && remote.state === "found" && !exact && (/\d/.test(query) || matches[0]?.fuzzy);
     if (literal) out.push({ title: "Name lookup", items: [{ kind: "remote", remote }] });
@@ -198,8 +213,9 @@ export function CommandSearch(p: Props) {
     }
     if (remote && remote.query === query && !literal && !(remote.state === "missing" && matches.length))
       out.push({ title: matches.length ? "Elsewhere" : "Name lookup", items: [{ kind: "remote", remote }] });
+    if (movingItem && !(solar === "strong" && !exact)) out.push({ title: "Solar system", items: [movingItem] });
     return out;
-  }, [query, coords, matches, facet, remote, p.space, p.recents]);
+  }, [query, coords, matches, facet, remote, p.space, p.recents, solar, exact, p.onMoving]);
 
   const items = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   useEffect(() => setActive(0), [query]);
@@ -221,6 +237,11 @@ export function CommandSearch(p: Props) {
     if (!it) return;
     if (it.kind === "random") {
       p.onRandom(it.what);
+      finish();
+      return;
+    }
+    if (it.kind === "moving") {
+      p.onMoving?.(it.name);
       finish();
       return;
     }
@@ -296,7 +317,7 @@ export function CommandSearch(p: Props) {
   };
 
   const hint = (() => {
-    if (!query) return <>Names, catalogue numbers (HD, HIP, GJ, NGC, M, 2MASS, WISE), object types, or RA Dec</>;
+    if (!query) return <>Names, catalogue numbers (HD, HIP, GJ, NGC, M, 2MASS, WISE), object types, comets and asteroids, or RA Dec</>;
     if (coords) return <>RA {formatRA(coords.ra)} · Dec {formatDec(coords.dec)} (J2000) · <kbd className="kbd">↵</kbd> opens it</>;
     if (looksLikeCoords(query)) return <>RA Dec as <span className="mono">269.452 4.693</span>, <span className="mono">17:57:48.5 +04:41:36</span> or <span className="mono">17h57m48s +4d41m36s</span></>;
     if (remote?.state === "loading" && (!matches.length || waiting)) return <>Not in the local index of {p.space.length.toLocaleString("en")} objects: asking SIMBAD, NED and VizieR…</>;
@@ -420,6 +441,11 @@ function Row(p: { i: number; item: Item; query: string; active: boolean; current
   } else if (it.kind === "random") {
     icon = <Dices size={14} />;
     name = it.label;
+    desc = it.sub;
+  } else if (it.kind === "moving") {
+    icon = <Orbit size={14} />;
+    name = it.label;
+    tag = <span className="cmdk-tag">co-moving</span>;
     desc = it.sub;
   } else if (it.kind === "recent") {
     icon = <History size={14} />;
