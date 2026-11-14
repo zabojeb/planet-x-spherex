@@ -25,7 +25,7 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0008](0008-flag-policy.md) | Contamination-flag policy | Superseded by ADR-0018 | 2026-11-14 |
 | [0009](0009-forced-aperture-photometry.md) | Forced aperture photometry for spectra and light curves | Superseded by ADR-0016 | 2026-11-14 |
 | [0010](0010-proper-motion-aware-targets.md) | Proper-motion-aware targets | Accepted | 2026-11-14 |
-| [0011](0011-name-resolution-and-catalogs.md) | Name resolution and reference catalogs | Accepted | 2026-11-14 |
+| [0011](0011-name-resolution-and-catalogs.md) | Name resolution and reference catalogs | Accepted, extended by ADR-0021 | 2026-11-14 |
 | [0012](0012-caching.md) | Caching layers and cache keys | Accepted | 2026-11-14 |
 | [0013](0013-process-pool-and-slim-headers.md) | Process pool and slim FITS headers for per-frame work | Accepted | 2026-11-14 |
 | [0014](0014-dev-compute-on-vast-ai.md) | Development compute on a vast.ai instance next to S3 | Accepted | 2026-11-14 |
@@ -35,4 +35,5 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0018](0018-photometry-flag-policy.md) | Flag policy v2: HALO informational, 20 % masked threshold, saturation excluded rather than bad | Accepted | 2026-11-14 |
 | [0019](0019-merge-small-epochs.md) | Merge small epochs into close neighbours, otherwise mark them partial | Accepted | 2026-11-14 |
 | [0020](0020-ring-photometry-for-saturated-stars.md) | Measure saturated stars in a fixed ring outside the core, as relative fluxes | Accepted | 2026-11-14 |
-| [0021](0021-3d-views.md) | Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand | Accepted | 2026-11-14 |
+| [0021](0021-local-object-index-for-search.md) | Suggest objects from a local index while typing; ask Sesame only for names it does not know | Accepted | 2026-11-14 |
+| [0022](0022-3d-views.md) | Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand | Accepted | 2026-11-14 |

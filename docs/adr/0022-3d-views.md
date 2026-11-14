@@ -1,4 +1,4 @@
-# ADR-0021: Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand
+# ADR-0022: Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

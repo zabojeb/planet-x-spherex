@@ -26,6 +26,8 @@ interface Props {
   span: [number, number] | null;
   targetPx: [number, number] | null;
   targetName: string;
+  /** What is being loaded, shown with the progress (a search pick or a Random draw tells you what you got). */
+  loading?: { name: string; note?: string | null } | null;
   targetWorld: [number, number] | null;
   track: [number, number][];
   trackIndex: number;
@@ -439,6 +441,12 @@ export function SkyView(p: Props) {
 
       {loader && (
         <div className="hud-loader" role="status" aria-live="polite">
+          {p.loading && (
+            <div className="hud-loader-target">
+              <div className="hud-loader-name">{p.loading.name}</div>
+              {p.loading.note && <div className="hud-loader-note">{p.loading.note}</div>}
+            </div>
+          )}
           <div className="hud-loader-text">
             {loader.text}
             {loader.pct != null && <span> — {loader.pct}%</span>}

@@ -1,7 +1,7 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, measureSource, prefetchSequence, resolveQuery, type Progress } from "./api";
+import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, loadObjectIndex, measureSource, prefetchSequence, type Progress } from "./api";
 import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, TrackPoint3D } from "./components/Sky3D";
@@ -14,6 +14,7 @@ import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, type Display, type ExposureView } from "./display";
 import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
+import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
 import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
 import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
 
@@ -84,8 +85,8 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
+  const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>({});
   const [exp, setExp] = useState<{ key: string; stack: ExposureStack | null; error: string | null }>({ key: "", stack: null, error: null });
@@ -110,6 +111,14 @@ export default function App() {
   useEffect(() => {
     getTargets().then(setPresets).catch((e) => setPresetsError(`Cannot reach the API: ${e.message || e}`));
   }, []);
+
+  // The search index loads when the browser is idle, or at once when the search box or Random is touched.
+  const warmIndex = useCallback(() => void loadObjectIndex().then(setObjectIndex), []);
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 1500));
+    idle(warmIndex, { timeout: 4000 });
+  }, [warmIndex]);
+  const space = useMemo(() => searchSpace(objectIndex, presets), [objectIndex, presets]);
 
   const target: Target | null = spec.kind === "coords" ? spec.target : presets.find((t) => t.id === spec.id) ?? null;
   const fov = fovOverride ?? target?.fov_arcmin ?? 6;
@@ -368,7 +377,6 @@ export default function App() {
     keepView.current = false;
     setView((v) => ({ ...v, epoch: 0, ref: -1, stack: null, mode: v.mode === "exp" ? "blink" : v.mode }));
     setPlaying(true);
-    setSearchError(null);
     setHero(false);
   };
   const choosePreset = (id: string) => {
@@ -376,20 +384,28 @@ export default function App() {
     setFovOverride(null);
     resetForNewTarget();
   };
-  const search = async (q: string) => {
-    setSearching(true);
-    setSearchError(null);
-    try {
-      const t = await resolveQuery(q);
-      if (t.id && presets.some((p) => p.id === t.id)) choosePreset(t.id);
-      else {
-        setSpec({ kind: "coords", target: { ...t, name: t.name || q } });
-        resetForNewTarget();
-      }
-    } catch (e) {
-      setSearchError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSearching(false);
+  /** Open what a search suggestion or Random picked. Only now does anything load. */
+  const pick = (p: Pick, recent?: Recent) => {
+    if (p.kind === "preset") choosePreset(p.id);
+    else {
+      setSpec({ kind: "coords", target: p.target });
+      if (p.target.fov_arcmin) setFovOverride(null); // extended objects come with a field that fits them
+      resetForNewTarget();
+    }
+    if (recent) setRecents(saveRecent(recent));
+  };
+  const lastRandom = useRef<string | undefined>(undefined);
+  /** Random: an object (of a kind, or weighted over kinds) or, for "field" and a quarter of plain clicks, a patch of sky. */
+  const random = async (what: Facet | "field" | null) => {
+    const idx = objectIndex ?? (await loadObjectIndex());
+    const all = searchSpace(idx, presets);
+    const obj = what === "field" || (what === null && Math.random() < 0.25) ? null : randomObject(all, what, lastRandom.current);
+    if (obj) {
+      lastRandom.current = obj.name;
+      pick(pickFor(obj), { label: obj.name, sub: describe(obj), pick: pickFor(obj) });
+    } else {
+      const f = randomField();
+      pick(f, { label: f.kind === "target" ? f.target.name ?? "Patch of sky" : "", sub: "Random patch of sky", pick: f });
     }
   };
   const prefetchPreset = (id: string) => {
@@ -551,6 +567,7 @@ export default function App() {
       span={span}
       targetPx={targetPx}
       targetName={target?.name || meta?.target.name || "Target"}
+      loading={target?.name ? { name: target.name, note: target.description } : null}
       targetWorld={hud?.target ?? null}
       track={track}
       trackIndex={view.epoch}
@@ -627,14 +644,15 @@ export default function App() {
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
       <TopLeft
-        presets={presets}
-        activeId={spec.kind === "preset" ? spec.id : null}
-        busy={searching}
-        searchError={searchError}
+        space={space}
+        indexReady={!!objectIndex}
+        current={spec.kind === "preset" ? `p:${spec.id}` : `n:${spec.target.name ?? ""}`}
+        recents={recents}
         fov={fov}
         compact={mobile}
-        onSearch={search}
-        onPreset={choosePreset}
+        onPick={pick}
+        onRandom={random}
+        onWarm={warmIndex}
         onFov={(f) => setFovOverride(f)}
       />
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}

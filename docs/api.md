@@ -33,11 +33,27 @@ General behaviour:
 | `default_band` | string or null | detector a preset opens with: `all` or `D1`–`D6` (WISE 0855: `D6`, RW Aur: `D6`, R Dra: `D1`, others `all`) |
 | `default_mode` | string or null | view a preset opens with: `blink`, `diff`, `stack`, `rgb` or `exp` (Barnard's Star: `diff`, WISE 0855: `rgb`, others `blink`) |
 
-`GET /api/resolve?q=<text>` resolves a preset id or name, coordinates (`269.452 4.693`, `17:57:48.5 +04:41:36`, `17h57m48.5s 4d41m36s`) or an object name through CDS Sesame. Returns a target as above (`pmra`/`pmdec` = 0 when unknown). `404` if the name is unknown or the resolver is unreachable.
+`GET /api/resolve?q=<text>` resolves, in this order: a preset id or name; coordinates (`269.452 4.693`, `17:57:48.5 +04:41:36`, `17h57m48.5s 4d41m36s`); an exact name or alias from the local object index (case, spacing and punctuation ignored: `alpha Lyr`, `α Lyr`, `gliese 699`, `WISE 0855-0714`); earlier Sesame answers cached for 30 days; and finally CDS Sesame, asking all configured mirrors at once. Returns a target as above (`pmra`/`pmdec` = 0 when unknown; `fov_arcmin` is set for extended objects such as M 31). `404` if the name is unknown (remembered for 10 minutes) or every resolver is unreachable ([ADR-0021](adr/0021-local-object-index-for-search.md)).
 
 ```bash
 curl "http://<api-host>/api/resolve?q=RW%20Aur"
 ```
+
+`GET /api/objects` returns the local object index the viewer searches while you type: about 4,500 SIMBAD objects (brown dwarfs, fast-moving and variable stars, young stars, named stars, Messier objects, galaxies, nebulae, clusters) with their search aliases. It is a static file, 712 kB (237 kB gzipped), sent with an `ETag` and `Cache-Control: public, max-age=3600`; `If-None-Match` gives `304`.
+
+```json
+{
+  "version": 1,
+  "generated": "2026-11-14",
+  "source": "SIMBAD astronomical database (CDS, Strasbourg) via TAP; built by scripts/build_object_index.py",
+  "fields": ["name", "aliases", "otype", "cat", "ra", "dec", "pmra", "pmdec", "plx", "vmag", "kmag", "sp", "size", "fov", "refs", "preset"],
+  "categories": {"brown-dwarf": "Brown dwarf", "young": "Young star", "...": "..."},
+  "types": {"BD*": "Brown Dwarf", "Mi*": "Mira Variable", "...": "..."},
+  "rows": [["Vega", ["α Lyr", "alf Lyr", "alpha Lyrae", "alpha Lyr", "GJ 721", "GJ 721.0", "HD 172167", "HIP 91262"], "dS*", "nearby", 279.23473, 38.78369, 200.9, 286.2, 130.23, 0.03, 0.13, "A0V", null, null, 2817, null]]
+}
+```
+
+Rows are sorted by `refs` (SIMBAD bibliography count). `ra`/`dec` are degrees ICRS at J2000, `pmra`/`pmdec` mas/yr, `plx` mas, `size` arcmin, `fov` a suggested field in arcmin for extended objects, `preset` the id of the challenge preset the row stands for. Rebuild with `scripts/build_object_index.py` ([development.md](development.md#object-index)).
 
 ## Sequences
 
@@ -60,10 +76,12 @@ curl "http://<api-host>/api/resolve?q=RW%20Aur"
 The response is the job:
 
 ```json
-{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "elapsed": 9.4}
+{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "elapsed": 9.4}
 ```
 
-`status` is `queued`, `running`, `done` or `error`; `stage` is `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+`status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+
+At most `SPHEREX_MAX_JOBS` builds (default 3) run at once; the rest wait in submission order. Each POST makes the caller one of the build's clients. A queued or running build is cancelled when nobody waits for it: `SPHEREX_JOB_DETACH_GRACE` seconds (default 5) after its last client sent `DELETE`, or when no client polled it for `SPHEREX_JOB_IDLE` seconds (default 120). A build that runs longer than `SPHEREX_JOB_TIMEOUT` seconds (default 900) fails with an error. A client that submits and never polls must poll at least every `SPHEREX_JOB_IDLE` seconds, or set it to 0.
 
 ```bash
 curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/json" \
@@ -78,8 +96,13 @@ curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/jso
 |---|---|
 | `200` | the finished `meta.json` |
 | `202` | the job (still queued or running) |
-| `500` | the job, with `error` set |
+| `500` | the job, with `error` set (failed or timed out) |
+| `410` | the job, cancelled because nobody was waiting; POST again to restart it |
 | `404` | unknown id |
+
+### Stop waiting
+
+`DELETE /api/sequences/{id}` → `204`. The caller no longer waits for the build; once no client waits, it is cancelled and its slot goes to the next build in the queue. A finished result is kept. `404` for an unknown id. The web client sends it when the target or field of view changes and when the page is closed.
 
 ### `meta.json`
 
@@ -95,7 +118,7 @@ curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/jso
 | `photometry` | one entry per measured exposure: `index, epoch, band, mjd, wl, dwl, flux_mjy, err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight, flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out`. `method` is `psf` (ePSF fit), `aperture` (fallback) or `ring` (detector where the target saturates). Ring entries have `relative: true` and `ab_mag: null`: their flux is the ring's share of the light, comparable only within one detector and wavelength (divide by the median of the wavelength bin for a light curve), so do not plot them on an absolute spectrum |
 | `processing` | pipeline constants, and `rings`: per detector that uses rings, `{saturated_share, core_radius_px, r_in, r_out, exposures}` |
 | `flag_bits` | `[{bit, name, description, masked, phot_bad}]` read from the files |
-| `stats` | `frames_found`, `frames_used`, `errors`, `requests`, `bytes`, `cache_hits`, `seconds` (`search`, `fetch_and_align`, `total`) |
+| `stats` | `frames_found`, `frames_used`, `errors`, `requests`, `bytes`, `cache_hits`, `retries`, `seconds` (`search`, `fetch_and_align`, `assemble`, `total`), `timings`: per-exposure seconds as `{n, p50, p90, max, sum}` for `slot` (waiting to start), `read` (cutout from S3), `tables` (wavelength map and ePSF), `pool_wait` (waiting for a CPU worker), `process` (align and measure) and `work` (all of it) |
 | `sources` | archive, collections and data location |
 
 Wavelengths (`wl`, `dwl`) are in µm, times in MJD, fluxes in mJy. Missing values are `null`.
