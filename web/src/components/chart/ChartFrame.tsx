@@ -183,6 +183,8 @@ export function ChartFrame(p: Props) {
         </ul>
       )}
       <div className={`chart-body${split ? " split" : ""}`}>
+        {/* phones: the empty-state message is a line above the plot instead of an overlay over axis labels */}
+        {split && p.empty && <p className="chart-empty inline">{p.empty}</p>}
         <div className="chart-row">
         {split && (
           <svg className="chart-axis" width={M.l} height={height} aria-hidden>
@@ -284,7 +286,7 @@ export function ChartFrame(p: Props) {
         </div>
         </div>
         {p.note && <p className="chart-note">{p.note}</p>}
-        {p.empty && <p className="chart-empty">{p.empty}</p>}
+        {!split && p.empty && <p className="chart-empty">{p.empty}</p>}
       </div>
     </div>
   );
