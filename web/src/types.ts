@@ -163,6 +163,8 @@ export interface Job {
   total: number;
   error: string | null;
   elapsed: number;
+  /** Builds that start before this one while it is queued (null otherwise). */
+  position?: number | null;
 }
 
 export interface CatalogSource {

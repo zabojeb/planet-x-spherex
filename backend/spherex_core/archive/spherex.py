@@ -14,6 +14,8 @@ from .. import cache
 from ..config import settings
 from .tap import tap_csv
 
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class Frame:

@@ -17,16 +17,18 @@ import numpy as np
 from . import __version__, cache, catalogs
 from .config import settings
 from .errors import NotFound, UpstreamError
+from .jobs import PRIORITY_INTERACTIVE, JobQueue, QueueFull, TooManyJobs, make_queue
 from .pipeline import results
-from .pipeline.jobs import JobManager
 from .pipeline.params import SequenceParams
+from .store import store
 from .targets import PRESETS, objects, resolve
 
-__all__ = ["NotFound", "SequenceParams", "UpstreamError", "array_file", "catalog_cone", "configure", "health",
-           "jobs", "list_catalogs", "list_presets", "load_sequence", "object_index", "read_array", "read_exposures",
-           "resolve_target", "detach_sequence", "sequence_meta_bytes", "sequence_status", "submit_sequence"]
+__all__ = ["NotFound", "QueueFull", "SequenceParams", "TooManyJobs", "UpstreamError", "array_file", "catalog_cone",
+           "configure", "health", "jobs", "list_catalogs", "list_presets", "load_sequence", "object_index", "poll_sequence",
+           "queue_stats", "read_array", "read_exposures", "readiness", "resolve_target", "result_dir",
+           "sequence_meta_bytes", "sequence_status", "submit_sequence", "withdraw_sequence"]
 
-_jobs: JobManager | None = None
+_jobs: JobQueue | None = None
 
 
 def configure(cache_root: Path | None = None) -> None:
@@ -36,10 +38,11 @@ def configure(cache_root: Path | None = None) -> None:
     _jobs = None
 
 
-def jobs() -> JobManager:
+def jobs() -> JobQueue:
+    """The job queue: in-process (default) or Redis (SPHEREX_QUEUE=redis / REDIS_URL set), see jobs/."""
     global _jobs
     if _jobs is None:
-        _jobs = JobManager(cache.layout().sequences)
+        _jobs = make_queue()
     return _jobs
 
 
@@ -65,17 +68,53 @@ def object_index() -> tuple[bytes, str]:
 
 
 # ---------------------------------------------------------------- sequences
-async def submit_sequence(params: SequenceParams, force: bool = False) -> dict:
-    """Start (or reuse) a build and wait for it as one more client; returns the job dict.
-    Must be awaited on the event loop. Call detach_sequence when the result is no longer wanted."""
-    m = jobs()
-    return m.describe(m.submit(params, force=force))
+async def submit_sequence(params: SequenceParams, force: bool = False, *, ip: str | None = None,
+                          client: str | None = None, priority: int = PRIORITY_INTERACTIVE,
+                          pinned: bool = False) -> dict:
+    """Start (or join) a build; returns the job dict. Raises TooManyJobs / QueueFull (HTTP 429)."""
+    q = jobs()
+    if not pinned and not await q.allow_submit(ip):
+        raise TooManyJobs("Too many requests from your address; slow down.", retry_after=20)
+    return await q.submit(params, force=force, ip=ip, client=client, priority=priority, pinned=pinned)
 
 
-async def detach_sequence(seq_id: str) -> None:
-    """This client no longer waits for the build; nobody waiting cancels it. Raises NotFound."""
-    if jobs().detach(seq_id) is None:
-        raise NotFound("unknown sequence")
+async def poll_sequence(seq_id: str, client: str | None = None) -> tuple[str, dict | None]:
+    """Like sequence_status, and the poll counts as a heartbeat that keeps the build alive."""
+    import asyncio
+
+    if seq_id.isalnum() and await asyncio.to_thread(store().ensure_local, seq_id):
+        return "done", None
+    job = await jobs().status(seq_id, client=client) if seq_id.isalnum() else None
+    if job is None:
+        return "unknown", None
+    if job["status"] == "done":  # built by a worker: fetch it from the bucket now, or report it as still publishing
+        if await asyncio.to_thread(store().ensure_local, seq_id, True):
+            return "done", None
+        return "running", {**job, "status": "running", "stage": "publish"}
+    return job["status"], job
+
+
+async def withdraw_sequence(seq_id: str, client: str | None = None) -> dict | None:
+    """The client no longer needs this build; it is cancelled once nobody else wants it."""
+    return await jobs().withdraw(seq_id, client=client) if seq_id.isalnum() else None
+
+
+async def queue_stats() -> dict:
+    return await jobs().stats()
+
+
+async def readiness() -> dict:
+    """Dependencies reachable (queue backend, bucket). Raises on failure."""
+    import asyncio
+
+    await jobs().ping()
+    await asyncio.to_thread(store().ping)
+    return {"ready": True, **await queue_stats(), "bucket": store().enabled}
+
+
+def result_dir(seq_id: str) -> Path:
+    """Local directory of a finished result (downloaded from the bucket if needed). Raises NotFound."""
+    return _ready_dir(seq_id)
 
 
 def _result_dir(seq_id: str) -> Path | None:
@@ -84,22 +123,20 @@ def _result_dir(seq_id: str) -> Path | None:
 
 def _ready_dir(seq_id: str) -> Path:
     d = _result_dir(seq_id)
-    if d is None or not results.is_complete(d):
+    if d is None or not store().ensure_local(seq_id):
         raise NotFound("sequence not ready")
     return d
 
 
 def sequence_status(seq_id: str) -> tuple[str, dict | None]:
-    """('done', None) when the result exists, (job status, job dict) while queued/running or after it
-    failed or was cancelled, ('unknown', None) when nothing is known about the id. Asking keeps a build alive."""
+    """Synchronous status without heartbeat (in-process queue only; async callers use poll_sequence)."""
     d = _result_dir(seq_id)
-    if d is not None and results.is_complete(d):
+    if d is not None and store().ensure_local(seq_id):
         return "done", None
-    m = jobs()
-    job = m.poll(seq_id)
+    job = getattr(jobs(), "jobs", {}).get(seq_id)
     if job is None:
         return "unknown", None
-    return job.status, m.describe(job)
+    return job.status, job.to_dict()
 
 
 def sequence_meta_bytes(seq_id: str) -> bytes:
@@ -141,3 +178,274 @@ def catalog_cone(name: str, ra: float, dec: float, radius_arcmin: float) -> list
     if name not in catalogs.CATALOGS:
         raise NotFound("unknown catalog")
     return catalogs.cone(name, ra, dec, radius_arcmin / 60.0)
+
+
+# ---------------------------------------------------------------- analyses, exports, releases (agent B)
+# Thin wrappers; the logic lives in analysis/, exports/ and releases.py. Imports are local so a failure
+# there cannot break the core services.
+async def position_photometry(seq_id: str, ra: float, dec: float, pmra: float = 0.0, pmdec: float = 0.0,
+                              ref_epoch: float = 2000.0, name: str | None = None) -> dict:
+    """Forced photometry of any position in every exposure of a built sequence (seconds; cached cutouts)."""
+    from .analysis import load_context
+    from .analysis.remeasure import measure_position
+    from .targets import Target
+
+    target = Target(ra=ra, dec=dec, name=name, pmra=pmra, pmdec=pmdec, ref_epoch=ref_epoch)
+    return await measure_position(load_context(seq_id), target)
+
+
+def motion_fit(seq_id: str, x: float, y: float, bands: list[str] | None = None, pmra: float | None = None,
+               pmdec: float | None = None) -> dict:
+    """Proper motion of the source near grid pixel (x, y) from per-epoch co-add centroids. ValueError if it
+    is found in fewer than two epochs."""
+    from .analysis import fit_motion, load_context
+
+    ctx = load_context(seq_id)
+    return fit_motion(ctx.meta, results.read_array(ctx.dir, ctx.meta, "coadds"), ctx.grid, x, y, bands, pmra, pmdec)
+
+
+def sky_to_grid(seq_id: str, ra: float, dec: float) -> tuple[float, float]:
+    from .analysis import load_context
+
+    x, y = load_context(seq_id).grid.world_to_pixel(ra, dec)
+    return float(x), float(y)
+
+
+def sequence_periodogram(seq_id: str, **options) -> dict:
+    """Lomb-Scargle of the sequence target's photometry (options: method, band, min_period, max_period,
+    include_flagged). ValueError for too few points or a bad range."""
+    from .analysis import load_context, periodogram
+
+    return periodogram(load_context(seq_id).meta["photometry"], **options)
+
+
+def points_periodogram(photometry: list[dict], **options) -> dict:
+    """Lomb-Scargle of client-supplied photometry records (e.g. from position_photometry)."""
+    from .analysis import periodogram
+
+    return periodogram(photometry, **options)
+
+
+def export_coadds_fits(seq_id: str, epoch: int | None = None, band: str | None = None,
+                       coverage: bool = False) -> bytes:
+    from .analysis import load_context
+    from .exports import coadds_fits
+
+    ctx = load_context(seq_id)
+    return coadds_fits(ctx.dir, ctx.meta, epoch, band, coverage)
+
+
+def export_photometry(seq_id: str, fmt: str) -> bytes:
+    """'csv' or 'vot' (VOTable)."""
+    from .analysis import load_context
+    from .exports import photometry_csv, photometry_votable
+
+    meta = load_context(seq_id).meta
+    return photometry_csv(meta) if fmt == "csv" else photometry_votable(meta)
+
+
+def export_download_script(seq_id: str, kind: str = "full", source: str = "irsa") -> str:
+    from .analysis import load_context, sequence_frames
+    from .exports import download_script
+
+    ctx = load_context(seq_id)
+    try:
+        frames = sequence_frames(ctx)
+    except RuntimeError as e:
+        raise UpstreamError(f"IRSA TAP is unavailable: {e}") from e
+    return download_script(ctx.meta, frames, kind, source)
+
+
+def releases_summary() -> dict:
+    from . import releases
+
+    return releases.releases()
+
+
+def sequence_freshness(seq_id: str) -> dict:
+    from . import releases
+    from .analysis import load_context
+
+    return releases.freshness(load_context(seq_id))
+
+
+# ---------------------------------------------------------------- archival epochs, moving objects (agent A)
+# Archival builds and MOST searches run as in-process background tasks (tasks.py); callers poll.
+_tasks = None
+
+
+def _task_registry():
+    global _tasks
+    if _tasks is None:
+        from .tasks import TaskRegistry
+
+        _tasks = TaskRegistry(max_concurrent=2)
+    return _tasks
+
+
+async def archival_status(seq_id: str, fov_arcmin: float | None = None) -> tuple[str, bytes | dict]:
+    """2MASS / AllWISE / NEOWISE epochs on the sequence grid: ('done', meta.json bytes) or
+    ('running' | 'error', task dict). Starts the build on first call. Raises NotFound (sequence not ready,
+    or a solar-system object). Must be awaited on the event loop."""
+    from . import archival
+    from .archival import store as archival_store
+
+    meta = load_sequence(seq_id)
+    if meta["target"].get("ephemeris"):
+        raise NotFound("Archival epochs are for fixed or proper-motion targets, not solar-system objects.")
+    d = archival.archival_dir(seq_id, meta, fov_arcmin)
+    if archival_store.is_complete(d):
+        return "done", archival_store.meta_bytes(d)
+
+    async def build(progress):
+        try:
+            await archival.build_archival(meta, d, fov_arcmin, archival.SURVEYS, progress)
+        finally:
+            _release(lock)
+
+    key, lock = f"archival:{seq_id}:{d.name}", d.with_name(d.name + ".lock")
+    t = await _start_locked(key, lock, build)
+    if archival_store.is_complete(d):
+        return "done", archival_store.meta_bytes(d)
+    return ("error" if t["status"] == "done" else t["status"]), t
+
+
+def archival_frames(seq_id: str, fov_arcmin: float | None = None, index: int | None = None) -> np.ndarray:
+    """Archival frames float32 [k, n, n] (or one [n, n]). Raises NotFound until built."""
+    from . import archival
+    from .archival import store as archival_store
+
+    return archival_store.read_frames(archival.archival_dir(seq_id, load_sequence(seq_id), fov_arcmin), index)
+
+
+async def moving_search(name: str | None = None, obj_type: str | None = None, begin: str | None = None,
+                        end: str | None = None, naif_id: int | None = None) -> tuple[str, dict]:
+    """SPHEREx exposures of a solar-system object via IRSA MOST: ('done', summary) or ('running' | 'error',
+    task dict with kind/choices). Long windows take minutes on MOST's side, so the first call starts a
+    background search. ValueError without a name or NAIF ID. Must be awaited on the event loop."""
+    import asyncio
+    import json
+
+    from . import moving
+    from .moving import most
+
+    q = moving.build_query(name, obj_type, begin, end, naif_id)
+    hit = most.cached(q)
+    if hit is not None:
+        return "done", moving.search_summary(hit)
+    path = most.cache_path(q)
+    lock = path.with_name(path.name + ".lock")
+
+    async def search(progress):
+        try:
+            await asyncio.to_thread(moving.query_most, name, obj_type, begin, end, naif_id)
+        finally:
+            _release(lock)
+
+    t = await _start_locked("most:" + json.dumps(q, sort_keys=True), lock, search)
+    hit = most.cached(q)
+    if hit is not None:
+        return "done", moving.search_summary(hit)
+    return t["status"], t
+
+
+async def _start_locked(key: str, lock, make) -> dict:
+    """Start a background task unless this process already runs it or another process holds the lock
+    (several uvicorn workers share the disk). Returns the task dict."""
+    from .tasks import claim
+
+    reg = _task_registry()
+    t = reg.get(key)
+    if t is None:
+        if not claim(lock):
+            return {"id": key, "status": "running", "stage": "running in another worker", "done": 0, "total": 0,
+                    "error": None, "elapsed": 0.0}
+        t = reg.start(key, make)
+    return t.to_dict()
+
+
+def _release(lock) -> None:
+    from .tasks import release
+
+    release(lock)
+
+
+# ---------------------------------------------------------------- spectral analysis (spectral agent)
+# Thin wrappers over spectral/. Results of a built sequence depend only on its immutable meta.json and the
+# analysis version, so they are memoised per (sequence, options) in this process.
+_SPECTRAL_CACHE: "dict[tuple, dict]" = {}
+_SPECTRAL_CACHE_MAX = 64
+
+
+def _spectral_memo(key: tuple, make) -> dict:
+    hit = _SPECTRAL_CACHE.get(key)
+    if hit is None:
+        hit = make()
+        if len(_SPECTRAL_CACHE) >= _SPECTRAL_CACHE_MAX:
+            _SPECTRAL_CACHE.pop(next(iter(_SPECTRAL_CACHE)))
+        _SPECTRAL_CACHE[key] = hit
+    return hit
+
+
+def _sequence_target(meta: dict):
+    from .targets import Target
+
+    t = meta["target"]
+    return Target(ra=t["ra"], dec=t["dec"], name=t.get("name"), pmra=t.get("pmra") or 0.0,
+                  pmdec=t.get("pmdec") or 0.0, ref_epoch=t.get("ref_epoch") or 2000.0)
+
+
+def sequence_spectrum(seq_id: str, include_flagged: bool = False) -> dict:
+    """Binned spectrum (overall, per epoch, relative), continuum, curated features, detections, indices."""
+    from . import spectral
+    from .spectral.version import SPECTRAL_VERSION
+
+    meta = load_sequence(seq_id)
+    return _spectral_memo(("spectrum", seq_id, include_flagged, SPECTRAL_VERSION),
+                          lambda: {"sequence": seq_id, "target": meta["target"].get("name"),
+                                   "version": SPECTRAL_VERSION,
+                                   **spectral.spectrum_report(meta["photometry"], include_flagged)})
+
+
+def sequence_classification(seq_id: str, catalogs: bool = False) -> dict:
+    """Template / blackbody / IR-index classification and synthetic photometry (optionally vs catalogues)."""
+    from . import spectral
+    from .spectral.version import SPECTRAL_VERSION
+
+    meta = load_sequence(seq_id)
+    return _spectral_memo(("classify", seq_id, catalogs, SPECTRAL_VERSION),
+                          lambda: {"sequence": seq_id, "target": meta["target"].get("name"),
+                                   "version": SPECTRAL_VERSION,
+                                   **spectral.classify_report(meta["photometry"],
+                                                              _sequence_target(meta) if catalogs else None,
+                                                              catalogs=catalogs)})
+
+
+def sequence_spectral_variability(seq_id: str, reference: int | None = None) -> dict:
+    """Ratio spectra of every epoch to a reference epoch."""
+    from . import spectral
+    from .spectral.version import SPECTRAL_VERSION
+
+    meta = load_sequence(seq_id)
+    return _spectral_memo(("variability", seq_id, reference, SPECTRAL_VERSION),
+                          lambda: {"sequence": seq_id, "version": SPECTRAL_VERSION,
+                                   **spectral.variability_report(meta["photometry"], reference)})
+
+
+def analyze_spectrum(photometry: list[dict], target: dict | None = None, catalogs: bool = False,
+                     reference: int | None = None) -> dict:
+    """Full spectral analysis of client-supplied photometry records (e.g. a clicked source)."""
+    from . import spectral
+    from .spectral.version import SPECTRAL_VERSION
+    from .targets import Target
+
+    tgt = Target(**target) if target else None
+    return {"version": SPECTRAL_VERSION,
+            **spectral.analyze(photometry, target=tgt, catalogs=catalogs, reference=reference)}
+
+
+def spectral_reference() -> dict:
+    """The bin grid, curated features, index definitions and template library listing."""
+    from . import spectral
+
+    return spectral.reference()

@@ -98,7 +98,7 @@ export function loaderText(p: Progress): { text: string; pct: number | null } {
     case "done":
       return { text: "Downloading results", pct };
     default:
-      return { text: "Waiting for a free worker", pct: null };
+      return { text: p.ahead ? `Waiting for a free worker · ${p.ahead} ahead` : "Waiting for a free worker", pct: null };
   }
 }
 

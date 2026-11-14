@@ -81,7 +81,7 @@ The response is the job:
 
 `status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
 
-At most `SPHEREX_MAX_JOBS` builds (default 3) run at once; the rest wait in submission order. Each POST makes the caller one of the build's clients. A queued or running build is cancelled when nobody waits for it: `SPHEREX_JOB_DETACH_GRACE` seconds (default 5) after its last client sent `DELETE`, or when no client polled it for `SPHEREX_JOB_IDLE` seconds (default 120). A build that runs longer than `SPHEREX_JOB_TIMEOUT` seconds (default 900) fails with an error. A client that submits and never polls must poll at least every `SPHEREX_JOB_IDLE` seconds, or set it to 0.
+Builds go through the job queue (ADR-0033): `SPHEREX_JOBS_PER_WORKER` builds run at once per worker (default 2; `SPHEREX_MAX_JOBS` is accepted as an alias), the rest wait by priority and submission order, and a queued job reports `position` (builds that start before it). Each POST and each poll is a heartbeat keyed by `X-Client-Id`; `DELETE` withdraws the caller. A build is cancelled when every client has withdrawn, or when nobody polled it for `SPHEREX_INTEREST_TIMEOUT` seconds (default 30; alias `SPHEREX_JOB_IDLE`); a cancelled job answers 410. A build that runs longer than `SPHEREX_MAX_RUNTIME` seconds (default 900; alias `SPHEREX_JOB_TIMEOUT`) fails with an error. Limits answer 429 with `Retry-After`.
 
 ```bash
 curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/json" \
@@ -156,3 +156,171 @@ python -c "import numpy as np, json, urllib.request as u; m=json.load(u.urlopen(
 Every source has `epoch` (Julian year of `ra`/`dec`) and `pmra`/`pmdec` in mas/yr (null when unknown), so clients can place it at any date.
 
 `simbad` rows come most-studied first and add `type` (object type, e.g. `BY Dra Variable`), `otype` (its short code), `sp_type`, `z` (redshift), `refs` (number of references) and `parallax`; `mag` is V, else Gaia G, else J, else K, named in `mag_band`; the `NAME ` prefix of SIMBAD identifiers is dropped (`Barnard's star`). SIMBAD services are tried in order from `SPHEREX_SIMBAD_TAP_URLS` (default: CDS, then the CfA mirror), so the layer keeps working while one of them is down. `502` with a readable `detail` (naming the catalogue) if the upstream service fails, times out or returns something unusable; the client can simply retry. The example values above are illustrative, not a recorded response.
+
+## Analyses of a built sequence
+
+All return `404 {"detail": "sequence not ready"}` for an unknown or unfinished id and `422` for bad parameters.
+
+### `POST /api/sequences/{id}/photometry`
+
+Forced photometry of any position (optionally moving) in every exposure, on the sequence's cached cutouts (ADR-0031). Synchronous, a few seconds. Body: `{"ra": deg, "dec": deg, "pmra": 0, "pmdec": 0, "ref_epoch": 2000.0, "name": null}` (`pmra` includes cos dec, mas/yr; `ref_epoch` is the Julian year of `ra`/`dec`, e.g. 2016.0 for Gaia DR3).
+
+```json
+{"sequence": "<id>", "target": {"ra": ..., "dec": ..., "pmra": ..., ...},
+ "photometry": [ /* records exactly like meta.json photometry: index, epoch, band, mjd, wl, dwl, flux_mjy,
+                    err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight,
+                    flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out */ ],
+ "rings": {"D1": {"r_in": 9, "r_out": 12, ...}},
+ "stats": {"exposures": 358, "measured": 357, "missing_files": 0, "bytes_downloaded": 0, "seconds": 3.1}}
+```
+
+`502` if the sequence's files cannot be read.
+
+### `GET /api/sequences/{id}/motion`
+
+Proper motion from per-epoch co-add centroids (ADR-0030). Query: `x`,`y` (grid pixels, 0-based) or `ra`,`dec`; optional `bands=D1,D2`, `pmra`,`pmdec` (prior motion used to predict where to look).
+
+```json
+{"start": {"x": 29.0, "y": 29.0, "ra": ..., "dec": ...}, "reference_year": 2026.15, "prior": null,
+ "combined": {"pmra": 3628, "pmdec": -2526, "pmra_err": 305, "pmdec_err": 260, "pm_total": 4421,
+              "pm_total_err": 290, "pa_deg": 124.8, "chi2_red_ra": 30.9, "chi2_red_dec": 22.4,
+              "n_points": 22, "n_epochs": 4, "bands": ["D1", ...]},
+ "per_band": {"D1": { /* same fields */ }},
+ "points": [{"epoch": 0, "band": "D1", "mjd": ..., "year": ..., "x": ..., "y": ..., "ra": ..., "dec": ...,
+             "dra_arcsec": ..., "ddec_arcsec": ..., "sigma_arcsec": 0.12, "snr": 2969,
+             "resid_ra_arcsec": ..., "resid_dec_arcsec": ...}],
+ "track": [{"epoch": 0, "year": ..., "ra": ..., "dec": ..., "x": ..., "y": ...}]}
+```
+
+Motions in mas/yr (RA includes cos dec), `pa_deg` east of north. `422` if the source is found in fewer than two epochs.
+
+### `GET /api/sequences/{id}/periodogram` · `POST /api/periodogram`
+
+Lomb–Scargle of the target's light curve, with fluxes normalised per wavelength bin exactly as the web client does (ADR-0031). Query (GET) or body fields (POST, plus `photometry`: records like meta.json's): `method=standard|multiband`, `band`, `min_period` (days, default 0.5), `max_period` (default the baseline), `include_flagged=false`.
+
+```json
+{"method": "standard", "band": null, "n_points": 2452, "bands": ["D1", ...], "include_flagged": false,
+ "relative_points": 2452, "baseline_days": 520.3, "min_period_days": 20, "max_period_days": 520.3,
+ "best": {"period_days": 235.7, "frequency_per_day": 0.00424, "power": 0.46, "false_alarm_probability": 8e-321},
+ "peaks": [{"period_days": 235.7, "power": 0.46}, ...],
+ "periodogram": {"period_days": [...], "power": [...]},
+ "t0_mjd": 60789.8,
+ "folded": [{"index": 12, "mjd": ..., "phase": 0.31, "rel": 1.12, "rel_err": 0.03, "band": "D1", "wl": 0.92,
+             "flagged": false, "relative": true}],
+ "model": {"phase": [0, ...200 values], "rel": [...]}}
+```
+
+For `multiband`, `false_alarm_probability` is null and the model is `{"phase": [...], "rel_by_band": {"D1": [...], ...}}`. `422` with fewer than 6 usable points.
+
+## Exports
+
+| Request | Returns |
+|---|---|
+| `GET /api/sequences/{id}/export/coadds.fits` | All co-adds as one multi-extension FITS (`EXTNAME E<epoch>_<band>`); `?epoch=0&band=D6` for one image; `&coverage=true` adds coverage images |
+| `GET /api/sequences/{id}/export/photometry.csv` | Photometry with exposure provenance (CSV) |
+| `GET /api/sequences/{id}/export/photometry.vot` | The same as a VOTable with units |
+| `GET /api/sequences/{id}/export/download.sh` | Shell script with one `curl` per original Level 2 file; `?source=s3` for the public bucket, `?kind=cutout` for IRSA cutouts of the field |
+
+All are sent with `Content-Disposition: attachment`. FITS headers carry the grid WCS, `BUNIT = MJy/sr`, dates, wavelength range, frame count and provenance (ADR-0030).
+
+## Data freshness
+
+### `GET /api/releases`
+
+```json
+{"checked": "2026-11-14T12:00:00+00:00", "searched_collections": ["spherex_dr1", ...],
+ "collections": [{"collection": "spherex_qr3", "images": 362124, "oldest_mjd": 61174.5, "newest_mjd": 61318.0,
+                  "oldest_date": "2026-05-14 12:08", "newest_date": "2026-10-05 00:01", "searched": true}, ...]}
+```
+
+Cached for an hour (the TAP aggregate takes 14–29 s at IRSA). `502` if IRSA TAP fails.
+
+### `GET /api/sequences/{id}/freshness`
+
+```json
+{"sequence": "<id>", "built": "...", "checked": "...", "exposures_in_sequence": 358, "exposures_available": 358,
+ "new_exposures": 0, "newest_in_sequence_mjd": 61305.6, "newest_in_sequence_date": "2026-09-22 15:05",
+ "newest_available_mjd": 61305.6, "newest_available_date": "2026-09-22 15:05",
+ "new_by_band": {}, "new_by_collection": {}, "rebuild_recommended": false}
+```
+
+Cached for ten minutes; it refreshes the footprint-search cache, so `POST /api/sequences` with `force: true` then includes the new files.
+
+### Build filters
+
+`POST /api/sequences` also accepts `date_min`, `date_max` (UTC dates `YYYY-MM-DD`, `date_max` inclusive) and `bands` (e.g. `["D5", "D6"]`). Unset filters leave the sequence id unchanged (ADR-0031).
+
+## Archival epochs (2MASS, AllWISE, NEOWISE)
+
+Older-survey images resampled onto a built sequence's own grid, in MJy/sr, so they can be blinked with the
+SPHEREx co-adds over a 1999–2026 baseline (ADR-0023). Not available for solar-system objects.
+
+### `GET /api/sequences/{id}/archival`
+
+Query: `fov_arcmin` (optional, 1–60): a wider concentric grid at the same pixel scale, for targets that were
+far from today's position decades ago (Barnard's Star sits 4.4′ south of its 2026 position in 2MASS).
+
+- `202` while building (the first call starts the build; poll the same URL): `{"id", "status": "running",
+  "stage": "search" | "fetch", "done", "total", "error", "elapsed"}`.
+- `200` when built:
+
+```json
+{"sequence": "<id>", "version": 2, "created": "...",
+ "grid": {"ra": 269.4462, "dec": 4.7688, "n": 119, "pixscale_arcsec": 6.15, "fov_arcmin": 12.2, ...},
+ "surveys": ["2mass", "allwise", "neowise"],
+ "frames": [
+   {"index": 0, "survey": "2MASS", "survey_id": "2mass", "band": "H", "label": "2MASS H", "wl_um": 1.662,
+    "mjd": 51692.43, "mjd_min": 51692.42, "mjd_max": 51692.44, "date": "2000-05-28 10:17", "epoch_year": 2000.41,
+    "native_pixscale_arcsec": 1.0, "n_images": 4, "unit": "MJy/sr", "coverage": 1.0, "sources": ["https://..."],
+    "target_radec": [269.4502, 4.6966], "target_px": [55.6, 15.5], "target_in_field": true},
+   ...],
+ "array": {"file": "frames.f32", "dtype": "float32", "shape": [47, 119, 119], "unit": "MJy/sr (background subtracted)"},
+ "processing": {...}, "stats": {"images_found": 683, "requests": 1344, "bytes": 1080000000, "seconds": 134.2, "errors": []},
+ "sources": {...}}
+```
+
+Frames are sorted by time. NEOWISE frames are per-visit medians (`n_images` single exposures); `coverage` is
+the fraction of grid pixels with data. `404` if the sequence is not built or is a co-moving sequence; `500`
+with the task if the build failed (a new request after two minutes retries).
+
+### `GET /api/sequences/{id}/archival.bin`
+
+Query: `fov_arcmin` (as above), `index` (optional). Float32 little-endian, NaN where no data: all frames
+`[k, n, n]` in the order of `frames`, or one frame `[n, n]` with `index`. `404` until built.
+
+## Solar-system objects (IRSA MOST)
+
+### `GET /api/moving/search`
+
+Query: `name` (e.g. `3I`, `Eros`, `C/2025 N1`) or `naif_id` (JPL NAIF ID; asteroid number N is 20000000 + N);
+`type` (`Asteroid` | `Comet`, guessed from the name when omitted); `begin`, `end` (UTC dates, default
+2025-04-01 to today).
+
+- `202` while MOST searches (long windows take minutes; poll the same URL).
+- `200`:
+
+```json
+{"object": "ATLAS (C/2025 N1)", "query": {...}, "elements": {"eccentricity": "6.1396", ...},
+ "n_files": 160, "n_exposures": 84, "date_min": "2025-08-01 08:00", "date_max": "2025-08-15 12:42",
+ "exposures": [{"mjd": 60888.334, "date": "...", "ra": 252.664, "dec": -17.4905, "band": "D3", "obs_id": "...",
+                "collection": "spherex_dr1", "uri": "ibe/data/spherex/dr1/level2/...", "vmag": 14.04,
+                "sun_dist": 3.48, "geo_dist": 2.81, "phase": 13.9}, ...],
+ "ephemeris": [[60888.3334, 252.664196, -17.490529], ...],
+ "suggested_request": {"ra": 247.109, "dec": -16.840, "name": "ATLAS (C/2025 N1)", "fov_arcmin": 6.0,
+                       "object_name": "3I", "object_type": "Comet", "naif_id": null,
+                       "obs_begin": "2025-08-01", "obs_end": "2025-08-20"}}
+```
+
+- `409` for ambiguous names: `{"status": "error", "kind": "AmbiguousObject", "error": "...", "choices":
+  [{"name": "16 Psyche", "type": "Asteroid", "naif_id": 20000016, "designation": "A852 FA"}, ...]}`; retry with
+  `naif_id`.
+- `404` unknown object, `502` MOST unavailable, `422` without `name` or `naif_id` or with a bad date.
+
+### Co-moving sequences
+
+`POST /api/sequences` with the `suggested_request` fields (`object_name`, `object_type`, `naif_id`,
+`obs_begin`, `obs_end` plus `ra`, `dec`, `fov_arcmin`) builds a sequence in which every exposure is resampled
+on a grid centred on the object at its own time (ADR-0024). Its `meta.json` adds `grid.frame = "comoving"`,
+`exposures[i].center` and `epochs[i].center` ([ra, dec] of that grid's centre), `target.ephemeris`, and a
+`moving` block; `target_px` and the track sit on the central pixel. Stars trail; catalog overlays and archival
+epochs do not apply.

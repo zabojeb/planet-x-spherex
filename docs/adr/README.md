@@ -37,3 +37,17 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0020](0020-ring-photometry-for-saturated-stars.md) | Measure saturated stars in a fixed ring outside the core, as relative fluxes | Accepted | 2026-11-14 |
 | [0021](0021-local-object-index-for-search.md) | Suggest objects from a local index while typing; ask Sesame only for names it does not know | Accepted | 2026-11-14 |
 | [0022](0022-3d-views.md) | Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand | Accepted | 2026-11-14 |
+| [0023](0023-archival-epochs.md) | Add 2MASS, AllWISE and NEOWISE epochs on the sequence's own grid | Accepted | 2026-11-14 |
+| [0024](0024-moving-objects-via-most.md) | Follow solar-system objects with IRSA MOST and a co-moving sequence mode | Accepted | 2026-11-14 |
+| [0025](0025-background-tasks-for-archival-and-most.md) | Run archival builds and MOST searches as polled background tasks in the API process | Accepted | 2026-11-14 |
+| [0026](0026-archival-regridding-on-threads.md) | Regrid archival images on threads, not on the shared process pool | Accepted | 2026-11-14 |
+| [0027](0027-photometry-of-any-position.md) | Measure any position on the sequence's cached cutouts, synchronously | Accepted | 2026-11-14 |
+| [0028](0028-proper-motion-from-coadd-centroids.md) | Fit proper motion to per-epoch co-add centroids with per-detector zero points | Accepted | 2026-11-14 |
+| [0029](0029-periodograms.md) | Lomb–Scargle periodograms on the client's relative light curve | Accepted | 2026-11-14 |
+| [0030](0030-export-formats.md) | Exports as FITS with WCS, CSV/VOTable photometry and a download script | Accepted | 2026-11-14 |
+| [0031](0031-releases-freshness-and-filters.md) | Release summary, freshness checks and optional build filters | Accepted | 2026-11-14 |
+| [0032](0032-api-worker-split-on-railway.md) | Stateless API replicas, queue workers, Redis and a bucket on Railway | Accepted | 2026-11-14 |
+| [0033](0033-job-queue-heartbeats-and-cancellation.md) | Job queue with dedupe, heartbeats, cancellation, priorities and limits | Accepted | 2026-11-14 |
+| [0034](0034-immutable-http-caching-and-light-endpoints.md) | Immutable HTTP caching, precompressed metadata and lightweight result endpoints | Accepted | 2026-11-14 |
+| [0035](0035-packaging-docker-and-railway-config.md) | One multi-stage image, docker compose for local runs, Railway config as code | Accepted | 2026-11-14 |
+| [0036](0036-cpu-quota-sizing.md) | Size pools and server workers from the cgroup CPU quota | Accepted | 2026-11-14 |
