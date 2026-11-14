@@ -492,3 +492,21 @@ canvas.smooth { image-rendering: auto; }
 .exports { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .exports a { justify-content: flex-start; font-size: 12px; text-decoration: none; }
 .exports a small { color: var(--text-3); margin-left: auto; font-family: var(--mono); font-size: 10px; }
+
+/* ---- 3D views (Sky3D): the canvas fills the sky; the bar floats top-right */
+.sky3d { cursor: grab; }
+.sky3d.pointing { cursor: pointer; }
+.sky3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transition: opacity 250ms var(--ease); }
+.sky3d.dim .sky3d-canvas { opacity: 0.35; }
+.hud-hint { max-width: 260px; text-transform: none; letter-spacing: 0.02em; color: var(--text-3); animation: hintFade 10s var(--ease) forwards; }
+@keyframes hintFade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.bar3d { position: absolute; top: 18px; right: 18px; z-index: 31; display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 12px; border-radius: 12px; }
+.bar3d .segmented { border-radius: 8px; }
+.bar3d-tag { color: var(--accent); }
+.bar3d-height { display: inline-flex; align-items: center; gap: 8px; }
+.bar3d-height input { width: 84px; margin: 0; }
+@media (max-width: 760px) {
+  .bar3d { top: 92px; left: 12px; right: 64px; flex-wrap: wrap; gap: 6px; }
+  .bar3d-height input { width: 64px; }
+  .hud-hint { display: none; }
+}

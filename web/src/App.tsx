@@ -1,20 +1,24 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, measureSource, prefetchSequence, resolveQuery, type Progress } from "./api";
 import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
-import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, type CatalogStatus } from "./components/Controls";
+import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
+import type { Layer, TrackPoint3D } from "./components/Sky3D";
 import { Drawer, type DrawerTab } from "./components/Drawer";
 import { Rail } from "./components/Rail";
 import { SkyView } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, playableEpochs, rgbLabel, stackEpochs, type Display, type ExposureView } from "./display";
+import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, type Display, type ExposureView } from "./display";
 import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
-import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type ViewState } from "./state";
+import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
 import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
+
+// three.js is a separate chunk, fetched the first time a 3D view opens.
+const Sky3D = lazy(() => import("./components/Sky3D"));
 
 interface StageHud {
   epoch: string;
@@ -94,8 +98,14 @@ export default function App() {
   const [tablesTick, setTablesTick] = useState(0);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
+  const [spin, setSpin] = useState(false);
+  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "relief");
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
+  if (view.view3d !== "off") last3d.current = view.view3d;
+  const is3d = view.view3d !== "off";
+  const isCube = view.view3d === "time" || view.view3d === "bands";
+  const toggle3d = () => set({ view3d: is3d ? "off" : last3d.current });
 
   useEffect(() => {
     getTargets().then(setPresets).catch((e) => setPresetsError(`Cannot reach the API: ${e.message || e}`));
@@ -165,9 +175,9 @@ export default function App() {
   const flagsOn = view.overlays.includes("flags");
   const willPlay = playing && view.mode !== "stack" && view.mode !== "exp" && playable.length > 1;
   const need = useMemo(
-    () => (derived ? planesNeeded(derived, view, willPlay, flagsOn) : null),
+    () => (derived ? (isCube ? planesNeeded3d(derived, view, willPlay) : planesNeeded(derived, view, willPlay, flagsOn && !is3d)) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, willPlay, flagsOn],
+    [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, view.view3d, willPlay, flagsOn],
   );
   const needKey = need ? [...need.now, ...need.soon].map((k) => `${k.array}${k.e}${k.b}`).join(",") : "";
   useEffect(() => {
@@ -230,6 +240,37 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [meta, exposures, photometry, tablesTick],
   );
+
+  // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
+  const slices = useMemo(
+    () => (derived && isCube ? slices3d(derived, view) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [derived, isCube, view.view3d, view.mode, view.band, view.epoch, view.ref, view.stack, view.lo, view.hi],
+  );
+  // In Exposures mode the time cube stacks the single exposures of the epoch at their times instead: an
+  // asteroid crossing the field during a visit becomes a diagonal line through the layers.
+  const expCube = view.view3d === "time" && view.mode === "exp" && view.band !== "all";
+  const expRows = useMemo(
+    () => (expCube && expStack && exposures ? expStack.indices.map((i) => exposures[i]).filter(Boolean) : []),
+    [expCube, expStack, exposures],
+  );
+  const layers: Layer[] = useMemo(() => {
+    if (!derived) return [];
+    if (expCube) {
+      if (!expRows.length || expRows.length !== expStack?.indices.length) return [];
+      const t0 = expRows[0].mjd;
+      const span = expRows[expRows.length - 1].mjd - t0;
+      return expRows.map((ex, i) => ({
+        key: `x${i}`,
+        label: formatDate(ex.mjd, true).slice(5),
+        z: span > 0 ? (ex.mjd - t0) / span : 0.5,
+        current: i === expIndex,
+        display: computeDisplay(derived, view, { ...expView, index: i }),
+      }));
+    }
+    return slices.map((s) => ({ key: s.key, label: s.label, z: s.z, current: s.current, display: computeDisplay(derived, s.view, expView) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derived, slices, planesTick, expCube, expRows, expIndex, view.lo, view.hi]);
 
   // ---- catalogs for overlays
   const wanted = view.overlays.filter((o): o is (typeof CATALOG_IDS)[number] => (CATALOG_IDS as readonly string[]).includes(o));
@@ -306,6 +347,7 @@ export default function App() {
         const b = meta.bands[Number(e.key) - 1];
         if (b && derived?.playable(b.id).length) set({ band: b.id });
       } else if (e.key === "0") set({ band: "all" });
+      else if (e.key.toLowerCase() === "v") toggle3d();
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -433,7 +475,69 @@ export default function App() {
   };
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
-  const sky = (
+  const zOf = new Map(slices.map((s) => [s.view.epoch, s.z]));
+  const track3d: TrackPoint3D[] = !meta
+    ? []
+    : expCube
+      ? expRows.map((ex, i) => ({ x: ex.target_px[0], y: ex.target_px[1], z: layers[i]?.z ?? 0, current: i === expIndex }))
+      : meta.target.track
+          .filter((t) => view.view3d !== "time" || zOf.has(t.epoch))
+          .map((t) => ({ x: t.x, y: t.y, z: view.view3d === "time" ? zOf.get(t.epoch)! : null, current: t.epoch === view.epoch }));
+  const cur3d = track3d.find((t) => t.current);
+  const currentTrack3d: [number, number] | null = cur3d ? [cur3d.x, cur3d.y] : null;
+  const sliceMode = MODES.find((m) => m.id === slices[0]?.view.mode)?.label ?? "";
+  const label3d = (() => {
+    const first = slices[0];
+    const last = slices[slices.length - 1];
+    if (expCube && layers.length)
+      return { date: `Time cube · ${layers.length} exposures · ${layers[0].label} → ${layers[layers.length - 1].label} UTC`, sub: `Exposures · ${bandLabel(view.band, meta?.bands ?? [])} · ${hud?.epoch ?? ""}` };
+    if (expCube) return { date: "Loading exposures…", sub: undefined };
+    if (view.view3d === "time" && first)
+      return { date: `Time cube · ${slices.length} epochs · ${first.label} → ${last.label}`, sub: `${sliceMode} · ${view.mode === "rgb" ? "false colour" : bandLabel(view.band, meta?.bands ?? [])} · ${dateLabel}` };
+    if (view.view3d === "bands" && first && meta) {
+      const wl = (id: string) => meta.bands.find((b) => b.id === id)!;
+      const range = `${wl(first.view.band).wl_min.toFixed(2)}–${wl(last.view.band).wl_max.toFixed(2)} µm`;
+      return { date: `λ cube · ${slices.length} detectors · ${range}`, sub: `${sliceMode} · ${view.mode === "stack" ? hud?.dates ?? "" : dateLabel}` };
+    }
+    return { date: dateLabel, sub: hud?.spectral };
+  })();
+
+  const sky = is3d ? (
+    <Suspense fallback={<div className="sky" />}>
+      <Sky3D
+        kind={view.view3d as Exclude<View3D, "off">}
+        n={meta?.grid.n ?? 0}
+        display={display}
+        layers={layers}
+        stretch={view.stretch}
+        cmap={view.cmap}
+        smooth={view.smooth}
+        height={view.height3d}
+        spin={spin}
+        track={track3d}
+        targetPx={view.view3d === "time" ? currentTrack3d : targetPx}
+        showTarget={overlays.has("target")}
+        showTrack={overlays.has("track")}
+        showCompass={overlays.has("compass")}
+        axisLabel={view.view3d === "time" ? "time" : "λ"}
+        dateLabel={label3d.date}
+        subLabel={label3d.sub}
+        progress={progress}
+        error={errorText}
+        onRetry={() => setReloadKey((k) => k + 1)}
+        lockKey={meta?.id ?? "none"}
+        onPick={(key) => {
+          if (expCube) return setExpIndex(Number(key.slice(1)));
+          const s = slices.find((x) => x.key === key);
+          if (!s) return;
+          if (view.view3d === "time") set({ epoch: s.view.epoch });
+          else set({ band: s.view.band });
+        }}
+        onInteract={() => hero && setHero(false)}
+        shiftX={hero && !mobile && presets.length ? 180 : 0}
+      />
+    </Suspense>
+  ) : (
     <SkyView
       grid={meta?.grid ?? null}
       display={display}
@@ -547,8 +651,11 @@ export default function App() {
           share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} />}
           detailsOpen={!!drawer}
           onDetails={() => openDetails("spectrum")}
+          is3d={is3d}
+          on3d={toggle3d}
         />
       )}
+      {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
       {drawer && fullMeta && (
         <Drawer

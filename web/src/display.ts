@@ -1,4 +1,5 @@
 /** What the viewer shows for the current mode: pure functions over Derived (no React). */
+import { formatMonth } from "./astro";
 import type { BandSel, Derived } from "./render";
 import type { ViewState } from "./state";
 import type { BandInfo, ExposureStack, PlaneKey } from "./types";
@@ -100,6 +101,68 @@ export function planesNeeded(d: Derived, v: ViewState, playing: boolean, flags: 
       return true;
     }),
   };
+}
+
+/** One layer of a 3D cube: the view that produces it and its height in the cube (0 = bottom, 1 = top). */
+export interface Slice {
+  key: string;
+  label: string;
+  z: number;
+  current: boolean;
+  view: ViewState;
+}
+
+/** Layers of the cube for the current 3D view. Time cube: every epoch (partial visits included), at its date,
+ *  in Blink, Difference or RGB (Stack has no per-epoch frame, so it shows Blink; Exposures with one detector is
+ *  built in App from the single exposures of the epoch, and falls back to Blink here). λ cube: every
+ *  detector of the current epoch, bottom to top in wavelength order, each with its own stretch. */
+export function slices3d(d: Derived, v: ViewState): Slice[] {
+  const meta = d.seq.meta;
+  if (v.view3d === "time") {
+    const mode = v.mode === "stack" || v.mode === "exp" ? "blink" : v.mode;
+    const eps = d.playable(mode === "rgb" ? "rgb" : v.band);
+    if (!eps.length) return [];
+    const t = (e: number) => meta.epochs[e].mjd_mean;
+    const t0 = t(eps[0]);
+    const span = t(eps[eps.length - 1]) - t0;
+    return eps.map((e) => ({
+      key: `e${e}`,
+      label: formatMonth(t(e)),
+      z: span > 0 ? (t(e) - t0) / span : 0.5,
+      current: e === v.epoch,
+      view: { ...v, mode, epoch: e },
+    }));
+  }
+  if (v.view3d === "bands") {
+    const mode = v.mode === "rgb" || v.mode === "exp" ? "blink" : v.mode;
+    const ids = meta.bands.map((b) => b.id).filter((b) => (mode === "stack" ? d.playable(b).length > 0 : d.hasBand(v.epoch, b)));
+    return ids.map((b, i) => {
+      const info = meta.bands.find((x) => x.id === b)!;
+      return { key: b, label: `${b} · ${wlRange(info)}`, z: ids.length > 1 ? i / (ids.length - 1) : 0.5, current: b === v.band, view: { ...v, mode, band: b } };
+    });
+  }
+  return [];
+}
+
+/** Planes for a cube: every layer now; while playing the λ cube, the other epochs' layers next. */
+export function planesNeeded3d(d: Derived, v: ViewState, playing: boolean): { now: PlaneKey[]; soon: PlaneKey[] } {
+  const seen = new Set<string>();
+  const collect = (views: ViewState[]) => {
+    const out: PlaneKey[] = [];
+    for (const sv of views)
+      for (const k of planesNeeded(d, sv, false, false).now) {
+        const id = `${k.array}|${k.e}|${k.b}`;
+        if (!seen.has(id)) seen.add(id), out.push(k);
+      }
+    return out;
+  };
+  if (v.view3d === "time" && v.mode === "exp" && v.band !== "all") return { now: [], soon: [] }; // single exposures, not planes
+  const now = collect(slices3d(d, v).map((s) => s.view));
+  if (v.view3d !== "bands" || v.mode === "stack") return { now, soon: [] };
+  const list = playableEpochs(d, v);
+  const i = list.indexOf(v.epoch);
+  const next = playing ? list : [list[i + 1], list[i - 1]].filter((e): e is number => e !== undefined);
+  return { now, soon: collect(next.filter((e) => e !== v.epoch).flatMap((e) => slices3d(d, { ...v, epoch: e }).map((s) => s.view))) };
 }
 
 /** What to draw, or null while the planes of the current frame are still downloading. Stretch limits
