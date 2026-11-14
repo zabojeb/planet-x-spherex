@@ -8,7 +8,10 @@ import {
 import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames, stretchGroup } from "./archival";
 import { ArchivalStrip, LongBaselineControls } from "./components/LongBaseline";
 import { MovingCard, type MovingState } from "./components/Moving";
-import { formatDate, formatRange, mjdToYear, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
+import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
+import type { VerifySubject } from "./components/chart/VerifyPanel";
+import { formatDate, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
@@ -117,6 +120,10 @@ export default function App() {
   const [tablesTick, setTablesTick] = useState(0);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisSubject | null>(null);
+  const [verify, setVerify] = useState<VerifySubject | null>(null);
+  const [ruler, setRuler] = useState(false);
+  const [magnifier, setMagnifier] = useState(false);
   const [spin, setSpin] = useState(false);
   const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "time");
   const [sel, setSel] = useState<Selection | null>(null);
@@ -163,6 +170,8 @@ export default function App() {
         setCatalogStatus({});
         setExp({ key: "", stack: null, error: null });
         setSource(null);
+        setAnalysis(null);
+        setVerify(null);
         setTablesError(null);
         const keep = keepView.current; // read now: the updater below runs later
         keepView.current = false;
@@ -350,6 +359,9 @@ export default function App() {
     if (arch?.meta) return view.mode !== "blink" ? "Plays in Blink mode" : `${archFrames.length} frames in ${view.archBands.join(" / ")} · ${arch.meta.grid.fov_arcmin.toFixed(1)}′ field`;
     return null;
   })();
+
+  // ---- field tools: candidates, known objects, Track & Stack (their marks and stacked image go on the sky)
+  const ft = useFieldTools(meta, view.epoch);
 
   // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
   const slices = useMemo(
@@ -594,6 +606,53 @@ export default function App() {
     if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
     return Promise.resolve();
   };
+  /** Open the automatic analysis of a selection in the drawer. */
+  const analyzeSelection = (s: Selection, world: [number, number] | null) => {
+    if (!world) return;
+    let subject: AnalysisSubject;
+    if (s.kind === "target" && target) subject = { key: `target:${meta?.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null } };
+    else if (s.kind === "source") subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) } };
+    else subject = { key: `pt:${world[0].toFixed(6)},${world[1].toFixed(6)}`, label: `${world[0].toFixed(5)} ${world[1] >= 0 ? "+" : ""}${world[1].toFixed(5)}`, pos: { ra: world[0], dec: world[1] } };
+    setAnalysis(subject);
+    setSel(null);
+    setHero(false);
+    setDrawer("analysis");
+  };
+  /** Per-exposure fits at a selection; a field candidate brings its trial motion along. */
+  const verifySelection = (world: [number, number] | null, label: string) => {
+    if (!world) return;
+    const c = ft.cands.find((x) => x.key === ft.active);
+    const near = c && Math.abs(c.ra - world[0]) < 1e-4 && Math.abs(c.dec - world[1]) < 1e-4 ? c : null;
+    setVerify({ key: `v:${world[0].toFixed(6)},${world[1].toFixed(6)}:${near?.rate ?? 0}`, label: near ? `${near.title}` : label, ra: world[0], dec: world[1], rate: near?.rate, pa: near?.pa, epoch: near?.epoch, mjd_ref: near?.mjd });
+    setSel(null);
+    setDrawer("verify");
+  };
+  /** A candidate from the field list or a mark on the sky: select it there and fly to it. */
+  const pickCandidate = (c: Candidate) => {
+    ft.setActive(c.key);
+    if (is3d) set({ view3d: "off" });
+    if (c.epoch != null && c.epoch !== view.epoch) set({ epoch: c.epoch });
+    setSel({ kind: "point", ra: c.ra, dec: c.dec });
+    setFocus({ ra: c.ra, dec: c.dec, key: Date.now() });
+    setHero(false);
+  };
+  const onMark = (key: string) => {
+    const c = ft.cands.find((x) => x.key === key);
+    if (c) return pickCandidate(c);
+    if (key.startsWith("s:") && ft.search.state === "done") {
+      const t = ft.search.result.candidates.find((x) => `s:${x.id}` === key);
+      if (t) {
+        ft.setStack({ ...ft.stack, rate: t.rate_arcsec_per_hr, pa: t.pa_deg });
+        setSel({ kind: "point", ra: t.ra, dec: t.dec });
+      }
+      return;
+    }
+    const m = ft.marks.find((x) => x.key === key);
+    if (m && meta) {
+      const [ra, dec] = pixelToWorld(meta.grid, m.x, m.y);
+      setSel({ kind: "point", ra, dec });
+    }
+  };
   const dismissHero = () => {
     setHero(false);
     safeStorage(INTRO_KEY, "1");
@@ -658,6 +717,7 @@ export default function App() {
       };
     }
     if (comoving) hud.extra = hud.extra ? `${hud.extra} · co-moving: stars trail` : "co-moving: stars trail";
+    if (ft.stackDisplay && !lbActive) hud.extra = `Track & Stack ${ft.stack.rate.toFixed(2)}″/h PA ${ft.stack.pa.toFixed(0)}°`;
   }
   const flagBits = meta ? view.flagBits ?? defaultFlagBits(meta.flag_bits) : [];
   const flagMask = flagBits.reduce((m, b) => m | (1 << b), 0);
@@ -727,6 +787,8 @@ export default function App() {
           setDrawer("spectrum");
         }}
         onMeasure={sel.kind !== "target" ? () => measureSelection(sel) : undefined}
+        onAnalyze={() => analyzeSelection(sel, selWorld)}
+        onVerify={sel.kind !== "target" ? () => verifySelection(selWorld, sel.kind === "source" ? String(sel.src.id) : "Pinned position") : undefined}
         onCentre={sel.kind !== "target" && selWorld ? () => goTo({ name: sel.kind === "source" ? String(sel.src.id) : null, ra: selWorld[0], dec: selWorld[1], pmra: 0, pmdec: 0, ref_epoch: 2000 }) : undefined}
         onFollow={
           sel.kind === "source" && totalPm(sel.src) >= 20
@@ -848,7 +910,7 @@ export default function App() {
   ) : (
     <SkyView
       grid={lbActive && arch?.meta ? arch.meta.grid : meta?.grid ?? null}
-      display={skyDisplay}
+      display={!lbActive && ft.stackDisplay ? ft.stackDisplay : skyDisplay}
       view={view}
       overlays={overlays}
       flags={flags}
@@ -874,6 +936,11 @@ export default function App() {
         if (s) setHero(false);
       }}
       card={card}
+      marks={lbActive ? undefined : ft.marks}
+      onMark={onMark}
+      ruler={ruler}
+      magnifier={magnifier}
+      invert={view.invert}
       highlight={hoverKey}
       focus={focus}
       onStep={embed ? undefined : stepField}
@@ -984,6 +1051,7 @@ export default function App() {
           meta ? (
             <div className="panel-stack">
               <DisplayPanel view={view} set={set} />
+              <MeasureTools ruler={ruler} onRuler={setRuler} magnifier={magnifier} onMagnifier={setMagnifier} invert={view.invert} onInvert={(invert) => set({ invert })} />
               <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
             </div>
           ) : undefined
@@ -1004,6 +1072,7 @@ export default function App() {
             </>
           ) : undefined
         }
+        field={meta && !comoving ? <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} /> : undefined}
         share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} /> : undefined}
         detailsOpen={!!drawer}
         onDetails={meta ? () => openDetails("spectrum") : undefined}
@@ -1023,6 +1092,8 @@ export default function App() {
           source={source}
           onClearSource={() => setSource(null)}
           onNeedPhotometry={() => setLegacySpectrum(true)}
+          analysis={analysis}
+          verify={verify}
           target={target}
           epoch={view.epoch}
           band={view.band}

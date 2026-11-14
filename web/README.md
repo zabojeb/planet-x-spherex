@@ -123,6 +123,21 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   epoch, |z| ≥ 3 full strength). A measured catalogue source uses `POST /api/spectrum/analyze`. Without the
   endpoints the per-exposure spectrum from the photometry table is shown.
 
+## Point analysis and field tools
+
+- **Analyze** (pick card of any pinned point, catalogue source or the target): `POST /api/sequences/{id}/analyze`,
+  polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with DELETE). The Analysis tab shows the
+  verdict first (findings with a confidence bar, novelty badge), then expandable sections: identification,
+  spectrum + classification, motion vs catalogue, light curve + period, red excess, nearby tracklets. Each slot may
+  be `{error}` and says so.
+- **Verify** (pick card): `POST .../verify`, an 11×11 cutout and PSF-fit S/N per exposure, fixed or along a
+  candidate's motion.
+- **Field analysis** (rail → scan icon): `POST .../field` job with candidate lists (movers, tracklets, variables,
+  red excess, anomalies) as marks on the sky and a list; known asteroids and comets (`known-objects`) with labels
+  and 1-hour motion arrows; Track & Stack (`trackstack.bin`, rate/PA sliders, `trackstack/search` results); ADES
+  (`/api/field/{id}/ades.psv`) and CSV exports.
+- **Display → Tools**: invert (`inv=1`), magnifier (11×11 px), ruler (two clicks: distance and PA).
+
 ## Design
 
 Google-Earth model on black: the sky fills the viewport and every control floats over it as small glass

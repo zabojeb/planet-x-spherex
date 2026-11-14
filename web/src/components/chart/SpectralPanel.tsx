@@ -201,7 +201,7 @@ function segments(key: string, wl: number[], flux: (number | null)[], color: str
 
 // ------------------------------------------------------------------ spectrum
 
-function SpectrumView({ s, meta, ylog }: { s: SpectrumResult; meta: Meta; ylog: boolean }) {
+export function SpectrumView({ s, meta, ylog }: { s: SpectrumResult; meta: Meta; ylog: boolean }) {
   const relative = !s.bins.length && s.relative_bins.length > 0;
   const bins = relative ? s.relative_bins : s.bins;
   const { points, lines, yDomain } = useMemo(() => {
@@ -297,7 +297,7 @@ const FAMILY: Record<string, string> = {
   nonstellar: "Non-stellar (AGN/QSO or YSO)",
 };
 
-function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: SpectrumResult | null; meta: Meta; ylog: boolean }) {
+export function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: SpectrumResult | null; meta: Meta; ylog: boolean }) {
   const curves = c.model_curves ?? {};
   const { points, lines, yDomain } = useMemo(() => {
     const pts = s ? binPoints(s.bins, ylog, SERIES.blue) : [];
@@ -422,7 +422,7 @@ function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: SpectrumResult 
 
 // ------------------------------------------------------------------ variability
 
-function VariabilityView({ v, meta }: { v: VariabilityResult; meta: Meta }) {
+export function VariabilityView({ v, meta }: { v: VariabilityResult; meta: Meta }) {
   const nE = meta.epochs.length;
   const eps = v.epochs.filter((e) => e.epoch !== v.reference_epoch);
   const { points, yDomain } = useMemo(() => {

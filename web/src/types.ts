@@ -395,3 +395,76 @@ export interface SpectralAnalysis {
   classification: ClassifyResult | null;
   variability: VariabilityResult | null;
 }
+
+// ------------------------------------------------------------------ point analysis (POST /api/sequences/{id}/analyze)
+/** Any slot of an analysis may fail on its own. */
+export type Slot<T> = T | { error: string } | null | undefined;
+
+export interface Finding {
+  text: string;
+  evidence?: string | string[] | null;
+  confidence: number | string; // 0–1, or "high" | "medium" | "low"
+}
+
+export interface CatalogMatch {
+  catalog?: string;
+  id: string | number;
+  name?: string | null;
+  type?: string | null;
+  mag?: number | null;
+  mag_band?: string | null;
+  sep_arcsec?: number | null;
+  pmra?: number | null;
+  pmdec?: number | null;
+}
+
+export interface PointAnalysis {
+  id?: string;
+  point?: { ra: number; dec: number; x?: number; y?: number; name?: string | null };
+  verdict?: Slot<{ summary?: string; findings: Finding[]; novelty?: number | string | null; novelty_note?: string | null }>;
+  identification?: Slot<{ matches?: CatalogMatch[]; simbad?: CatalogMatch[]; solar_system?: { name: string; kind?: string; vmag?: number | null; sep_arcsec?: number | null }[] }>;
+  photometry?: Slot<{ n?: number; records?: Photometry[]; summary?: Record<string, unknown> }>;
+  spectrum?: Slot<SpectrumResult>;
+  classification?: Slot<ClassifyResult>;
+  variability?: Slot<VariabilityResult>;
+  motion?: Slot<{ pmra: number; pmdec: number; pmra_err?: number; pmdec_err?: number; pm_total?: number; significance?: number; catalog?: { catalog: string; pmra: number; pmdec: number } | null; discrepancy_sigma?: number | null }>;
+  periodogram?: Slot<PeriodogramResult>;
+  red_excess?: Slot<{ ratio_long_short?: number; excess_snr?: number; note?: string }>;
+  tracklets?: Slot<{ items?: { id: string; epoch: number; n: number; rate_arcsec_per_hr: number; pa_deg: number; sep_arcsec?: number; known?: string | null }[] }>;
+}
+
+// ------------------------------------------------------------------ field analysis
+export interface FieldMover {
+  id: string; x: number; y: number; ra: number; dec: number; category: string; score: number;
+  motion?: { pmra: number; pmdec: number; pm_total: number; significance?: number } | null;
+  catalog_motion?: { catalog: string; id: string; pmra: number; pmdec: number } | null;
+  catalog_discrepancy_sigma?: number | null;
+  track?: { epoch: number; x: number; y: number }[];
+}
+export interface FieldTracklet {
+  id: string; epoch: number; n: number; mjd_mid: number; rate_arcsec_per_hr: number; pa_deg: number; rms_arcsec?: number; mean_snr: number; mean_rb?: number; score: number;
+  detections: { exposure: number; mjd: number; band: string; x: number; y: number; ra: number; dec: number; snr: number }[];
+  known?: { name: string; kind?: string; vmag?: number } | null;
+}
+export interface FieldVariable { id: string; x: number; y: number; ra: number; dec: number; method?: string; n?: number; chi2_red: number; amplitude: number; score: number; period?: { best_period_days: number } | null }
+export interface FieldRed { id: string; x: number; y: number; ra: number; dec: number; ratio_long_short?: number; snr_long?: number; no_gaia?: boolean; score: number }
+export interface FieldAnomaly { id: string; x: number; y: number; ra: number; dec: number; score: number; no_gaia?: boolean }
+export interface FieldResult {
+  id: string;
+  sequence: string;
+  candidates: { movers?: FieldMover[]; faint_movers?: FieldMover[]; tracklets?: FieldTracklet[]; pairs?: FieldTracklet[]; variables?: FieldVariable[]; red?: FieldRed[]; anomalies?: FieldAnomaly[] };
+  stats?: { sources?: number; seconds?: number };
+  notes?: string[];
+}
+export interface KnownObject { name: string; kind?: string; mjd: number; ra: number; dec: number; vmag?: number | null; ra_rate?: number; dec_rate?: number; x: number; y: number; inside: boolean; speed_arcsec_per_hr?: number; pa_deg?: number }
+export interface KnownObjects { sequence: string; times: { mjd: number; objects: KnownObject[] }[] }
+export interface StackSearch {
+  epoch: number;
+  candidates: { id: string; x: number; y: number; ra: number; dec: number; snr: number; rate_arcsec_per_hr: number; pa_deg: number; sub_snr?: number[]; score: number }[];
+  trials?: number;
+}
+export interface VerifyResult {
+  summary: { exposures: number; fitted: number; detected_snr3: number; median_snr: number | null; median_offset_arcsec?: number | null };
+  exposures: { index: number; mjd: number; band: string; wl: number; fit: { snr: number; flux_mjy: number; offset_arcsec?: number } | null }[];
+  strips: { half_size_px: number; stare: { index: number; pixels: (number | null)[][] }[]; track: { index: number; pixels: (number | null)[][] }[] };
+}
