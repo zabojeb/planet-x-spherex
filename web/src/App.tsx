@@ -5,21 +5,22 @@ import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExpo
 import { formatDate, formatRange, mjdToYear, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
-import type { Layer, TrackPoint3D } from "./components/Sky3D";
+import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
+import { CoordField } from "./components/CoordField";
 import { Drawer, type DrawerTab } from "./components/Drawer";
 import { GoToPanel, rememberPlace, type Place } from "./components/GoTo";
 import { ObjectsPanel } from "./components/Objects";
 import { PickCard } from "./components/PickCard";
 import { Rail } from "./components/Rail";
-import { SkyView, selectionWorld, valueAt, type Selection, type StepDir } from "./components/SkyView";
+import { HIGH_PM, SkyView, catalogMarkers, markerTip, selectionWorld, sourceKey, valueAt, type Selection, type StepDir } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, type Display, type ExposureView } from "./display";
+import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
 import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
-import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
+import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
 import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
 
 // three.js is a separate chunk, fetched the first time a 3D view opens.
@@ -35,6 +36,7 @@ interface StageHud {
 }
 
 const INTRO_KEY = "spherex-intro-dismissed";
+const xy = ([x, y]: [number, number]) => ({ x, y });
 
 /** Default detector from the data: a single band only when the target is detected in just a few detectors. */
 function bestBand(meta: Meta): BandSel {
@@ -87,7 +89,7 @@ export default function App() {
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
   const [fovOverride, setFovOverride] = useState<number | null>(initial.fov);
-  const [view, setView] = useState<ViewState>({ ...DEFAULT_VIEW, ...initial.view });
+  const [view, setView] = useState<ViewState>({ ...DEFAULT_VIEW, ...(embed ? { view3d: EMBED_VIEW3D } : null), ...initial.view });
   const [seq, setSeq] = useState<SequenceData | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +111,7 @@ export default function App() {
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
   const [spin, setSpin] = useState(false);
-  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "relief");
+  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "time");
   const [sel, setSel] = useState<Selection | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
@@ -177,7 +179,7 @@ export default function App() {
     setSel(null);
     setHoverKey(null);
   }, [meta?.id]);
-  const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
+  const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ref, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   const refEpoch = derived ? effectiveRef(derived, view) : -1;
 
   // ---- single exposures (Exposures mode)
@@ -336,7 +338,7 @@ export default function App() {
       if (view.mode === "exp") {
         if (nExp > 1) setExpIndex((i) => (i + 1) % nExp);
       } else if (view.mode !== "stack" && playable.length > 1) {
-        setView((v) => ({ ...v, epoch: playable[(playable.indexOf(v.epoch) + 1) % playable.length] }));
+        setView((v) => ({ ...v, epoch: stepEpoch(playable, v.epoch, 1) ?? v.epoch }));
       }
     }, view.speed);
     return () => window.clearInterval(t);
@@ -347,9 +349,8 @@ export default function App() {
       if (nExp) setExpIndex((i) => (i + dir + nExp) % nExp);
       return;
     }
-    if (!playable.length) return;
-    const i = Math.max(0, playable.indexOf(view.epoch));
-    set({ epoch: playable[(i + dir + playable.length) % playable.length] });
+    const e = stepEpoch(playable, view.epoch, dir);
+    if (e !== undefined) set({ epoch: e });
   };
 
   useEffect(() => {
@@ -537,6 +538,15 @@ export default function App() {
   };
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
+  // The field centre for the coordinate box: a fixed position as requested (so it shows at once while the field
+  // builds), a moving target's field once built (centred where the target was during the observations).
+  const fieldCentre: [number, number] | null =
+    target && (target.pmra || target.pmdec) && meta && meta.target.ra === target.ra && meta.target.dec === target.dec
+      ? [meta.grid.ra, meta.grid.dec]
+      : target
+        ? [target.ra, target.dec]
+        : null;
+
   // ---- the selected object, target or pin, and its card
   const targetWorld = hud?.target ?? null;
   const targetName = target?.name || meta?.target.name || "Field centre";
@@ -591,6 +601,43 @@ export default function App() {
     ) : null;
 
 
+  // Catalogue sources for the 3D views, at the shown date; in the time cube fast movers also get their
+  // position at every layer, so their path through the cube can be drawn beside the stars' columns.
+  const objects3d: Object3D[] = useMemo(() => {
+    if (!is3d || !meta) return [];
+    const g = meta.grid;
+    const at: { year: number; z: number }[] = [];
+    if (expCube && expRows.length > 1) {
+      const t0 = expRows[0].mjd;
+      const dt = expRows[expRows.length - 1].mjd - t0;
+      for (const ex of expRows) at.push({ year: mjdToYear(ex.mjd), z: dt > 0 ? (ex.mjd - t0) / dt : 0.5 });
+    } else if (view.view3d === "time" && !expCube) for (const s of slices) at.push({ year: mjdToYear(meta.epochs[s.view.epoch].mjd_mean), z: s.z });
+    return catalogMarkers(g, catalogs, overlays, year, null).map((m) => {
+      const tip = markerTip(m.cat, m.src);
+      return {
+        key: sourceKey(m.cat, m.src),
+        cat: m.cat,
+        name: tip.name,
+        sub: tip.sub,
+        x: m.x,
+        y: m.y,
+        big: m.pm > HIGH_PM,
+        label: m.cat === "simbad",
+        rank: Number(m.src.refs ?? 0),
+        path: m.pm > HIGH_PM && at.length > 1 ? at.map((a) => ({ ...xy(worldToPixel(g, ...propagate(m.src, a.year))), z: a.z })) : undefined,
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [is3d, meta, catalogs, overlays, year, view.view3d, expCube, expRows, slices]);
+  /** Open a catalogue source on the flat sky, where its card and the fly-to live. */
+  const openSource = (cat: string, src: CatalogSource) => {
+    const [ra, dec] = propagate(src, year);
+    if (is3d) set({ view3d: "off" });
+    setSel({ kind: "source", cat, src });
+    setFocus({ ra, dec, key: Date.now() });
+    setHero(false);
+  };
+
   const zOf = new Map(slices.map((s) => [s.view.epoch, s.z]));
   const track3d: TrackPoint3D[] = !meta
     ? []
@@ -636,6 +683,8 @@ export default function App() {
         showTarget={overlays.has("target")}
         showTrack={overlays.has("track")}
         showCompass={overlays.has("compass")}
+        objects={objects3d}
+        highlight={hoverKey}
         axisLabel={view.view3d === "time" ? "time" : "λ"}
         dateLabel={label3d.date}
         subLabel={label3d.sub}
@@ -649,6 +698,12 @@ export default function App() {
           if (!s) return;
           if (view.view3d === "time") set({ epoch: s.view.epoch });
           else set({ band: s.view.band });
+        }}
+        onPickObject={(key) => {
+          for (const cat of CATALOG_IDS) {
+            const src = view.overlays.includes(cat) ? catalogs[cat]?.find((s) => sourceKey(cat, s) === key) : undefined;
+            if (src) return openSource(cat, src);
+          }
         }}
         onInteract={() => hero && setHero(false)}
         shiftX={hero && !mobile && presets.length ? 180 : 0}
@@ -758,6 +813,7 @@ export default function App() {
         onRandom={random}
         onWarm={warmIndex}
         onFov={(f) => setFovOverride(f)}
+        coords={<CoordField centre={fieldCentre} onGo={goTo} />}
       />
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
       <Rail
@@ -776,13 +832,7 @@ export default function App() {
               year={year}
               targetWorld={targetWorld}
               onHover={setHoverKey}
-              onPick={(cat, src) => {
-                const [ra, dec] = propagate(src, year);
-                if (is3d) set({ view3d: "off" }); // the card and the fly-to live on the flat sky
-                setSel({ kind: "source", cat, src });
-                setFocus({ ra, dec, key: Date.now() });
-                setHero(false);
-              }}
+              onPick={openSource}
             />
           ) : undefined
         }

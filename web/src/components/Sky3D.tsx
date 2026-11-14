@@ -2,16 +2,17 @@
  * 3D views of a sequence (three.js, loaded only when a 3D view is opened). Relief: the frame on screen as a
  * height field, same colours and stretch as the flat sky. Time cube / λ cube: the frames of every epoch (by
  * date) or detector (by wavelength) stacked as glowing layers whose sky is transparent, so a still star is a
- * vertical column and a mover leans along its predicted track. Orientation is the sky's: north is the far
- * side, east is left. Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset; click a
- * layer's label to show that epoch or detector.
+ * vertical column and a mover leans along its predicted track. Catalogue sources (the Layers panel's
+ * catalogues) are drawn like on the flat sky: on the current layer in the cubes, on the surface in the relief.
+ * Orientation is the sky's: north is the far side, east is left. Drag to orbit, right-drag to pan, scroll to
+ * zoom, double-click to reset; click a layer's label to show that epoch or detector, or a source to open it.
  */
 import { RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Progress } from "../api";
-import { SERIES } from "../colors";
+import { CATALOG_STYLE, SERIES } from "../colors";
 import type { Display } from "../display";
 import { heightField, paintDisplay, sliceAlpha, type Cmap, type Display3D, type Stretch } from "../render";
 import { loaderText } from "./SkyView";
@@ -31,6 +32,21 @@ export interface TrackPoint3D {
   current: boolean;
 }
 
+/** A catalogue source in the 3D views: grid pixel position at the shown date, and for fast movers in the
+ *  time cube their position at every layer (z 0..1), which draws their path through the cube. */
+export interface Object3D {
+  key: string;
+  cat: string;
+  name: string;
+  sub: string;
+  x: number;
+  y: number;
+  big: boolean; // a fast mover: drawn larger, as on the flat sky
+  label: boolean; // a named object that may carry its name
+  rank: number; // label priority (SIMBAD references)
+  path?: { x: number; y: number; z: number }[];
+}
+
 export interface Sky3DProps {
   kind: "relief" | "time" | "bands";
   n: number;
@@ -46,6 +62,9 @@ export interface Sky3DProps {
   showTarget: boolean;
   showTrack: boolean;
   showCompass: boolean;
+  objects: Object3D[];
+  /** Source highlighted from elsewhere (the objects list), as Object3D.key. */
+  highlight?: string | null;
   axisLabel: string;
   dateLabel: string;
   subLabel?: string;
@@ -54,6 +73,7 @@ export interface Sky3DProps {
   onRetry: () => void;
   lockKey: string;
   onPick: (key: string) => void;
+  onPickObject: (key: string) => void;
   onInteract: () => void;
   shiftX?: number;
 }
@@ -100,16 +120,56 @@ function textSprite(text: string, color: string, size: number, anchor: "left" | 
   return s;
 }
 
-function disposeTree(o: THREE.Object3D) {
+function disposeTree(o: THREE.Object3D, keepMaps?: Set<THREE.Texture>) {
   o.traverse((c) => {
     const m = c as THREE.Mesh;
     m.geometry?.dispose();
     const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
     for (const mat of mats) {
-      (mat as THREE.MeshBasicMaterial).map?.dispose();
+      const map = (mat as THREE.MeshBasicMaterial).map;
+      if (map && !keepMaps?.has(map)) map.dispose();
       mat.dispose();
     }
   });
+}
+
+/** A marker shape (the flat sky's: circle, square, diamond, plus, or a highlight ring) as a point sprite,
+ *  outlined in black so it reads over bright layers. */
+function shapeCanvas(shape: string, color: string): HTMLCanvasElement {
+  const S = 64;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = S;
+  const ctx = cv.getContext("2d")!;
+  const c = S / 2;
+  const r = shape === "plus" ? S * 0.29 : shape === "ring" ? S * 0.4 : S * 0.32;
+  const path = () => {
+    ctx.beginPath();
+    if (shape === "circle" || shape === "ring") ctx.arc(c, c, r, 0, Math.PI * 2);
+    else if (shape === "square") ctx.rect(c - r * 0.85, c - r * 0.85, r * 1.7, r * 1.7);
+    else if (shape === "diamond") {
+      ctx.moveTo(c, c - r);
+      ctx.lineTo(c + r, c);
+      ctx.lineTo(c, c + r);
+      ctx.lineTo(c - r, c);
+      ctx.closePath();
+    } else
+      for (const [x0, y0, x1, y1] of [[-1.5, 0, -0.5, 0], [0.5, 0, 1.5, 0], [0, -1.5, 0, -0.5], [0, 0.5, 0, 1.5]]) {
+        ctx.moveTo(c + x0 * r, c + y0 * r);
+        ctx.lineTo(c + x1 * r, c + y1 * r);
+      }
+  };
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,0.85)";
+  ctx.lineWidth = shape === "ring" ? 7 : 10;
+  path();
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = shape === "ring" ? 3.5 : 5;
+  if (shape === "ring") ctx.setLineDash([7, 5]);
+  path();
+  ctx.stroke();
+  return cv;
 }
 
 function square(n: number, y: number, color: string, opacity: number): THREE.LineLoop {
@@ -139,6 +199,9 @@ class Stage {
   private layerGeo: { geo: THREE.PlaneGeometry; n: number } | null = null;
   private decor = new THREE.Group();
   private marks = new THREE.Group();
+  private objs = new THREE.Group();
+  private objPos: { key: string; pos: THREE.Vector3 }[] = [];
+  private shapes = new Map<string, THREE.CanvasTexture>();
   private pending = false;
   private w = 1;
   private h = 1;
@@ -162,7 +225,7 @@ class Stage {
     const sun = new THREE.DirectionalLight(0xffffff, 1.9);
     sun.position.set(-0.55, 1, 0.65);
     this.scene.add(sun);
-    this.scene.add(this.decor, this.marks);
+    this.scene.add(this.decor, this.marks, this.objs);
   }
 
   request = () => {
@@ -429,9 +492,116 @@ class Stage {
     this.request();
   }
 
+  // ---------------------------------------------------------------- catalogue sources
+  private shapeTex(shape: string, color: string): THREE.CanvasTexture {
+    const id = `${shape}|${color}`;
+    let t = this.shapes.get(id);
+    if (!t) {
+      t = new THREE.CanvasTexture(shapeCanvas(shape, color));
+      t.colorSpace = THREE.SRGBColorSpace;
+      this.shapes.set(id, t);
+    }
+    return t;
+  }
+
+  /** Height of the relief under grid pixel (x, y): the highest of the 3×3 pixels around it, so a marker
+   *  sits on top of its star's peak; 0 when no relief is shown. */
+  private surfaceY(x: number, y: number): number {
+    const r = this.relief;
+    if (!r || !r.mesh.visible) return 0;
+    const P = (r.mesh.geometry.getAttribute("position") as THREE.BufferAttribute).array as Float32Array;
+    const ix = Math.round(x);
+    const iy = Math.round(y);
+    let top = 0;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const px = ix + dx;
+        const py = iy + dy;
+        if (px >= 0 && py >= 0 && px < r.n && py < r.n) top = Math.max(top, P[(py * r.n + px) * 3 + 1]);
+      }
+    return top;
+  }
+
+  /** Markers as camera-facing point sprites (one draw per catalogue and size), fast movers' paths through
+   *  the time cube, a highlight ring, and the names of the most-studied named objects. */
+  setObjects(p: { n: number; top: number; kind: Sky3DProps["kind"]; objects: Object3D[]; y: number; highlight: string | null }) {
+    const keep = new Set(this.shapes.values());
+    for (const c of [...this.objs.children]) (this.objs.remove(c), disposeTree(c, keep));
+    this.objPos = [];
+    const c = (p.n - 1) / 2;
+    const at = (x: number, y: number, h: number) => new THREE.Vector3(x - c, h, -(y - c));
+    const overlay = { transparent: true, depthTest: false, depthWrite: false };
+    // Point sizes are in screen units scaled by distance: this makes a marker about `d` grid pixels across.
+    const d = p.n * 0.034;
+    const k = 1 / Math.tan((this.camera.fov * Math.PI) / 360);
+    const lift = p.kind === "relief" ? p.n * 0.015 : 0;
+    const groups = new Map<string, { cat: string; big: boolean; pts: THREE.Vector3[] }>();
+    for (const o of p.objects) {
+      const pos = at(o.x, o.y, p.kind === "relief" ? this.surfaceY(o.x, o.y) + lift : p.y);
+      this.objPos.push({ key: o.key, pos });
+      const id = `${o.cat}|${o.big}`;
+      if (!groups.has(id)) groups.set(id, { cat: o.cat, big: o.big, pts: [] });
+      groups.get(id)!.pts.push(pos);
+      if (o.path && o.path.length > 1) {
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(o.path.map((q) => at(q.x, q.y, q.z * p.top))),
+          new THREE.LineBasicMaterial({ color: CATALOG_STYLE[o.cat].color, opacity: 0.7, ...overlay }),
+        );
+        line.renderOrder = 13;
+        this.objs.add(line);
+      }
+    }
+    for (const g of groups.values()) {
+      const st = CATALOG_STYLE[g.cat];
+      const mat = new THREE.PointsMaterial({ map: this.shapeTex(st.shape, st.color), size: d * k * (g.big ? 1.4 : 1), sizeAttenuation: true, ...overlay });
+      const pts = new THREE.Points(new THREE.BufferGeometry().setFromPoints(g.pts), mat);
+      pts.renderOrder = 14;
+      this.objs.add(pts);
+    }
+    const hl = p.highlight ? this.objPos.find((o) => o.key === p.highlight) : null;
+    if (hl) {
+      const ring = new THREE.Points(new THREE.BufferGeometry().setFromPoints([hl.pos]), new THREE.PointsMaterial({ map: this.shapeTex("ring", TEXT_1), size: d * k * 2.2, sizeAttenuation: true, ...overlay }));
+      ring.renderOrder = 15;
+      this.objs.add(ring);
+    }
+    // Names next to their markers, most-studied first and not on top of each other.
+    const size = p.n * 0.026;
+    const placed: Object3D[] = [];
+    for (const o of p.objects.filter((x) => x.label).sort((a, b) => b.rank - a.rank)) {
+      if (placed.length >= 12) break;
+      if (o.x < 0 || o.y < 0 || o.x > p.n - 1 || o.y > p.n - 1) continue;
+      if (placed.some((q) => Math.abs(q.y - o.y) < p.n * 0.05 && Math.abs(q.x - o.x) < p.n * 0.3)) continue;
+      placed.push(o);
+      const s = textSprite(o.name.length > 28 ? `${o.name.slice(0, 27)}…` : o.name, TEXT_1, size, "left");
+      // offset right of the marker and a little up, in screen-aligned sprite units
+      s.center.set(-(d * 0.75) / s.scale.x, 0.5 - (d * 0.35) / s.scale.y);
+      s.position.copy(this.objPos[p.objects.indexOf(o)].pos);
+      s.renderOrder = 16;
+      this.objs.add(s);
+    }
+    this.request();
+  }
+
+  /** The source whose marker is nearest a screen point, within `radius` pixels. */
+  pickObject(x: number, y: number, radius = 10): { key: string; x: number; y: number } | null {
+    const v = new THREE.Vector3();
+    let best: { key: string; x: number; y: number } | null = null;
+    let bd = radius * radius;
+    for (const o of this.objPos) {
+      v.copy(o.pos).project(this.camera);
+      if (v.z > 1) continue; // behind the camera
+      const sx = ((v.x + 1) / 2) * this.w;
+      const sy = ((1 - v.y) / 2) * this.h;
+      const dd = (sx - x) ** 2 + (sy - y) ** 2;
+      if (dd < bd) (bd = dd), (best = { key: o.key, x: sx, y: sy });
+    }
+    return best;
+  }
+
   dispose() {
     this.controls.dispose();
-    disposeTree(this.scene);
+    disposeTree(this.scene, new Set(this.shapes.values()));
+    for (const t of this.shapes.values()) t.dispose();
     this.layerGeo?.geo.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -504,16 +674,26 @@ export default function Sky3D(p: Sky3DProps) {
     if (p.n) stage.current?.setMarks({ n: p.n, top, track: p.track, target: p.targetPx, targetZ, showTarget: p.showTarget, showTrack: p.showTrack, kind: p.kind });
   }, [p.n, top, trackKey, p.targetPx?.[0], p.targetPx?.[1], targetZ, p.showTarget, p.showTrack, p.kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // click (no drag) on a layer label picks that epoch or detector; double-click resets the camera
+  // after the relief (its heights place the markers in the relief view)
+  useEffect(() => {
+    if (p.n) stage.current?.setObjects({ n: p.n, top, kind: p.kind, objects: p.objects, y: targetZ, highlight: p.highlight ?? null });
+  }, [p.n, top, p.kind, p.objects, targetZ, p.highlight, p.display, p.stretch, p.smooth]);
+
+  // click (no drag) on a layer label picks that epoch or detector, on a source opens it; double-click resets the camera
   const down = useRef<{ x: number; y: number } | null>(null);
   const local = (e: React.PointerEvent | React.MouseEvent): [number, number] => {
     const b = host.current!.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
   };
   const [hover, setHover] = useState(false);
+  const [tip, setTip] = useState<{ key: string; x: number; y: number } | null>(null);
+  const tipObj = tip ? p.objects.find((o) => o.key === tip.key) : null;
 
   const loader = p.progress ? loaderText(p.progress) : null;
   const empty = cube ? (!p.layers.length ? "No layers to stack for this selection" : null) : p.display?.kind === "empty" ? p.display.message : null;
+  const hint = ["Drag to orbit · right-drag to pan · scroll to zoom · double-click to reset", cube && "click a label to show it", p.objects.length > 0 && "click a source to open it"]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div
@@ -521,31 +701,50 @@ export default function Sky3D(p: Sky3DProps) {
       ref={host}
       onPointerDown={(e) => {
         down.current = { x: e.clientX, y: e.clientY };
+        setTip(null);
         p.onInteract();
       }}
       onPointerMove={(e) => {
-        if (!cube || e.buttons) return;
+        if (e.buttons) return;
         const [x, y] = local(e);
-        setHover(!!stage.current?.pick(x, y));
+        const label = cube && !!stage.current?.pick(x, y);
+        const obj = !label && !p.spin ? stage.current?.pickObject(x, y) ?? null : null;
+        setHover(label || !!obj);
+        setTip((t) => (obj?.key === t?.key && obj?.x === t?.x ? t : obj));
+      }}
+      onPointerLeave={() => {
+        setHover(false);
+        setTip(null);
       }}
       onPointerUp={(e) => {
         const d = down.current;
         down.current = null;
-        if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || !cube) return;
+        if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) return;
         const [x, y] = local(e);
-        const key = stage.current?.pick(x, y);
-        if (key) p.onPick(key);
+        const key = cube ? stage.current?.pick(x, y) : null;
+        if (key) return p.onPick(key);
+        const obj = stage.current?.pickObject(x, y, e.pointerType === "mouse" ? 10 : 20);
+        if (obj) p.onPickObject(obj.key);
       }}
       onDoubleClick={() => stage.current?.reset()}
-      onWheel={() => p.onInteract()}
+      onWheel={() => {
+        setTip(null);
+        p.onInteract();
+      }}
     >
       <div className="hud-min" aria-hidden>
         <div className="hud-line">
           <span>{p.dateLabel}</span>
           {p.subLabel && <span className="muted">{p.subLabel}</span>}
-          <span className="muted hud-hint">Drag to orbit · right-drag to pan · scroll to zoom · double-click to reset{cube ? " · click a label to show it" : ""}</span>
+          <span className="muted hud-hint">{hint}</span>
         </div>
       </div>
+      {tip && tipObj && (
+        <div className="tip3d" style={{ left: Math.min(tip.x + 14, (host.current?.clientWidth ?? 0) - 230), top: tip.y + 14 }} aria-hidden>
+          <span className="tip3d-name">{tipObj.name}</span>
+          <span className="tip3d-sub">{tipObj.sub}</span>
+        </div>
+      )}
       {loader && (
         <div className="hud-loader" role="status" aria-live="polite">
           <div className="hud-loader-text">

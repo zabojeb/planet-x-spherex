@@ -54,13 +54,15 @@ src/
                        preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
     Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
                        fastest), hover highlights on the sky, click flies there
-    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer
+    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer;
+                       catalogue markers and SIMBAD names, fast movers' paths, hover tips, click opens a source
     TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
+    CoordField.tsx     field-centre coordinates under the search: click or c to type a position, Enter goes there
     CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
                        challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
     Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, 3D, Details, Share
-    Controls.tsx       mode control, detector panel, Display and Layers panels, the 3D bar
+    Controls.tsx       mode control, detector panel, Display and Layers panels (hover card: what each dataset is), 3D bar
     Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
     Progress.tsx       top progress bar and the landing index over the sky
@@ -113,8 +115,9 @@ accent). Blinking is instant; a new target plays a short lock-on animation.
 
 ## 3D views
 
-The rail's 3D button (or `v`) opens one of three views ([ADR-0022](../docs/adr/0022-3d-views.md)). They are
-independent of the mode and use the same stretch, colour map and percentile limits as the flat sky:
+The viewer opens on the time cube; the rail's 3D button (or `v`) toggles the flat sky and the three views
+([ADR-0022](../docs/adr/0022-3d-views.md)). They are independent of the mode and use the same stretch, colour map
+and percentile limits as the flat sky:
 
 - **Relief**: the frame on screen as a height field. Height is signal-to-noise above the sky on a log scale (flat
   within 2σ, 1 at 200σ). Colours follow the stretch and colour map. Stars are peaks. In Difference a mover is a red
@@ -125,6 +128,11 @@ independent of the mode and use the same stretch, colour map and percentile limi
   such as an asteroid, traces a straight diagonal.
 - **λ cube**: every detector of the current epoch, short to long wavelength. A source lights up only in the layers
   where it is bright.
+
+The catalogue layers (Gaia, CatWISE, 2MASS, SIMBAD) are drawn in 3D too, with the flat sky's shapes and colours: on the
+current layer of a cube, on the surface of the relief, with the names of the most-cited SIMBAD objects. In the time
+cube a fast mover (> 0.1″/yr) also gets its path through the layers. Hover a source for its name and type; click it
+to open its card on the flat sky.
 
 Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset. Click a layer's label to show that epoch
 or detector. The bar at the top right switches the view, sets the height, spins the scene and goes back to 2D.
@@ -150,7 +158,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `mode` | `blink` (default), `diff`, `stack`, `rgb`, `exp` |
 | `band` | `D1`…`D6` or `all` (noise-weighted combination) |
 | `epoch` | epoch index shown |
-| `ref` | reference epoch for `diff` |
+| `ref` | reference epoch for `diff` (playback skips it: minus itself it is blank) |
 | `stack` | comma-separated epoch indices for `stack` |
 | `speed` | milliseconds per frame |
 | `ends=1` | blink only the first and last epoch |
@@ -163,7 +171,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
-| `v3d` | 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
+| `v3d` | `off` for the flat sky, or the 3D view: `relief`, `time` (epochs stacked by date, the default) or `bands` (detectors stacked by wavelength). An embed shows the flat sky unless `v3d` asks for a 3D view |
 | `h3d` | vertical exaggeration of the 3D view (default 1) |
 | `embed=1` | viewer and its controls only, for iframes |
 
@@ -185,15 +193,16 @@ The loading screen names what was drawn.
 ## Keyboard
 
 Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
-v 3D on/off · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+v 3D on/off · c type coordinates · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
 ⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
 
 ## Exploring
 
 - **Where am I.** The readout in the bottom-left corner follows the cursor (or the pin, selection or target): α δ in
   sexagesimal and degrees, Galactic l b, the offset from the target and the pixel value. `g` draws an RA/Dec grid.
-- **Go somewhere.** Type a name or coordinates in the search, or open Go to (rail, top button) for RA/Dec or Galactic
-  input with a live preview, optional proper motion, an all-sky map to click on and recent places. The pad above the
+- **Go somewhere.** Type a name or coordinates in the search, or click the field-centre coordinates under it (or press
+  `c`), type or paste a new position (sexagesimal, degrees, a J-name or Galactic `gal l b`) and press Enter; the field of
+  view is kept. Go to (rail, top button) adds optional proper motion, an all-sky map to click on and recent places. The pad above the
   compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
 - **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
   motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,

@@ -62,9 +62,12 @@ export const DEFAULT_VIEW: ViewState = {
   partial: false,
   ylog: true,
   stack: null,
-  view3d: "off",
+  view3d: "time", // the viewer opens on the time cube; links to the flat sky carry v3d=off
   height3d: 1,
 };
+
+/** An embedded viewer has no 3D controls, so it shows the flat sky unless its link asks for a 3D view. */
+export const EMBED_VIEW3D: View3D = "off";
 
 export type TargetSpec =
   | { kind: "preset"; id: string }
@@ -130,7 +133,7 @@ export function parseUrl(search = window.location.search): UrlState {
   if (q.has("flags")) view.flagBits = (q.get("flags") || "").split(",").map(Number).filter((b) => Number.isInteger(b) && b >= 0 && b < 32);
   if (q.has("stack")) view.stack = (q.get("stack") || "").split(",").map(Number).filter((e) => Number.isInteger(e) && e >= 0);
   const v3d = q.get("v3d");
-  if (v3d && VIEWS_3D.some((x) => x.id === v3d)) view.view3d = v3d as View3D;
+  if (v3d === "off" || VIEWS_3D.some((x) => x.id === v3d)) view.view3d = v3d as View3D;
   const h3d = num(q.get("h3d"));
   if (h3d !== undefined && h3d > 0) view.height3d = Math.min(4, h3d);
   return { target, fov: num(q.get("fov")) ?? null, view, embed: q.get("embed") === "1", hasParams: [...q.keys()].length > 0 };
@@ -171,7 +174,7 @@ export function buildQuery(spec: TargetSpec | null, fov: number, view: ViewState
   if (view.overlays.join(",") !== d.overlays.join(",")) q.set("ov", view.overlays.join(","));
   if (view.flagBits) q.set("flags", view.flagBits.join(","));
   if (view.stack) q.set("stack", view.stack.join(","));
-  if (view.view3d !== d.view3d) q.set("v3d", view.view3d);
+  if (view.view3d !== (embed ? EMBED_VIEW3D : d.view3d)) q.set("v3d", view.view3d);
   if (view.view3d !== "off" && view.height3d !== d.height3d) q.set("h3d", fmt(view.height3d, 2));
   if (embed) q.set("embed", "1");
   return q.toString();
