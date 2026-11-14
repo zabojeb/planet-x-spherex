@@ -687,3 +687,78 @@ canvas.smooth { image-rendering: auto; }
   .bar3d-height input { width: 64px; }
   .hud-hint { display: none; }
 }
+
+/* ---- phones: roomier dock with finger-sized targets (after the base rules so it wins the cascade) */
+@media (max-width: 760px) {
+  .floating-bottom { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .dock { gap: 0; padding: 10px 12px 6px; border-radius: 20px; }
+  .dock-row { column-gap: 12px; row-gap: 14px; }
+  .dock .segmented { display: flex; overflow: visible; border-radius: 10px; }
+  .dock .segmented button { flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 6px; font-size: 13px; }
+  .transport-buttons { gap: 6px; }
+  .dock .btn.icon { width: 40px; height: 44px; }
+  .dock .btn.play { width: 48px; height: 48px; }
+  .scrubber { height: 52px; }
+  .scrub-rail, .scrub-fill { top: 22px; }
+  .scrub-tick { top: 22.5px; }
+  .scrub-tick::before { content: ""; position: absolute; inset: -14px -10px; } /* larger tap area */
+  .scrub-ref { bottom: calc(100% + 6px); }
+  .scrub-label { top: 34px; font-size: 11px; }
+  .exp-strip { padding: 0 2px 10px; }
+  .exp-dots { gap: 6px; }
+  .exp-dots button { width: 14px; height: 14px; }
+  .hud-min { left: 10px; bottom: calc(176px + env(safe-area-inset-bottom)); } /* aligned with the dock */
+}
+
+/* ---- phones: top bar fits the width; short mode names */
+.label-short { display: none; }
+@media (max-width: 760px) {
+  .search-row { min-width: 0; }
+  .search-row .cmdk { min-width: 0; }
+  .search-row .cmdk-input { height: 44px; border-radius: 22px; }
+  .search-row .cmdk-input input { font-size: 16px; } /* < 16px makes iOS zoom the page on focus */
+  .search-row .cmdk-ghost { font-size: 16px; } /* the type-ahead ghost must match the input text */
+  .fov { flex: none; height: 44px; border-radius: 22px; padding: 0 2px 0 12px; }
+  .fov select { height: 40px; font-size: 14px; }
+  .label-full { display: none; }
+  .label-short { display: inline; }
+  .dock .segmented button { font-size: 14px; }
+}
+
+/* ---- mid widths (tablets, small windows): the dock and the HUD no longer fit side by side.
+   The dock takes the width, the HUD sits above it, and the date goes when even the dock is tight. */
+@media (min-width: 761px) and (max-width: 1400px) {
+  .floating-bottom { width: min(760px, calc(100vw - 40px)); }
+  /* left edge of the HUD = left edge of the centred dock */
+  .hud-min { bottom: 90px; left: max(20px, calc(50% - 380px)); }
+}
+@media (min-width: 761px) and (max-width: 900px) {
+  .dock-date { display: none; }
+}
+
+/* ---- one gutter for the floating chrome: top bar, 3D bar and tool rail sit the same distance from the
+   edges and from each other. --row2 is where the second row starts (search pill bottom + gutter). */
+:root { --gutter: 20px; --rail-w: 50px; --row2: 114px; }
+@media (max-width: 760px) { :root { --gutter: 12px; --rail-w: 46px; --row2: 100px; } }
+.topleft { top: var(--gutter); left: var(--gutter); }
+.rail { right: var(--gutter); }
+.bar3d { top: var(--gutter); right: var(--gutter); }
+/* below ~1140px the 3D bar would run into the top bar: it becomes a second row, left-aligned with the search
+   pill and stopping one gutter short of the rail */
+@media (max-width: 1140px) {
+  .bar3d { top: var(--row2); left: var(--gutter); right: auto; max-width: calc(100vw - 3 * var(--gutter) - var(--rail-w)); }
+}
+@media (max-width: 760px) {
+  .topleft { right: var(--gutter); }
+  .rail { top: var(--row2); }
+  .bar3d {
+    right: calc(2 * var(--gutter) + var(--rail-w)); max-width: none;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 10px; padding: 8px 8px 8px 12px;
+  }
+  .bar3d .segmented { display: flex; min-width: 0; }
+  .bar3d .segmented button { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 6px; }
+  .bar3d > .btn:last-child { grid-column: 3; grid-row: 1; height: 32px; }   /* 2D, at the end of the first row */
+  .bar3d-height { grid-column: 1 / 3; grid-row: 2; gap: 10px; }
+  .bar3d-height input { flex: 1; width: auto; min-width: 0; }
+  .bar3d > .btn.icon { grid-column: 3; grid-row: 2; justify-self: end; width: 32px; height: 32px; } /* turntable */
+}

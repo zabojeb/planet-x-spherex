@@ -73,6 +73,8 @@ interface Props {
   /** Move the whole field (a new build) half a field in a direction. */
   onStep?: (dir: StepDir) => void;
   shiftX?: number; // horizontal offset of the view centre (room for the landing index)
+  /** Screen space taken by floating chrome (phones): the image is fitted and centred between these. */
+  frame?: { top: number; bottom: number };
 }
 
 const HIGH_PM = 100; // mas/yr
@@ -124,7 +126,10 @@ export function SkyView(p: Props) {
   const imgRef = useRef<HTMLCanvasElement>(null);
   const flagRef = useRef<HTMLCanvasElement>(null);
   const n = p.grid?.n ?? 0;
-  const fit = n && W ? (0.8 * Math.min(W, H)) / n : 1;
+  const frameTop = p.frame?.top ?? 0;
+  const frameH = H - frameTop - (p.frame?.bottom ?? 0);
+  const cy = frameTop + frameH / 2;
+  const fit = n && W ? (p.frame ? Math.min(0.94 * W, frameH) : 0.8 * Math.min(W, H)) / n : 1;
   const [scale, setScale] = useState(0); // 0 = follow fit
   const [center, setCenter] = useState<[number, number] | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -132,7 +137,7 @@ export function SkyView(p: Props) {
   const s = scale || (p.view.zoom ? p.view.zoom : fit);
   const c = center ?? [n / 2, n / 2];
   const tx = W / 2 + (p.shiftX ?? 0) - c[0] * s;
-  const ty = H / 2 - c[1] * s;
+  const ty = cy - c[1] * s;
   const u = 1 / s;
 
   // new sequence: recentre, keep the URL zoom
@@ -240,7 +245,7 @@ export function SkyView(p: Props) {
     const px = (mx - tx) / s; // layer coords under the cursor
     const py = (my - ty) / s;
     setScale(ns);
-    setCenter([(W / 2 + (p.shiftX ?? 0) - (mx - px * ns)) / ns, (H / 2 - (my - py * ns)) / ns]);
+    setCenter([(W / 2 + (p.shiftX ?? 0) - (mx - px * ns)) / ns, (cy - (my - py * ns)) / ns]);
     window.clearTimeout(zoomTimer.current);
     zoomTimer.current = window.setTimeout(() => p.onZoom(Math.abs(ns - fit) < 0.05 ? 0 : Math.round(ns * 10) / 10), 300);
     p.onInteract();

@@ -3,12 +3,12 @@ import type { BandSel, Cmap, Stretch } from "./render";
 import type { FlagBit, Target } from "./types";
 
 export type Mode = "blink" | "diff" | "stack" | "rgb" | "exp";
-export const MODES: { id: Mode; label: string; key: string; hint: string }[] = [
+export const MODES: { id: Mode; label: string; short?: string; key: string; hint: string }[] = [
   { id: "blink", label: "Blink", key: "b", hint: "Play the epochs like a movie" },
-  { id: "diff", label: "Difference", key: "d", hint: "Epoch minus a reference epoch: movers become +/− pairs" },
+  { id: "diff", label: "Difference", short: "Diff", key: "d", hint: "Epoch minus a reference epoch: movers become +/− pairs" },
   { id: "stack", label: "Stack", key: "s", hint: "Average the selected epochs for a deeper image" },
   { id: "rgb", label: "RGB", key: "r", hint: "False colour: red = 3.8–5 µm, green = 1.6–3.8 µm, blue = 0.75–1.6 µm" },
-  { id: "exp", label: "Exposures", key: "e", hint: "Single exposures of one epoch: asteroids jump between frames" },
+  { id: "exp", label: "Exposures", short: "Expo", key: "e", hint: "Single exposures of one epoch: asteroids jump between frames" },
 ];
 
 /** 3D views, orthogonal to the mode: the relief shows whatever the mode shows; the cubes stack its frames. */
