@@ -5,7 +5,7 @@
  */
 import { scaleLinear, scaleLog } from "d3-scale";
 import { useId, useMemo, useState, type ReactNode } from "react";
-import { useElementWidth } from "../../hooks";
+import { useElementWidth, useMediaQuery } from "../../hooks";
 
 export interface ChartPoint {
   key: string | number;
@@ -91,12 +91,16 @@ export const formatNumber = (v: number) => {
   return v.toPrecision(2);
 };
 
+const MIN_PHONE_WIDTH = 600;
+
 export function ChartFrame(p: Props) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<ChartPoint | null>(null);
   const clipId = `clip${useId().replace(/:/g, "")}`;
   const height = p.height ?? 280;
-  const w = Math.max(width, 280);
+  // phones get a wider plot than the screen, scrolled sideways in .chart-body, so bands and epochs stay readable
+  const narrow = useMediaQuery("(max-width: 760px)");
+  const w = Math.max(width, narrow ? MIN_PHONE_WIDTH : 280);
 
   const s = useMemo(() => {
     const x = scaleLinear().domain(p.xDomain).range([M.l, w - M.r]);

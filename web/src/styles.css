@@ -781,3 +781,14 @@ canvas.smooth { image-rendering: auto; }
     max-height: calc(100dvh - var(--row2) - var(--gutter)); overflow: auto;
   }
 }
+
+/* ---- phones: drawer header in two rows (tabs + close, then the tab's own controls); charts scroll sideways */
+@media (max-width: 760px) {
+  .drawer-head { flex-wrap: wrap; gap: 8px; padding: 10px 10px 8px 12px; }
+  .drawer-head > .segmented:first-child { flex: 1 1 calc(100% - 38px); min-width: 0; display: flex; } /* the row minus the close button */
+  .drawer-head > .segmented:first-child button { flex: 1 1 auto; min-width: 0; padding: 0 4px; }
+  .drawer-head > .btn.icon { order: 1; margin-left: 0; flex: none; }
+  .drawer-head > :not(:first-child):not(.btn) { order: 2; }
+  .drawer-head > .segmented:not(:first-child) + .drawer-title.source-chip, .app.is-mobile .drawer-title.source-chip { margin-left: auto; }
+  .chart-body { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+}
