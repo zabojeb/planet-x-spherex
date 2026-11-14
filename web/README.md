@@ -171,7 +171,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
-| `v3d` | `off` for the flat sky, or the 3D view: `relief`, `time` (epochs stacked by date, the default) or `bands` (detectors stacked by wavelength). An embed shows the flat sky unless `v3d` asks for a 3D view |
+| `v3d` | `off` for the flat sky (the default), or the 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
 | `h3d` | vertical exaggeration of the 3D view (default 1) |
 | `embed=1` | viewer and its controls only, for iframes |
 

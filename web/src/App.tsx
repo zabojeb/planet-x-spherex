@@ -78,7 +78,7 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
 const MOBILE_FRAME = { top: 108, bottom: 290 };
-const MID_FRAME = { top: 108, bottom: 264 };
+const MID_FRAME = { top: 160, bottom: 264 }; // top: below the coordinate box
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
@@ -96,6 +96,33 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
+  // The landing index sits above the HUD (epoch, target, coordinates), whose height depends on the width
+  // and the mode: track the HUD's top and expose the clearance as --hud-clear for the .hero rule.
+  const [hudClear, setHudClear] = useState(0);
+  useEffect(() => {
+    if (!hero) return;
+    let hud: Element | null = null;
+    const measure = () => {
+      const el = document.querySelector(".hud-min");
+      if (el !== hud) {
+        if (hud) ro.unobserve(hud);
+        hud = el;
+        if (hud) ro.observe(hud);
+      }
+      const r = hud?.getBoundingClientRect();
+      setHudClear(r && r.height ? Math.ceil(window.innerHeight - r.top) : 0);
+    };
+    const ro = new ResizeObserver(measure);
+    const mo = new MutationObserver(measure); // the HUD mounts once the first sequence is in
+    mo.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [hero]);
   const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
   const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
@@ -799,7 +826,10 @@ export default function App() {
   }
 
   return (
-    <div className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}>
+    <div
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}
+      style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
+    >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
       <TopLeft

@@ -782,7 +782,7 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 
 /* ---- one gutter for the floating chrome: top bar, 3D bar and tool rail sit the same distance from the
    edges and from each other. --row2 is where the second row starts (search pill bottom + gutter). */
-:root { --gutter: 20px; --rail-w: 50px; --row2: 114px; }
+:root { --gutter: 20px; --rail-w: 50px; --row2: 160px; } /* below the coordinate box under the search pill */
 @media (max-width: 760px) { :root { --gutter: 12px; --rail-w: 46px; --row2: 100px; } }
 .topleft { top: var(--gutter); left: var(--gutter); }
 .rail { right: var(--gutter); }
@@ -834,4 +834,9 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
   .drawer-head > .btn.icon { order: 1; margin-left: 0; flex: none; }
   .drawer-head > :not(:first-child):not(.btn) { order: 2; }
   .drawer-head > .segmented:not(:first-child) + .drawer-title.source-chip, .app.is-mobile .drawer-title.source-chip { margin-left: auto; }
+}
+
+/* the landing index stays clear of the HUD below it (--hud-clear is set from the HUD's measured top) */
+@media (min-width: 761px) {
+  .hero { bottom: max(110px, calc(var(--hud-clear, 0px) + 20px)); }
 }
