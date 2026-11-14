@@ -308,6 +308,11 @@ textarea { background: var(--layer-1); border: 1px solid var(--hair-2); border-r
 .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .chart-sub { margin: 0; font-size: 12px; color: var(--text-3); }
 .chart-body { position: relative; }
+.chart-row { display: flex; }
+.chart-scroll { position: relative; flex: 1; min-width: 0; }
+.chart-axis { flex: none; }
+/* phones: only the plot scrolls sideways; the y axis (.chart-axis) and the notes below stay in place */
+.chart-body.split .chart-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .chart svg { display: block; overflow: visible; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 4px; padding: 0; list-style: none; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
 .legend li { display: inline-flex; align-items: center; gap: 6px; }
@@ -523,6 +528,7 @@ canvas.smooth { image-rendering: auto; }
 
 /* ---- infra-era additions: periodogram, measured source, exports */
 .chart-empty.static { position: static; padding: 48px 0; text-align: center; }
+.chart-empty.inline { position: static; display: block; margin: 0 0 8px; font-size: 12px; line-height: 1.4; }
 .drawer-title.source-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--text-2); border: 1px solid var(--hair-2); padding: 2px 4px 2px 8px; border-radius: var(--r-sm); }
 .app.is-mobile .drawer-title.source-chip { display: inline-flex; margin-left: auto; }
 .btn.icon.xs { width: 20px; height: 20px; min-height: 20px; padding: 0; }
@@ -822,7 +828,7 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 
 /* ---- one gutter for the floating chrome: top bar, 3D bar and tool rail sit the same distance from the
    edges and from each other. --row2 is where the second row starts (search pill bottom + gutter). */
-:root { --gutter: 20px; --rail-w: 50px; --row2: 114px; }
+:root { --gutter: 20px; --rail-w: 50px; --row2: 160px; } /* below the coordinate box under the search pill */
 @media (max-width: 760px) { :root { --gutter: 12px; --rail-w: 46px; --row2: 100px; } }
 .topleft { top: var(--gutter); left: var(--gutter); }
 .rail { right: var(--gutter); }
@@ -918,3 +924,38 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 .measure-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hair); }
 .badge.novelty .num { margin-left: 6px; }
 .field-panel .segmented { flex-wrap: wrap; height: auto; }
+||||||| 76d6a3d
+
+/* phones pan by dragging, so the N/E/S/W pad only takes room from the image */
+@media (max-width: 760px) {
+  .nav-pad { display: none; }
+}
+
+/* phones: rail panels open to the left of the rail, level with its top, one gutter away from it and from the
+   left edge. (They used to be position: fixed, but the rail's backdrop-filter makes it the containing block
+   for fixed children, so the panel was squeezed into the 46 px rail and pushed off-screen.) The button
+   wrappers go static so the panel is placed against the rail itself. */
+@media (max-width: 760px) {
+  .rail .popover-wrap { position: static; }
+  .popover.side {
+    /* offsets count from inside the rail's 1 px border */
+    position: absolute; top: -1px; bottom: auto; left: auto; right: calc(100% + var(--gutter) + 1px);
+    width: calc(100vw - 3 * var(--gutter) - var(--rail-w)) !important; max-width: none;
+    max-height: calc(100dvh - var(--row2) - var(--gutter)); overflow: auto;
+  }
+}
+
+/* ---- phones: drawer header in two rows (tabs + close, then the tab's own controls); charts scroll sideways */
+@media (max-width: 760px) {
+  .drawer-head { flex-wrap: wrap; gap: 8px; padding: 10px 10px 8px 12px; }
+  .drawer-head > .segmented:first-child { flex: 1 1 calc(100% - 38px); min-width: 0; display: flex; } /* the row minus the close button */
+  .drawer-head > .segmented:first-child button { flex: 1 1 auto; min-width: 0; padding: 0 4px; }
+  .drawer-head > .btn.icon { order: 1; margin-left: 0; flex: none; }
+  .drawer-head > :not(:first-child):not(.btn) { order: 2; }
+  .drawer-head > .segmented:not(:first-child) + .drawer-title.source-chip, .app.is-mobile .drawer-title.source-chip { margin-left: auto; }
+}
+
+/* the landing index stays clear of the HUD below it (--hud-clear is set from the HUD's measured top) */
+@media (min-width: 761px) {
+  .hero { bottom: max(110px, calc(var(--hud-clear, 0px) + 20px)); }
+}

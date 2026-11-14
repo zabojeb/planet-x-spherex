@@ -5,7 +5,7 @@
  */
 import { scaleLinear, scaleLog } from "d3-scale";
 import { useId, useMemo, useState, type ReactNode } from "react";
-import { useElementWidth } from "../../hooks";
+import { useElementWidth, useMediaQuery } from "../../hooks";
 
 export interface ChartPoint {
   key: string | number;
@@ -94,12 +94,16 @@ export const formatNumber = (v: number) => {
   return v.toPrecision(2);
 };
 
+const MIN_PHONE_WIDTH = 600;
+
 export function ChartFrame(p: Props) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<ChartPoint | null>(null);
   const clipId = `clip${useId().replace(/:/g, "")}`;
   const height = p.height ?? 280;
-  const w = Math.max(width, 280);
+  // phones get a wider plot than the screen, scrolled sideways in .chart-body, so bands and epochs stay readable
+  const narrow = useMediaQuery("(max-width: 760px)");
+  const w = Math.max(width, narrow ? MIN_PHONE_WIDTH : 280);
 
   const s = useMemo(() => {
     const x = scaleLinear().domain(p.xDomain).range([M.l, w - M.r]);
@@ -122,9 +126,13 @@ export function ChartFrame(p: Props) {
   }, [p.points]);
 
   function onMove(e: React.MouseEvent<SVGRectElement>) {
-    const box = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-    const mx = e.clientX - box.left;
-    const my = e.clientY - box.top;
+    // client -> SVG user coordinates (the phone layout shifts the viewBox by the axis width)
+    const svg = e.currentTarget.ownerSVGElement as SVGSVGElement;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return;
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
+    const mx = pt.x;
+    const my = pt.y;
     let best: ChartPoint | null = null;
     let bd = 14 * 14;
     for (const q of p.points) {
@@ -139,8 +147,22 @@ export function ChartFrame(p: Props) {
     setHover(best);
   }
 
-  const tipLeft = hover ? Math.min(s.x(hover.x) + 12, w - 210) : 0;
+  // phones: the y axis stays put in its own SVG and only the plot scrolls; the plot SVG shows x >= M.l
+  const split = narrow;
+  const shift = split ? M.l : 0;
+  const tipLeft = hover ? Math.min(s.x(hover.x) + 12, w - 210) - shift : 0;
   const tipTop = hover ? Math.max(s.y(hover.y) - 12, 4) : 0;
+
+  const yTickLabel = (v: number) => (
+    <text key={`yl${v}`} className="tick" x={M.l - 6} y={s.y(v)} dy="0.32em" textAnchor="end">
+      {yFmt(v)}
+    </text>
+  );
+  const yAxisLabel = (
+    <text className="axis-label" transform={`translate(13 ${(M.t + height - M.b) / 2}) rotate(-90)`} textAnchor="middle">
+      {p.yLabel}
+    </text>
+  );
 
   return (
     <div className="chart" ref={ref}>
@@ -163,15 +185,29 @@ export function ChartFrame(p: Props) {
           ))}
         </ul>
       )}
-      <div className="chart-body">
-        <svg width={w} height={height} role="img" aria-label={p.title ?? p.subtitle ?? "chart"}>
+      <div className={`chart-body${split ? " split" : ""}`}>
+        {/* phones: the empty-state message is a line above the plot instead of an overlay over axis labels */}
+        {split && p.empty && <p className="chart-empty inline">{p.empty}</p>}
+        <div className="chart-row">
+        {split && (
+          <svg className="chart-axis" width={M.l} height={height} aria-hidden>
+            {yTickValues.map(yTickLabel)}
+            {yAxisLabel}
+          </svg>
+        )}
+        <div className="chart-scroll">
+        <svg
+          width={w - shift}
+          height={height}
+          viewBox={`${shift} 0 ${w - shift} ${height}`}
+          role="img"
+          aria-label={p.title ?? p.subtitle ?? "chart"}
+        >
           {p.background?.(scales)}
           {yTickValues.map((v) => (
             <g key={`y${v}`}>
               <line className="grid" x1={M.l} x2={w - M.r} y1={s.y(v)} y2={s.y(v)} />
-              <text className="tick" x={M.l - 6} y={s.y(v)} dy="0.32em" textAnchor="end">
-                {yFmt(v)}
-              </text>
+              {!split && yTickLabel(v)}
             </g>
           ))}
           {xTicks.map((t) => (
@@ -183,9 +219,7 @@ export function ChartFrame(p: Props) {
           <text className="axis-label" x={(M.l + w - M.r) / 2} y={height - 4} textAnchor="middle">
             {p.xLabel}
           </text>
-          <text className="axis-label" transform={`translate(13 ${(M.t + height - M.b) / 2}) rotate(-90)`} textAnchor="middle">
-            {p.yLabel}
-          </text>
+          {!split && yAxisLabel}
           <clipPath id={clipId}>
             <rect x={M.l - 6} y={M.t - 6} width={Math.max(0, w - M.l - M.r + 12)} height={Math.max(0, height - M.t - M.b + 12)} />
           </clipPath>
@@ -244,8 +278,6 @@ export function ChartFrame(p: Props) {
             onMouseLeave={() => setHover(null)}
           />
         </svg>
-        {p.note && <p className="chart-note">{p.note}</p>}
-        {p.empty && <p className="chart-empty">{p.empty}</p>}
         {hover && (
           <div className="tooltip" style={{ left: tipLeft, top: tipTop }}>
             {hover.tooltip.map((line, i) => (
@@ -255,6 +287,10 @@ export function ChartFrame(p: Props) {
             ))}
           </div>
         )}
+        </div>
+        </div>
+        {p.note && <p className="chart-note">{p.note}</p>}
+        {!split && p.empty && <p className="chart-empty">{p.empty}</p>}
       </div>
     </div>
   );

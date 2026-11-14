@@ -67,7 +67,7 @@ export const DEFAULT_VIEW: ViewState = {
   partial: false,
   ylog: true,
   stack: null,
-  view3d: "time", // the viewer opens on the time cube; links to the flat sky carry v3d=off
+  view3d: "off", // the viewer opens on the flat sky; links to a 3D view carry v3d=relief|time|bands
   height3d: 1,
   longBase: false,
   archBands: DEFAULT_ARCH_BANDS,
