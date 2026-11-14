@@ -1,6 +1,6 @@
 /** Slim vertical tool rail on the right edge; each button opens a compact panel beside it. "Go to" is there
  *  even before a field has loaded; the rest need a sequence. */
-import { Box, Info, Layers, ListTree, Navigation, Share2, SlidersHorizontal, Telescope } from "lucide-react";
+import { Box, Info, Layers, ListTree, Navigation, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
 import type { ReactNode } from "react";
 import { Popover } from "./ui/primitives";
 
@@ -12,6 +12,8 @@ export function Rail(p: {
   detector?: ReactNode;
   display?: ReactNode;
   layers?: ReactNode;
+  /** Field analysis, known objects, Track & Stack. */
+  field?: ReactNode;
   share?: ReactNode;
   detailsOpen: boolean;
   onDetails?: () => void;
@@ -42,6 +44,11 @@ export function Rail(p: {
       {p.layers && (
         <Popover label={<Layers size={16} />} title="Layers" align="side" width={300}>
           {p.layers}
+        </Popover>
+      )}
+      {p.field && (
+        <Popover label={<ScanSearch size={16} />} title="Field analysis" align="side" width={340}>
+          {p.field}
         </Popover>
       )}
       {p.on3d && (

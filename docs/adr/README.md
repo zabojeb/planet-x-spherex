@@ -66,3 +66,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0052](0052-verification-and-ades.md) | Verify candidates with free-position ePSF fits and export ADES for station 288 as follow-up data | Accepted | 2026-11-14 |
 | [0053](0053-point-analysis-job.md) | Analyze one clicked position as one job with independent steps and a plain-language verdict | Accepted | 2026-11-14 |
 | [0054](0054-known-objects-bracketed-positions.md) | Identify tracklets against positions queried at their first and last detection, not instantaneous rates | Accepted (extends 0049) | 2026-11-14 |
+| [0055](0055-mcp-server-for-discovery-agents.md) | MCP server (stdio + streamable HTTP at /mcp) so an AI agent can run a discovery search over the services facade | Accepted | 2026-11-14 |
