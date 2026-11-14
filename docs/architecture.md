@@ -62,7 +62,10 @@ sequenceDiagram
   A-->>B: {id, status, stage, done, total}
   loop until 200
     B->>A: GET /api/sequences/{id}
-    A-->>B: 202 + progress (or 500 + error)
+    A-->>B: 202 + progress (or 500 + error, 410 if cancelled)
+  end
+  opt target or field of view changed, page closed
+    B->>A: DELETE /api/sequences/{id} (build cancelled when nobody waits)
   end
   A-->>B: 200 meta.json
   B->>A: GET /api/sequences/{id}/coadds.bin, coverage.bin, flags.bin
