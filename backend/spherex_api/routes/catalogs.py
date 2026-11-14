@@ -24,5 +24,7 @@ async def catalog_cone(name: str, ra: float = Query(..., ge=0, lt=360), dec: flo
         raise HTTPException(404, "unknown catalog")
     try:
         return await asyncio.to_thread(services.catalog_cone, name, ra, dec, radius_arcmin)
+    except services.UpstreamError as e:  # message already names the catalog
+        raise HTTPException(502, str(e)) from e
     except RuntimeError as e:
         raise HTTPException(502, f"{labels[name]} is unavailable: {e}") from e

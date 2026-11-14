@@ -25,8 +25,10 @@ def test_health_and_targets(client):
     c, _, _ = client
     h = c.get("/api/health").json()
     assert h["ok"] is True and "spherex_dr1" in h["collections"]
-    ids = [t["id"] for t in c.get("/api/targets").json()]
-    assert ids == ["barnard", "eps-indi-b", "wise-0855", "rw-aur", "r-dra"]
+    targets = c.get("/api/targets").json()
+    assert [t["id"] for t in targets] == ["barnard", "eps-indi-b", "wise-0855", "rw-aur", "r-dra"]
+    hints = {t["id"]: (t["default_band"], t["default_mode"]) for t in targets}
+    assert hints["wise-0855"] == ("D6", "rgb") and hints["barnard"] == ("all", "diff")
 
 
 def test_resolve_coordinates(client):

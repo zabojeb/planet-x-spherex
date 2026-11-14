@@ -140,3 +140,54 @@ ePSF fits, including flagged ones, give these per-detector medians of flux over 
 | 6–9 | 1925 | 236 d | 0.34 |
 
 The pipeline does not compute this measurement yet. Adding it as a relative "wing" flux for saturated stars is the next step for R Dra's light curve.
+
+## ALGO_VERSION 3: ring photometry in the pipeline
+
+Detectors in which the target saturates in at least half of the exposures now use one fixed ring per detector, 1 px outside the 95th percentile of the saturated-core radii and 3 px wide ([ADR-0020](../../docs/adr/0020-ring-photometry-for-saturated-stars.md)). The core is the blob of `OVERFLOW`, `NONLINEAR`, `TRANSIENT`, `SUR_ERROR` and `BLOOM` pixels around the source. `PERSIST` is left out: around Barnard's Star in D3 it reaches 16.5 px without being centred on the star. Ring fluxes are relative (`relative: true`).
+
+The numbers below come from the pipeline's own `meta.json` photometry. Each unflagged value is divided by the median of its method and wavelength bin (log step 0.025), as the web client does (`pipeline_lightcurves.py`).
+
+| Target | Sequence id (FOV) | Photometry |
+|---|---|---|
+| Barnard's Star | `4261e28d6e0c3cb6df94` (6′) | rings in all six detectors (4–10 px) |
+| ε Indi B | `d651cb1431ed20027191` (16′) | ePSF in all six detectors |
+| WISE 0855−0714 | `e3fc10babf437ede1d93` (6′) | ePSF in all six detectors |
+| RW Aur | `cb983e7485da07d622a4` (6′) | rings in all six detectors (3–8 px) |
+| R Dra | `c16e0057355ff8f04f32` (6′) | rings in all six detectors (9–15 px) |
+| Comparison star, G = 13.9 | `51edd709fdbf3d9eedab` (4′) | ePSF in all six detectors, robust scatter 3.6 % |
+
+### R Dra
+
+Lomb–Scargle on 2,452 ring measurements gives a best period of **236 d** (power 0.29; expected ≈ 245 d, wing script 236–252 d). The D1 medians follow a full pulsation cycle: 1.45 → 1.05 → 0.51 → 0.67 between 2025-04 and 2025-10, then 0.95 → 1.34 in 2026-07/08.
+
+### RW Aur
+
+| Detector | 2025-09-01 | 2026-02-20 | 2026-09-02 |
+|---|---|---|---|
+| D1 | 0.84 | 1.00 | 1.24 |
+| D2 | 0.94 | 1.03 | 1.03 |
+| D3 | 0.96 | 1.00 | 1.00 |
+| D4 | 1.05 | 1.00 | 0.89 |
+| D5 | 1.22 | 1.00 | **0.65** |
+| D6 | 1.38 | 1.00 | **0.74** |
+
+The 4–5 µm fade and the 0.75–1.1 µm brightening of version 2 and of the wing script are reproduced.
+
+### Barnard's Star (control, constant)
+
+| Detector | 2025-08-15 | 2026-03-11 | 2026-08-16 |
+|---|---|---|---|
+| D1 | 0.99 | 1.00 | 1.01 |
+| D2 | 0.95 | 0.90 | 1.14 |
+| D3 | 0.98 | 0.95 | 1.11 |
+| D4 | 0.99 | 1.01 | 1.00 |
+| D5 | 1.00 | 1.01 | 0.98 |
+| D6 | 1.03 | 0.99 | 1.01 |
+| all | 1.00 | 1.00 | 1.00 |
+
+- **Flat** to within 1–4 % in D1, D4, D5 and D6 and over all detectors; robust per-exposure scatter is 6.4 %.
+- **D2 and D3 drift by 10–14 %.** Sigma-clipping field stars in each annulus did not change this, so it most likely comes from the wing profile changing with the position on the detector. Ring amplitudes below ~15 % are not trustworthy.
+- **What did not work.**
+  - Including `PERSIST` in the core inflated the D3 ring to 14–16 px and gave 0.38 → 1.00 → 1.69.
+  - Sigma-clipping moved RW Aur's D2 curve to 0.80 / 1.17 / 1.01.
+  - Both were dropped.

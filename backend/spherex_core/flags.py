@@ -40,6 +40,12 @@ ARTIFACTS = flag_mask("GHOST", "BLOOM", "CROSSTALK")
 PHOT_BAD = MASK_DEFAULT | SATURATION | ARTIFACTS
 # A measurement is flagged when more than this fraction of its aperture / PSF weight sits on masked pixels.
 MAX_MASKED_FRACTION = 0.2
+# Pixels left out of ring photometry around saturated stars: masked, saturated/nonlinear and bloom trails.
+RING_BAD = MASK_DEFAULT | SATURATION | flag_mask("BLOOM")
+# Pixels the bright star itself corrupts; the blob of them around the source sets its saturated-core radius.
+# PERSIST is left out on purpose: persistence from earlier exposures forms large blobs that are not
+# centred on the star (up to ~200 px around Barnard's Star in D3) and would push the ring far out.
+RING_CORE = SATURATION | flag_mask("TRANSIENT", "SUR_ERROR", "BLOOM")
 
 
 def read_flag_defs(header) -> FlagDefs:

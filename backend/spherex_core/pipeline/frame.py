@@ -6,9 +6,9 @@ import numpy as np
 
 from ..archive import Frame
 from ..bands import NATIVE_PIXSCALE
-from ..flags import ARTIFACTS, MASK_DEFAULT, PHOT_BAD, SATURATION, count_bits
+from ..flags import ARTIFACTS, MASK_DEFAULT, PHOT_BAD, RING_BAD, RING_CORE, SATURATION, count_bits
 from ..io import Cutout, WaveMap
-from ..photometry import measure
+from ..photometry import measure, radial_profile
 from ..processing import Grid, background, pixel_map, resample, resample_flags
 from ..targets import Target
 
@@ -39,10 +39,14 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
     fwhm = float(h.get("PSF_FWHM", 1.5 * NATIVE_PIXSCALE))
     phot = measure(cut.image, cut.variance, cut.flags, xt - cut.x0, yt - cut.y0, fwhm, omega, psf_os,
                    oversampling, MASK_DEFAULT, SATURATION, ARTIFACTS, PHOT_BAD)
+    # Radial profile for ring photometry; used only if this detector turns out to saturate (assemble.py).
+    ring = radial_profile(cut.image, cut.variance, cut.flags, xt - cut.x0, yt - cut.y0, RING_BAD, RING_CORE,
+                          bkg if np.isfinite(bkg) else 0.0)
     return {
         "band": frame.band, "mjd": mjd, "wl": float(wl), "dwl": float(dwl), "bkg": bkg, "rms": rms,
         "weight": 1.0 / rms ** 2 if np.isfinite(rms) and rms > 0 else 0.0, "psf_fwhm": fwhm,
         "aligned": aligned, "aligned_raw": aligned_raw, "flags": aligned_flags, "phot": phot,
+        "ring": ring, "omega": omega,
         "flag_counts": count_bits(aligned_flags),
         "obs_id": frame.obs_id, "collection": frame.collection, "file": frame.file_name,
     }

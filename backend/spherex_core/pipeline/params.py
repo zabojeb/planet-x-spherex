@@ -11,7 +11,8 @@ from ..targets import Target
 
 # Bump when the output of the pipeline changes for the same parameters; it is part of the cache key.
 # 2: ePSF photometry, NaN-aware resampling with filled co-add holes, small-epoch merging, HALO informational.
-ALGO_VERSION = 2
+# 3: ring photometry (relative fluxes) for detectors in which the target saturates.
+ALGO_VERSION = 3
 
 
 @dataclass

@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 from astropy.stats import SigmaClip
 from photutils.aperture import ApertureStats, CircularAnnulus, CircularAperture, aperture_photometry
+from scipy.ndimage import label as label_regions
 from scipy.ndimage import map_coordinates
 
 from .flags import MAX_MASKED_FRACTION
@@ -201,6 +202,84 @@ def measure(image: np.ndarray, variance: np.ndarray, flags: np.ndarray, x: float
                    npix=None, chi2=None, psf_weight=None, masked_frac=ap["masked_frac"],
                    flagged=bool(ap["flagged"] or saturated))
     return rec
+
+
+# ---------------------------------------------------------------- rings around saturated cores
+# A star whose saturated core is wider than the ePSF support (about +-3.3 px) cannot be PSF-fitted. Its wings
+# outside the core still scale with its total flux, so the summed flux in a fixed ring gives a relative
+# light curve. Each exposure keeps a radial profile; the ring is chosen once per detector (assemble.py).
+RING_PROFILE_RADIUS = 16  # native px covered by the per-exposure radial profile
+RING_BKG_ANNULUS = (16.0, 21.0)  # local background; the frame background is used if it does not fit
+RING_WIDTH = 3  # px
+RING_MIN_VALID = 0.6  # usable share of the ring's pixels (masked ones are filled with the annulus mean)
+RING_MIN_COVERAGE = 0.9  # the ring must lie almost entirely inside the cutout
+RING_CORE_PERCENTILE = 95  # a detector's ring starts outside this percentile of its saturated-core radii
+RING_SATURATED_SHARE = 0.5  # a detector switches to rings when at least this share of exposures saturate
+
+
+def radial_profile(image: np.ndarray, variance: np.ndarray, flags: np.ndarray, x: float, y: float,
+                   bad_bits: int, core_bits: int, frame_bkg: float,
+                   radius: int = RING_PROFILE_RADIUS) -> dict | None:
+    """Saturated-core radius and background-subtracted sums in 1-px annuli around (x, y), native pixels.
+
+    core_r is the farthest extent (+0.5 px) of the blob of core_bits pixels touching the source (0 if the
+    source pixel is clean). sums/var/nvalid cover the usable pixels (no bad_bits) of annulus k
+    (k <= r < k+1), ntotal all pixels of the annulus that lie on the cutout. Values are MJy/sr per pixel,
+    before the unit conversion.
+    """
+    ny, nx = image.shape
+    if not (0.0 <= x <= nx - 1.0 and 0.0 <= y <= ny - 1.0):
+        return None
+    outer = RING_BKG_ANNULUS[1]
+    x0, x1 = max(int(np.floor(x - outer)), 0), min(int(np.ceil(x + outer)) + 1, nx)
+    y0, y1 = max(int(np.floor(y - outer)), 0), min(int(np.ceil(y + outer)) + 1, ny)
+    gy, gx = np.mgrid[y0:y1, x0:x1]
+    r = np.hypot(gx - x, gy - y)
+    data = image[y0:y1, x0:x1].astype(np.float64)
+    var = variance[y0:y1, x0:x1].astype(np.float64)
+    fl = flags[y0:y1, x0:x1].astype(np.int64)
+    invalid = ~np.isfinite(data) | ~np.isfinite(var)
+    bad = ((fl & bad_bits) != 0) | invalid
+    core = ((fl & core_bits) != 0) | invalid
+
+    labels, _ = label_regions(core & (r < radius), structure=np.ones((3, 3), dtype=bool))
+    touching = np.unique(labels[(r <= 1.5) & (labels > 0)])
+    core_r = float(r[np.isin(labels, touching)].max() + 0.5) if touching.size else 0.0
+
+    in_bkg = (r >= RING_BKG_ANNULUS[0]) & (r < RING_BKG_ANNULUS[1]) & ~bad
+    bkg = float(np.median(data[in_bkg])) if in_bkg.sum() >= 20 else float(frame_bkg)
+
+    k = np.floor(r).astype(int)
+    inside = r < radius
+    good = inside & ~bad
+    sub = data - bkg
+    return {
+        "core_r": core_r,
+        "bkg": bkg,
+        "ntotal": np.bincount(k[inside], minlength=radius)[:radius].astype(np.int32),
+        "nvalid": np.bincount(k[good], minlength=radius)[:radius].astype(np.int32),
+        "sums": np.bincount(k[good], weights=sub[good], minlength=radius)[:radius],
+        "var": np.bincount(k[good], weights=var[good], minlength=radius)[:radius],
+    }
+
+
+def ring_flux(profile: dict, r_in: int, r_out: int, omega_arcsec2: float) -> dict | None:
+    """Flux in the ring r_in <= r < r_out of a radial profile, in mJy but NOT calibrated: it is the ring's
+    share of the star's light, comparable only between exposures of the same detector and wavelength.
+    Masked pixels are filled with their annulus mean. None if the ring is cut by the cutout edge or too
+    many of its pixels are unusable."""
+    ks = np.arange(r_in, r_out)
+    ntot = profile["ntotal"][ks].astype(float)
+    nval = profile["nvalid"][ks].astype(float)
+    if (ntot.sum() < RING_MIN_COVERAGE * np.pi * (2 * ks + 1).sum() or np.any(nval == 0)
+            or nval.sum() < RING_MIN_VALID * ntot.sum()):
+        return None
+    fill = ntot / nval
+    s = float((profile["sums"][ks] * fill).sum())
+    v = float((profile["var"][ks] * fill ** 2).sum())
+    unit = mjy_per_unit(omega_arcsec2)
+    return {"flux_mjy": s * unit, "err_mjy": with_floor(s * unit, np.sqrt(max(v, 0.0)) * unit),
+            "npix": int(nval.sum()), "masked_frac": float(1.0 - nval.sum() / ntot.sum())}
 
 
 def ab_mag(flux_mjy: float | None) -> float | None:

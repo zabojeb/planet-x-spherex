@@ -5,7 +5,7 @@ messages and the job registry live in one place. Blocking functions (network loo
 run in a worker thread by async callers; submit_sequence must run on the event loop.
 
 Errors: NotFound (unknown or not-ready resource, message safe for users), LookupError from
-resolve_target, RuntimeError when a remote catalog service fails.
+resolve_target, UpstreamError (a RuntimeError, message safe for users) when a remote catalog service fails.
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ import numpy as np
 
 from . import __version__, cache, catalogs
 from .config import settings
-from .errors import NotFound
+from .errors import NotFound, UpstreamError
 from .pipeline import results
 from .pipeline.jobs import JobManager
 from .pipeline.params import SequenceParams
 from .targets import PRESETS, resolve
 
-__all__ = ["NotFound", "SequenceParams", "array_file", "catalog_cone", "configure", "health", "jobs",
-           "list_catalogs", "list_presets", "load_sequence", "read_array", "read_exposures", "resolve_target",
-           "sequence_meta_bytes", "sequence_status", "submit_sequence"]
+__all__ = ["NotFound", "SequenceParams", "UpstreamError", "array_file", "catalog_cone", "configure", "health",
+           "jobs", "list_catalogs", "list_presets", "load_sequence", "read_array", "read_exposures",
+           "resolve_target", "sequence_meta_bytes", "sequence_status", "submit_sequence"]
 
 _jobs: JobManager | None = None
 
@@ -120,7 +120,7 @@ def list_catalogs() -> dict:
 
 
 def catalog_cone(name: str, ra: float, dec: float, radius_arcmin: float) -> list[dict]:
-    """Catalog sources around (ra, dec). Raises NotFound for an unknown catalog, RuntimeError if the
+    """Catalog sources around (ra, dec). Raises NotFound for an unknown catalog, UpstreamError if the
     remote service fails."""
     if name not in catalogs.CATALOGS:
         raise NotFound("unknown catalog")

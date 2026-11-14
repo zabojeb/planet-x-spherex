@@ -30,7 +30,8 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0013](0013-process-pool-and-slim-headers.md) | Process pool and slim FITS headers for per-frame work | Accepted | 2026-11-14 |
 | [0014](0014-dev-compute-on-vast-ai.md) | Development compute on a vast.ai instance next to S3 | Accepted | 2026-11-14 |
 | [0015](0015-frontend-stack.md) | Frontend stack and URL-addressable views | Accepted | 2026-11-14 |
-| [0016](0016-epsf-psf-photometry.md) | Fit the detector's effective PSF for photometry, skipping saturated pixels | Accepted | 2026-11-14 |
+| [0016](0016-epsf-psf-photometry.md) | Fit the detector's effective PSF for photometry, skipping saturated pixels | Accepted, extended by ADR-0020 | 2026-11-14 |
 | [0017](0017-nan-aware-resampling-and-filled-coadds.md) | NaN-aware resampling and filled co-add holes | Accepted | 2026-11-14 |
 | [0018](0018-photometry-flag-policy.md) | Flag policy v2: HALO informational, 20 % masked threshold, saturation excluded rather than bad | Accepted | 2026-11-14 |
 | [0019](0019-merge-small-epochs.md) | Merge small epochs into close neighbours, otherwise mark them partial | Accepted | 2026-11-14 |
+| [0020](0020-ring-photometry-for-saturated-stars.md) | Measure saturated stars in a fixed ring outside the core, as relative fluxes | Accepted | 2026-11-14 |

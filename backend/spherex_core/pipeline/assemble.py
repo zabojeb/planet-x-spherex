@@ -13,7 +13,8 @@ from ..archive import Frame
 from ..bands import BAND_INFO, BANDS
 from ..config import settings
 from ..flags import FILLED, MAX_MASKED_FRACTION, flag_bits_table
-from ..photometry import PSF_FIT_RADIUS, SYSTEMATIC_FLOOR, ab_mag
+from ..photometry import (PSF_FIT_RADIUS, RING_CORE_PERCENTILE, RING_PROFILE_RADIUS, RING_SATURATED_SHARE,
+                          RING_WIDTH, SYSTEMATIC_FLOOR, ab_mag, ring_flux)
 from ..processing import MERGE_GAP_DAYS, MIN_EPOCH_FRAMES, Grid, coadd, fill_holes, group_epochs
 from ..targets import Target
 from ..timeutil import mjd_to_iso, utc_now_iso
@@ -21,6 +22,56 @@ from .params import ALGO_VERSION, SequenceParams
 from .results import ARRAY_FILES, DTYPES, EXPOSURES_FILE
 
 MAX_EXPOSURE_VOXELS = 80_000_000  # single exposures are stored as float16 -> 160 MB at most
+
+# Fields a photometry record needs when a ring measurement replaces a missing PSF/aperture one.
+_EMPTY_PHOT = {"flux_ap_mjy": None, "err_ap_mjy": None, "ap_flags": 0, "masked_frac": None, "npix": None,
+               "chi2": None, "psf_weight": None, "saturated": True}
+
+
+def _saturated(r: dict) -> bool:
+    """Saturated in this exposure: the photometry says so, or it failed and a bad-pixel blob covers the source."""
+    if r["phot"] is not None:
+        return bool(r["phot"].get("saturated"))
+    return r.get("ring") is not None and r["ring"]["core_r"] > 1.5
+
+
+def apply_rings(ok: list[dict]) -> dict[str, dict]:
+    """Switch every detector in which the target saturates to ring photometry, in place.
+
+    A detector switches when at least RING_SATURATED_SHARE of its exposures are saturated (or could not be
+    measured). All its exposures then use one ring, starting 1 px outside the RING_CORE_PERCENTILE of the
+    saturated-core radii, so the fluxes stay comparable while the star's brightness and core size change.
+    Exposures whose ring cannot be measured lose their photometry rather than mixing methods within a
+    detector. Returns per-detector details for meta.processing.
+    """
+    info: dict[str, dict] = {}
+    for b in BANDS:
+        sel = [r for r in ok if r["band"] == b]
+        profiles = [r["ring"] for r in sel if r.get("ring") is not None]
+        if not sel or not profiles:
+            continue
+        share = float(np.mean([_saturated(r) for r in sel]))
+        if share < RING_SATURATED_SHARE:
+            continue
+        core = float(np.percentile([p["core_r"] for p in profiles], RING_CORE_PERCENTILE))
+        r_in = int(np.ceil(core)) + 1
+        r_out = min(r_in + RING_WIDTH, RING_PROFILE_RADIUS)
+        detail = {"saturated_share": share, "core_radius_px": core, "r_in": r_in, "r_out": r_out, "exposures": 0}
+        if r_out - r_in < 2:
+            info[b] = {**detail, "r_in": None, "r_out": None, "note": "saturated core too large for a ring"}
+            continue
+        for r in sel:
+            m = ring_flux(r["ring"], r_in, r_out, r["omega"]) if r.get("ring") is not None else None
+            if m is None:
+                r["phot"] = None
+                continue
+            old = r["phot"] or {}
+            r["phot"] = {**_EMPTY_PHOT, **old, **m, "method": "ring", "relative": True, "ring_r_in": r_in,
+                         "ring_r_out": r_out, "saturated": bool(old.get("saturated", True)), "chi2": None,
+                         "psf_weight": None, "flagged": False}
+            detail["exposures"] += 1
+        info[b] = detail
+    return info
 
 
 def assemble(p: SequenceParams, target: Target, grid: Grid, frames: list[Frame], results: list[dict | None],
@@ -35,6 +86,7 @@ def assemble(p: SequenceParams, target: Target, grid: Grid, frames: list[Frame],
     for r, e in zip(ok, ep):
         r["epoch"] = int(e)
     ok.sort(key=lambda r: (r["epoch"], BANDS.index(r["band"]), r["mjd"]))
+    rings = apply_rings(ok)
 
     coadds = np.full((n_ep, len(BANDS), n, n), np.nan, np.float32)
     coverage = np.zeros((n_ep, len(BANDS), n, n), np.uint16)
@@ -78,14 +130,16 @@ def assemble(p: SequenceParams, target: Target, grid: Grid, frames: list[Frame],
                           "target_px": [float(tx_all[i]), float(ty_all[i])]})
         ph = r["phot"]
         if ph is not None:
+            relative = bool(ph.get("relative", False))
             photometry.append({"index": i, "epoch": r["epoch"], "band": r["band"], "mjd": r["mjd"],
                                "wl": r["wl"], "dwl": r["dwl"], "flux_mjy": ph["flux_mjy"],
-                               "err_mjy": ph["err_mjy"], "ab_mag": ab_mag(ph["flux_mjy"]),
+                               "err_mjy": ph["err_mjy"], "ab_mag": None if relative else ab_mag(ph["flux_mjy"]),
                                "flagged": ph["flagged"], "ap_flags": ph["ap_flags"],
                                "masked_frac": ph["masked_frac"], "method": ph["method"],
                                "saturated": ph["saturated"], "npix": ph["npix"], "chi2": ph["chi2"],
                                "psf_weight": ph["psf_weight"], "flux_ap_mjy": ph["flux_ap_mjy"],
-                               "err_ap_mjy": ph["err_ap_mjy"]})
+                               "err_ap_mjy": ph["err_ap_mjy"], "relative": relative,
+                               "ring_r_in": ph.get("ring_r_in"), "ring_r_out": ph.get("ring_r_out")})
 
     track = []
     for e in epochs:
@@ -115,8 +169,10 @@ def assemble(p: SequenceParams, target: Target, grid: Grid, frames: list[Frame],
         "photometry": photometry,
         "flag_bits": flag_bits_table(flag_defs),
         "processing": {"min_epoch_frames": MIN_EPOCH_FRAMES, "merge_gap_days": MERGE_GAP_DAYS,
-                       "photometry": "ePSF fit (fallback: aperture)", "psf_fit_radius_px": PSF_FIT_RADIUS,
-                       "systematic_floor": SYSTEMATIC_FLOOR, "max_masked_fraction": MAX_MASKED_FRACTION},
+                       "photometry": "ePSF fit (fallback: aperture); detectors where the target saturates use "
+                                     "a ring outside the saturated core (relative fluxes)",
+                       "psf_fit_radius_px": PSF_FIT_RADIUS, "systematic_floor": SYSTEMATIC_FLOOR,
+                       "max_masked_fraction": MAX_MASKED_FRACTION, "rings": rings},
         "stats": {"frames_found": len(frames), "frames_used": len(ok), "errors": errors[:20]},
         "sources": {"archive": "NASA/IPAC IRSA", "collections": list(p.collections or settings.collections),
                     "data": settings.s3_base},

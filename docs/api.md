@@ -30,6 +30,8 @@ General behaviour:
 | `ref_epoch` | float | Julian year of the position |
 | `parallax` | float or null | mas |
 | `fov_arcmin` | float or null | suggested field (16′ for ε Indi B so the star ε Indi A is in view, 6′ otherwise) |
+| `default_band` | string or null | detector a preset opens with: `all` or `D1`–`D6` (WISE 0855: `D6`, RW Aur: `D6`, R Dra: `D1`, others `all`) |
+| `default_mode` | string or null | view a preset opens with: `blink`, `diff`, `stack`, `rgb` or `exp` (Barnard's Star: `diff`, WISE 0855: `rgb`, others `blink`) |
 
 `GET /api/resolve?q=<text>` resolves a preset id or name, coordinates (`269.452 4.693`, `17:57:48.5 +04:41:36`, `17h57m48.5s 4d41m36s`) or an object name through CDS Sesame. Returns a target as above (`pmra`/`pmdec` = 0 when unknown). `404` if the name is unknown or the resolver is unreachable.
 
@@ -90,7 +92,8 @@ curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/jso
 | `epochs` | `[{index, n, mjd_mean, mjd_min, mjd_max, date_min, date_max, bands: {D1: {n, wl_min, wl_max, mjd_mean, noise}, …}}]` |
 | `arrays` | file, dtype and shape of `coadds`, `coverage`, `flags`, `exposures` (`exposures` is null when too large) |
 | `exposures` | one entry per exposure in array order: `index, epoch, band, mjd, date, wl, dwl, rms, psf_fwhm, obs_id, collection, file, flag_counts, target_px` |
-| `photometry` | one entry per measured exposure: `index, epoch, band, mjd, wl, dwl, flux_mjy, err_mjy, ab_mag, flagged, ap_flags, masked_frac` |
+| `photometry` | one entry per measured exposure: `index, epoch, band, mjd, wl, dwl, flux_mjy, err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight, flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out`. `method` is `psf` (ePSF fit), `aperture` (fallback) or `ring` (detector where the target saturates). Ring entries have `relative: true` and `ab_mag: null`: their flux is the ring's share of the light, comparable only within one detector and wavelength (divide by the median of the wavelength bin for a light curve), so do not plot them on an absolute spectrum |
+| `processing` | pipeline constants, and `rings`: per detector that uses rings, `{saturated_share, core_radius_px, r_in, r_out, exposures}` |
 | `flag_bits` | `[{bit, name, description, masked, phot_bad}]` read from the files |
 | `stats` | `frames_found`, `frames_used`, `errors`, `requests`, `bytes`, `cache_hits`, `seconds` (`search`, `fetch_and_align`, `total`) |
 | `sources` | archive, collections and data location |
@@ -127,4 +130,4 @@ python -c "import numpy as np, json, urllib.request as u; m=json.load(u.urlopen(
   "pmra": -801.55, "pmdec": 10362.39, "parallax": 546.98, "mag": 8.19, "mag_band": "G", "color": 2.83}]
 ```
 
-Every source has `epoch` (Julian year of `ra`/`dec`) and `pmra`/`pmdec` in mas/yr (null when unknown), so clients can place it at any date. `502` if the upstream service is unavailable. The example values above are illustrative, not a recorded response.
+Every source has `epoch` (Julian year of `ra`/`dec`) and `pmra`/`pmdec` in mas/yr (null when unknown), so clients can place it at any date. `502` with a readable `detail` (naming the catalogue) if the upstream service fails, times out or returns something unusable; the client can simply retry. The example values above are illustrative, not a recorded response.

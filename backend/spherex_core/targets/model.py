@@ -22,6 +22,10 @@ class Target:
     description: str | None = None
     id: str | None = None
     fov_arcmin: float | None = None  # suggested field of view for presets
+    # Display hints for the web client: detector ("all" or "D1".."D6") and mode ("blink", "diff", "stack",
+    # "rgb", "exp") a preset opens with.
+    default_band: str | None = None
+    default_mode: str | None = None
 
     def position_at(self, mjd):
         """(ra, dec) in degrees at the given MJD(s); linear proper-motion propagation."""
