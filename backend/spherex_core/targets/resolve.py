@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -13,6 +15,8 @@ from astropy.coordinates import SkyCoord
 from ..config import settings
 from .model import Target
 from .presets import PRESETS
+
+log = logging.getLogger(__name__)
 
 _DECIMAL = re.compile(r"^[+-]?\d+(\.\d*)?$")
 
@@ -52,11 +56,14 @@ def resolve_name(name: str, timeout: float = 20.0) -> Target:
         if key in (t.id, (t.name or "").lower()):
             return t
     url = settings.sesame_url + "?" + urllib.parse.quote(name.strip())
+    t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             root = ET.fromstring(r.read())
     except Exception as e:  # noqa: BLE001 - surface network problems as lookup failures
+        log.warning("sesame failed s=%.2f name=%r error=%s", time.perf_counter() - t0, name, e)
         raise LookupError(f"Name resolver unavailable: {e}") from e
+    log.info("sesame done s=%.2f name=%r", time.perf_counter() - t0, name)
     for res in root.iter("Resolver"):
         ra, dec = _num(res, "jradeg"), _num(res, "jdedeg")
         if ra is None or dec is None:

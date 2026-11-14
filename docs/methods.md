@@ -112,3 +112,56 @@ ALGO_VERSION 2 rebuilds at each preset's field of view (cutouts cached except WI
 - **Parallax ignored** in position propagation (0.55″ for Barnard's Star).
 - **Fixed flag policy;** users can display any flag but cannot yet change which bits are masked.
 - **Running jobs are not persistent;** a restart loses in-flight builds (finished results stay on disk).
+
+## Analyses on a built sequence
+
+- **Photometry of any position** (ADR-0025): the pipeline's measurements on the cached native cutouts, at a new position with optional proper motion, PSF zone nearest to that position. Re-measuring the targets reproduces the build's fluxes exactly for Barnard's Star (357 of 358 exposures) and with a median difference of zero for ε Indi B (maximum 6 %, expected where the PSF zone nearest the source differs from the one nearest the cutout centre that the build used). 11–14 s for 358–458 exposures in a cold script, no downloads.
+- **Proper motion** (ADR-0026): flux-weighted centroids per epoch and detector, a straight-line fit with per-detector zero points. ε Indi B 3628 ± 305 / −2526 ± 260 mas/yr (Gaia 3982 / −2467); Barnard's Star −1316 ± 325 / 9557 ± 385 (Gaia −802 / 10362); three static Gaia stars −98 … +57 mas/yr. Precision is about 300 mas/yr with 3–4 visits; per-detector centroids of bright, saturated stars scatter by ~0.5″.
+- **Periodograms** (ADR-0027): Lomb–Scargle on the client-identical relative light curve. R Dra 235.7 d (standard) and 246.9 d (multiband) against ~245 d; RW Aur's three visits give the visit spacing (131 d), not a period.
+
+### Calibration checks (2026-11-14)
+
+- **Wavelengths.** WCS-WAVE (the 9 × 9 lookup we use) against the EPSF table's CWAVE at all 441 zone centres: median offset +0.02–0.04 % (D1–D4) and +0.14–0.16 % (D5–D6), maximum 0.19 % — a fifth of a resolution element or less. Bandwidths agree in the median (−0.04 %) but differ by up to 4 % (95th percentile) in some zones. No change needed.
+- **Pixel solid angle.** The pixel area from the WCS (with SIP) is 0.03 % below OMEGA_MEDIAN at the detector centre and 0.9–1.3 % away from it at the corners and edges, so using OMEGA_MEDIAN for every pixel biases fluxes by up to ~1.3 % near the edges. Proposed (needs an algorithm version bump): compute the solid angle at the target pixel from the WCS Jacobian.
+
+## Archival epochs and solar-system objects
+
+### Archival epochs (ADR-0021)
+
+1. CAOM TAP search around the grid centre: 2MASS and AllWISE images that intersect the field, NEOWISE-R
+   frames that contain the centre (`spherex_core/archival/sources.py`).
+2. Pixels: AllWISE Atlas tiles and NEOWISE-R frames by range reads from `s3://nasa-irsa-wise` (rows covering
+   the field only); 2MASS images downloaded whole (gzip, ~1.5 MB).
+3. Calibration to MJy/sr: `DN × F0 × 10^(−0.4 MAGZP) / Ω_pixel`, Vega zero points 1594 / 1024 / 666.7 Jy
+   (J/H/Ks) and 309.54 / 171.79 Jy (W1/W2).
+4. Background: sigma-clipped median subtracted per image.
+5. Smoothing to the SPHEREx scale: NaN-aware Gaussian, σ = 0.35 × (6.15″ / native pixel) native pixels
+   (2.2 px for 2MASS, 1.6 for AllWISE, 0.8 for NEOWISE); then bilinear resampling onto the sequence grid.
+6. Epochs: 2MASS images within 3 days mosaicked (mean), all AllWISE tiles mosaicked (mean), NEOWISE single
+   exposures median-combined per visit (gap > 20 days or span > 30 days starts a new visit; ≥ 3 frames).
+
+Checks (2026-11-14, light-weighted centroid within 4 px of the predicted target position):
+
+| Field | Frames | Baseline | Centroid offset from proper motion | Build |
+|---|---|---|---|---|
+| Barnard's Star, 12′ | 47 | 2000.4–2024.2 | 0.1–2.5″ (median ~0.8″) | 134 s, 1.1 GB |
+| ε Indi B, 16′ | 50 | 1999.9–2024.4 | 0.2–1.4″ | 130 s, 1.5 GB |
+| ε Indi B, 20′ | 50 | 1999.9–2024.4 | 0.2–1.3″ | 95 s, 1.75 GB |
+
+Limitations: AllWISE combines 2010 passes ~6 months apart, so fast movers look slightly elongated; 2MASS
+coverage of wide fields can be partial (`coverage`); bright stars saturate in 2MASS and WISE.
+
+### Solar-system objects (ADR-0022)
+
+IRSA MOST lists the SPHEREx files that contain the object with its predicted position at each exposure
+start. The co-moving build cuts out and resamples every exposure on a grid centred on that position, then
+runs the normal epoch grouping, co-adds and photometry, so co-adds stack the object while the stars trail.
+
+| Object | MOST | Files | Epochs | Build | Brightest co-add pixel |
+|---|---|---|---|---|---|
+| 3I/ATLAS, 2025-08-01..20 | 1.9 s | 160 | 1 | 11 s | central pixel in D1–D6 (D4: 1 px off), S/N 69 (D1) to 3 (D6) |
+| 433 Eros, 2025-04..2026-11 | 12–165 s | 954 | 6 | 47 s | central pixel in every epoch and detector |
+
+Command-line tools: `scripts/build_archival.py <sequence id> [--fov 12]` builds (or warms) archival epochs and
+prints the target's centroid offset in every frame; `scripts/build_moving.py <name> [--begin --end --type]`
+runs the MOST search and builds the co-moving sequence.

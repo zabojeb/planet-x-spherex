@@ -7,11 +7,14 @@ collections come from settings (SPHEREX_COLLECTIONS).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 
 from .. import cache
 from ..config import settings
 from .tap import tap_csv
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,7 +57,9 @@ def query_frames(ra: float, dec: float, collections: tuple[str, ...] | None = No
     collections = tuple(collections or settings.collections)
     path = cache.layout().tap(ra, dec, collections)
     if use_cache and cache.is_fresh(path, settings.tap_cache_hours):
-        return [Frame(**d) for d in json.loads(path.read_text())]
+        frames = [Frame(**d) for d in json.loads(path.read_text())]
+        log.info("image search from cache frames=%d (cached for %.0f h)", len(frames), settings.tap_cache_hours)
+        return frames
 
     coll = ",".join(f"'{c}'" for c in collections)
     rows = tap_csv(f"""

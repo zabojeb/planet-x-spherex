@@ -42,7 +42,7 @@ def test_sequence_and_arrays(client):
     r = c.get("/api/sequences/abc123")
     assert r.status_code == 200 and r.content == json.dumps(results.clean_json(meta)).encode()
     r = c.get("/api/sequences/abc123/coadds.bin")
-    assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=86400"
+    assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=31536000, immutable"
     np.testing.assert_array_equal(np.frombuffer(r.content, "<f4").reshape(arrays["coadds"].shape), arrays["coadds"])
     r = c.get("/api/sequences/abc123/exposures.bin", params={"epoch": 0, "band": "D1"})
     assert r.status_code == 200 and r.headers["x-exposure-indices"] == "0,1"
@@ -68,7 +68,7 @@ def test_errors(client, path, status, detail):
 
 def test_running_job_reports_202_and_failed_job_500(client):
     c, _, _ = client
-    from spherex_core.pipeline.jobs import Job
+    from spherex_core.jobs import Job
     from spherex_core.pipeline.params import SequenceParams
 
     p = SequenceParams(ra=1.0, dec=2.0)
@@ -84,3 +84,23 @@ def test_list_catalogs(client):
     c, _, _ = client
     assert c.get("/api/catalogs").json() == {"gaia": "Gaia DR3 (ESA)", "catwise": "CatWISE2020 (IRSA)",
                                              "2mass": "2MASS point sources (IRSA)"}
+
+
+def test_analysis_and_export_routes(client):
+    c, _, _ = client
+    assert c.get("/api/sequences/nope/motion?x=1&y=1").status_code == 404
+    assert c.get("/api/sequences/abc123/motion").status_code == 422
+    assert c.get("/api/sequences/nope/periodogram").status_code == 404
+    assert c.get("/api/sequences/nope/export/photometry.csv").status_code == 404
+    assert c.get("/api/sequences/abc123/export/photometry.txt").status_code == 422
+    assert c.post("/api/sequences/nope/photometry", json={"ra": 1, "dec": 2}).status_code == 404
+    r = c.post("/api/periodogram", json={"photometry": []})
+    assert r.status_code == 422 and "at least" in r.json()["detail"]
+
+
+def test_sequence_request_filters_validate(client):
+    c, _, _ = client
+    r = c.post("/api/sequences", json={"ra": 1, "dec": 2, "bands": ["D9"]})
+    assert r.status_code == 422
+    r = c.post("/api/sequences", json={"ra": 1, "dec": 2, "date_min": "not a date"})
+    assert r.status_code == 422

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
+import time
 
 import aiohttp
+
+log = logging.getLogger(__name__)
 
 
 class RangeClient:
@@ -20,6 +24,7 @@ class RangeClient:
         self.session: aiohttp.ClientSession | None = None
         self.bytes_read = 0
         self.requests = 0
+        self.retries_done = 0
 
     async def __aenter__(self) -> "RangeClient":
         conn = aiohttp.TCPConnector(limit=self.max_connections, limit_per_host=self.max_connections,
@@ -38,7 +43,10 @@ class RangeClient:
         assert self.session is not None, "use RangeClient as an async context manager"
         headers = {"Range": f"bytes={start}-{start + length - 1}"}
         delay = 0.5
+        name = url.rsplit("/", 1)[-1]
         for attempt in range(self.retries):
+            t0 = time.perf_counter()
+            reason = None
             try:
                 async with self.session.get(url, headers=headers) as r:
                     if r.status in (200, 206):
@@ -48,9 +56,17 @@ class RangeClient:
                         return data if r.status == 206 else data[start:start + length]
                     if r.status < 500 and r.status != 429:
                         raise RuntimeError(f"HTTP {r.status} for {url}")
-            except (aiohttp.ClientError, asyncio.TimeoutError):
+                    reason = f"HTTP {r.status}"
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                reason = f"{e.__class__.__name__}: {e}"[:200]
                 if attempt == self.retries - 1:
+                    log.warning("range read gave up after %d attempts: %s bytes=%d+%d (%s, last try %.1f s)",
+                                self.retries, name, start, length, reason, time.perf_counter() - t0)
                     raise
-            await asyncio.sleep(delay * (1.0 + random.random()))
+            self.retries_done += 1
+            wait = delay * (1.0 + random.random())
+            log.debug("range read retry %d/%d in %.1f s: %s bytes=%d+%d (%s after %.1f s)", attempt + 1,
+                      self.retries, wait, name, start, length, reason, time.perf_counter() - t0)
+            await asyncio.sleep(wait)
             delay *= 2
         raise RuntimeError(f"range read failed after {self.retries} attempts: {url}")
