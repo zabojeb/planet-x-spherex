@@ -5,7 +5,7 @@ import { useDismiss } from "../../hooks";
 export function Popover(props: {
   label: ReactNode;
   title: string;
-  align?: "left" | "right";
+  align?: "left" | "right" | "side";
   width?: number;
   className?: string;
   children: ReactNode | ((close: () => void) => ReactNode);
@@ -17,7 +17,7 @@ export function Popover(props: {
   return (
     <div className={`popover-wrap ${props.className ?? ""}`} ref={ref}>
       <button
-        className={`btn ghost${open ? " active" : ""}`}
+        className={`btn ghost${props.align === "side" ? " icon rail-btn" : ""}${open ? " active" : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         title={props.title}
@@ -26,7 +26,7 @@ export function Popover(props: {
         {props.label}
       </button>
       {open && (
-        <div className={`popover ${props.align === "left" ? "left" : "right"}`} role="dialog" aria-label={props.title} style={{ width: props.width }}>
+        <div className={`popover ${props.align ?? "right"}`} role="dialog" aria-label={props.title} style={{ width: props.width }}>
           {typeof props.children === "function" ? props.children(close) : props.children}
         </div>
       )}

@@ -1,6 +1,5 @@
 /** Thin top progress bar, numbered section headers and the cinematic landing hero with a target index. */
 import { ArrowUpRight, X } from "lucide-react";
-import type { ReactNode } from "react";
 import type { Progress } from "../api";
 import { formatPm } from "../astro";
 import type { Target } from "../types";
@@ -17,22 +16,12 @@ export function ProgressBar({ progress }: { progress: Progress | null }) {
   );
 }
 
-export function SectionHead({ n, title, children }: { n: string; title: string; children?: ReactNode }) {
-  return (
-    <header className="section-head">
-      <span className="section-n">{n}</span>
-      <h2 className="section-title">{title}</h2>
-      {children && <div className="section-actions">{children}</div>}
-    </header>
-  );
-}
-
 function motionLabel(t: Target): string {
   const pm = Math.hypot(t.pmra, t.pmdec);
   return pm >= 1 ? formatPm(t.pmra, t.pmdec) : "—";
 }
 
-export function Hero({ presets, onPick, onDismiss }: { presets: Target[]; onPick: (id: string) => void; onDismiss: () => void }) {
+export function Hero({ presets, onPick, onDismiss, onPrefetch }: { presets: Target[]; onPick: (id: string) => void; onDismiss: () => void; onPrefetch?: (id: string) => void }) {
   return (
     <section className="hero" aria-label="Introduction">
       <div className="hero-grid" aria-hidden />
@@ -51,7 +40,13 @@ export function Hero({ presets, onPick, onDismiss }: { presets: Target[]; onPick
         <ol className="index" aria-label="Challenge targets">
           {presets.map((t, i) => (
             <li key={t.id}>
-              <button className="index-row" onClick={() => t.id && onPick(t.id)} title={t.description ?? undefined}>
+              <button
+                className="index-row"
+                onClick={() => t.id && onPick(t.id)}
+                onPointerEnter={() => t.id && onPrefetch?.(t.id)}
+                onFocus={() => t.id && onPrefetch?.(t.id)}
+                title={t.description ?? undefined}
+              >
                 <span className="index-n">{String(i + 1).padStart(2, "0")}</span>
                 <span className="index-name">{t.name}</span>
                 <span className="index-motion">{motionLabel(t)}</span>

@@ -41,20 +41,18 @@ src/
   types.ts          API payload types (meta.json, jobs, catalogs)
   App.tsx           wiring and layout: target -> build -> derived images -> sections; playback, keys
   components/
-    TopBar.tsx         serif wordmark, command search, field of view, status readout, share menu
-    CommandSearch.tsx  palette search (⌘K / Ctrl+K) with the challenge targets as quick picks
-    Progress.tsx       thin top progress bar, numbered section headers, landing hero with target index
-    Stage.tsx          image stage: canvas, SVG overlays, reticle with lock-on, mono HUD corners, HUD loader
-    Controls.tsx       toolbar (mode, detector), header actions, Display and Layers panels
-    Transport.tsx      previous / play / next, epoch scrubber on a time axis, exposures strip, speed
-    SidePanel.tsx      04 Data tabs: Overview · Epoch · Flags · Data
+    SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click-to-select,
+                       hairline overlays in screen space, minimal HUD, HUD loader
+    TopBar.tsx         floating top-left: serif wordmark, search pill, FOV; the share panel
+    CommandSearch.tsx  ⌘K / Ctrl+K search with the challenge targets as quick picks
+    Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
+    Rail.tsx           right tool rail: Detector, Display, Layers, Details, Share
+    Controls.tsx       mode control, detector panel, Display and Layers panels
+    Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
+    SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
+    Progress.tsx       top progress bar and the landing index over the sky
     ui/primitives.tsx  popover, segmented control, tabs, switch, micro label
-    ui/BottomSheet.tsx mobile controls sheet
-    chart/
-      ChartFrame.tsx      reusable SVG chart: axes, grid, error bars, hollow/diamond marks, hover tooltip
-      SpectrumChart.tsx   flux vs wavelength, coloured by epoch, detector bands, molecular features
-      LightCurveChart.tsx flux relative to the median spectrum vs date, epoch medians
-      ChartsCard.tsx      the numbered 02 Spectrum and 03 Light curve sections
+    chart/             ChartFrame (reusable SVG chart), SpectrumChart, LightCurveChart
 ```
 
 Nothing about the instrument is hard-coded: detector ids, order and wavelength ranges come from
@@ -62,10 +60,21 @@ Nothing about the instrument is hard-coded: detector ids, order and wavelength r
 the detectors split into three wavelength groups (longest = red). Targets may carry `default_band` and
 `default_mode` hints from the API; they apply unless the URL sets band or mode.
 
+## Loading and caching
+
+- One AbortController per load: changing target or FOV cancels polls and downloads; an unfinished job is
+  withdrawn with `DELETE /api/sequences/{id}` (also on `pagehide`, via `fetch(..., {keepalive: true})`).
+- Polling doubles as a heartbeat: every 1 s while visible, 10 s while the tab is hidden.
+- `429` + `Retry-After` shows a "many users right now" countdown and retries.
+- Decoded sequences sit in an 8-entry in-memory LRU keyed by sequence id (plus request→id), so mode, band
+  and target revisits make no requests; arrays are immutable and HTTP-cacheable.
+- Catalogs load only when their layer is on (and are aborted on a new sequence); chart and data-panel code
+  loads only when the drawer opens. The only prefetch is a preset on hover in the landing index.
+
 ## Design
 
-Editorial HUD on black: warm off-white text, hairline frames and numbered sections (01 Viewer,
-02 Spectrum, 03 Light curve, 04 Data), reticle corners and monospaced readouts around the image. Type is
+Google-Earth model on black: the sky fills the viewport and every control floats over it as small glass
+panels (search pill, dock, tool rail, drawer); hairline reticle around the image, minimal mono HUD. Type is
 self-hosted: Geist (UI), Geist Mono (data and HUD) and Instrument Serif (display), from `@fontsource`.
 One amber accent (`#ffc845`) marks active and focus states only; all data colours come from the dataviz
 palette in `colors.ts` (contamination flags use the status red so they cannot be confused with the

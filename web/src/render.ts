@@ -48,7 +48,7 @@ export const LUTS: Record<Cmap, Uint8ClampedArray> = {
 export const DIVERGING = buildLut([
   [0, "#cde2fb"],
   [0.22, "#3987e5"],
-  [0.5, "#383835"],
+  [0.5, "#1c1c1a"], // neutral gray midpoint, dark enough to sit quietly on the black sky
   [0.78, "#e66767"],
   [1, "#fbd5d5"],
 ]);

@@ -1,22 +1,29 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog, fetchExposures, getTargets, loadSequence, resolveQuery, type Progress } from "./api";
+import { fetchCatalog, fetchExposures, getTargets, loadSequence, prefetchSequence, resolveQuery, type Progress } from "./api";
 import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
-import { ChartSections, ChartSkeletons } from "./components/chart/ChartsCard";
-import { DetectorControl, DisplayPanel, LayersPanel, ModeControl, ModeHint, Toolbar, ViewerActions, type CatalogStatus } from "./components/Controls";
-import { Hero, ProgressBar, SectionHead } from "./components/Progress";
-import { SidePanel } from "./components/SidePanel";
-import { Stage, type StageHud } from "./components/Stage";
-import { TopBar, Wordmark } from "./components/TopBar";
-import { Transport } from "./components/Transport";
-import { BottomSheet } from "./components/ui/BottomSheet";
-import { MicroLabel } from "./components/ui/primitives";
+import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, type CatalogStatus } from "./components/Controls";
+import { Drawer, type DrawerTab } from "./components/Drawer";
+import { Rail } from "./components/Rail";
+import { SkyView } from "./components/SkyView";
+import { Hero, ProgressBar } from "./components/Progress";
+import { SharePanel, TopLeft } from "./components/TopBar";
+import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, playableEpochs, rgbLabel, stackEpochs, type ExposureView } from "./display";
-import { safeStorage, useElementWidth, useMediaQuery, useViewportHeight } from "./hooks";
+import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
 import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type ViewState } from "./state";
 import type { CatalogSource, ExposureStack, Meta, SequenceData, Target } from "./types";
+
+interface StageHud {
+  epoch: string;
+  dates: string;
+  spectral: string;
+  frames: string;
+  extra?: string;
+  target?: [number, number] | null;
+}
 
 const INTRO_KEY = "spherex-intro-dismissed";
 const CATALOG_IDS = ["gaia", "catwise", "2mass"] as const;
@@ -62,7 +69,6 @@ export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
   const mobile = useMediaQuery("(max-width: 760px)");
-  const vh = useViewportHeight();
   const [presets, setPresets] = useState<Target[]>([]);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
@@ -82,7 +88,7 @@ export default function App() {
   const [expIndex, setExpIndex] = useState(0);
   const keepView = useRef(initial.hasParams);
   const metaId = useRef<string | null>(null);
-  const [gridRef, gridWidth] = useElementWidth<HTMLDivElement>();
+  const [drawer, setDrawer] = useState<DrawerTab | null>(null);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
 
@@ -157,19 +163,25 @@ export default function App() {
 
   // ---- catalogs for overlays
   const wanted = view.overlays.filter((o): o is (typeof CATALOG_IDS)[number] => (CATALOG_IDS as readonly string[]).includes(o));
+  const catalogCtrl = useRef<AbortController | null>(null);
+  useEffect(() => {
+    catalogCtrl.current?.abort(); // a new sequence cancels catalog queries for the old one
+    catalogCtrl.current = new AbortController();
+    return () => catalogCtrl.current?.abort();
+  }, [meta?.id]);
   useEffect(() => {
     if (!meta) return;
     for (const cat of wanted) {
       if (catalogStatus[cat]) continue;
       const id = meta.id;
       setCatalogStatus((s) => ({ ...s, [cat]: { state: "loading" } }));
-      fetchCatalog(cat, meta.grid.ra, meta.grid.dec, Math.min(30, meta.grid.fov_arcmin * 0.75))
+      fetchCatalog(cat, meta.grid.ra, meta.grid.dec, Math.min(30, meta.grid.fov_arcmin * 0.75), catalogCtrl.current?.signal)
         .then((rows) => {
           if (metaId.current !== id) return;
           setCatalogs((c) => ({ ...c, [cat]: rows }));
           setCatalogStatus((s) => ({ ...s, [cat]: { state: "ready", count: rows.length } }));
         })
-        .catch((e) => metaId.current === id && setCatalogStatus((s) => ({ ...s, [cat]: { state: "error", message: String(e.message || e) } })));
+        .catch((e) => metaId.current === id && e?.name !== "AbortError" && setCatalogStatus((s) => ({ ...s, [cat]: { state: "error", message: String(e.message || e) } })));
     }
   }, [meta?.id, wanted.join(","), catalogStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -209,7 +221,8 @@ export default function App() {
       const tag = el?.tagName ?? "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === " ") {
+      if (e.key === "Escape") setDrawer(null);
+      else if (e.key === " ") {
         if (tag === "BUTTON") return;
         e.preventDefault();
         setPlaying((p) => !p);
@@ -267,6 +280,10 @@ export default function App() {
       setSearching(false);
     }
   };
+  const prefetchPreset = (id: string) => {
+    const t = presets.find((p) => p.id === id);
+    if (t) prefetchSequence({ ra: t.ra, dec: t.dec, pmra: t.pmra, pmdec: t.pmdec, ref_epoch: t.ref_epoch, name: t.name ?? null, fov_arcmin: t.fov_arcmin ?? 6 });
+  };
   const dismissHero = () => {
     setHero(false);
     safeStorage(INTRO_KEY, "1");
@@ -320,22 +337,17 @@ export default function App() {
   const canPlay = view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1;
   const errorText = error ?? presetsError ?? (unknownPreset ? `Unknown target "${spec.kind === "preset" ? spec.id : ""}"` : null);
 
-  // Stage size: as large as the width allows while header, toolbar, stage and transport fit on one screen.
-  // The landing hero sits above and scrolls away; the stage never shrinks for it.
-  const narrow = useMediaQuery("(max-width: 1000px)");
-  const sideMin = 340;
-  const cellPad = mobile ? 0 : 48;
-  const byWidth = (mobile || narrow || embed ? gridWidth : gridWidth - sideMin) - cellPad;
-  // top bar 56 + section head 44 + toolbar 40 + gaps 48 + hint 20 + transport 74 + cell padding 40
-  const heightBudget = mobile ? Infinity : embed ? vh - 150 : Math.max(460, vh - (56 + 44 + 40 + 48 + 20 + 74 + 40));
-  const stageSize = Math.max(240, Math.floor(Math.min(byWidth || 600, heightBudget)));
-  const stackWidth = mobile ? stageSize : Math.min(byWidth || stageSize, Math.max(stageSize, 600));
-  const releases = meta
-    ? [...new Set(meta.sources.collections.map((c) => c.replace("spherex_", "").replace("_deep", "").toUpperCase()))].join(" + ")
-    : null;
+  const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}` : "";
+  const bandShort = view.mode === "rgb" ? "RGB" : view.band === "all" ? "All" : view.band;
+  const openDetails = (tab: DrawerTab = "spectrum") => {
+    setHero(false);
+    setDrawer((d) => (d ? null : tab));
+  };
+  const flagsOn = view.overlays.includes("flags");
+  const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
-  const stage = (
-    <Stage
+  const sky = (
+    <SkyView
       grid={meta?.grid ?? null}
       display={display}
       view={view}
@@ -346,22 +358,25 @@ export default function App() {
       year={year}
       span={span}
       targetPx={targetPx}
+      targetName={target?.name || meta?.target.name || "Target"}
+      targetWorld={hud?.target ?? null}
       track={track}
       trackIndex={view.epoch}
-      hud={hud}
+      dateLabel={dateLabel}
       progress={progress}
       lockKey={meta?.id ?? "none"}
       error={errorText}
       onRetry={() => setReloadKey((k) => k + 1)}
-      size={stageSize}
       onZoom={(zoom) => set({ zoom })}
-      compact={mobile}
+      onInteract={() => hero && setHero(false)}
+      onOpenDetails={() => openDetails("spectrum")}
+      shiftX={hero && !mobile && presets.length ? 180 : 0}
     />
   );
 
-  const transport =
+  const dock =
     meta && derived ? (
-      <Transport
+      <Dock
         meta={meta}
         playing={playing && canPlay}
         canPlay={canPlay}
@@ -385,137 +400,82 @@ export default function App() {
           set({ stack: next.length ? next : null });
         }}
         exposures={view.mode === "exp" && nExp ? { count: nExp, index: Math.min(expIndex, nExp - 1), onIndex: setExpIndex } : null}
-      />
-    ) : (
-      <div className="transport skeleton-row" aria-hidden>
-        <div className="skeleton" style={{ width: 120, height: 32 }} />
-        <div className="skeleton" style={{ flex: 1, height: 32 }} />
-      </div>
-    );
+        date={hud?.dates ?? ""}
+      >
+        <ModeControl view={view} set={set} size="sm" />
+      </Dock>
+    ) : null;
 
   if (embed) {
     return (
-      <div className="app embed">
+      <div className="app earth embed">
         <ProgressBar progress={progress} />
-        <div className="embed-main" ref={gridRef}>
-          {stage}
-          <div className="embed-controls" style={{ width: stageSize }}>
-            {transport}
-            {meta && derived && (
-              <div className="embed-row">
-                <ModeControl view={view} set={set} size="sm" />
-                <DetectorControl meta={meta} derived={derived} view={view} set={set} />
-                <a className="btn ghost" href={viewLink(spec, fov, view, false)} target="_blank" rel="noreferrer">
-                  Open full viewer <ExternalLink size={14} />
-                </a>
-              </div>
-            )}
-          </div>
+        {sky}
+        <div className="floating-bottom">
+          {dock}
+          {meta && derived && (
+            <div className="embed-row glass">
+              <DetectorControl meta={meta} derived={derived} view={view} set={set} />
+              <a className="btn ghost" href={viewLink(spec, fov, view, false)} target="_blank" rel="noreferrer">
+                Full viewer <ExternalLink size={14} />
+              </a>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`app${mobile ? " is-mobile" : ""}`}>
-      <TopBar
+    <div className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}>
+      <ProgressBar progress={progress} />
+      {sky}
+      <TopLeft
         presets={presets}
         activeId={spec.kind === "preset" ? spec.id : null}
         busy={searching}
         searchError={searchError}
         fov={fov}
         compact={mobile}
-        releases={releases}
         onSearch={search}
         onPreset={choosePreset}
         onFov={(f) => setFovOverride(f)}
-        link={() => viewLink(spec, fov, view, false)}
-        embedLink={() => viewLink(spec, fov, view, true)}
       />
-      <ProgressBar progress={progress} />
-      {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} />}
-      <main className="workspace">
-        <div
-          className="editorial"
-          ref={gridRef}
-          style={mobile || narrow ? undefined : { gridTemplateColumns: `${stackWidth + cellPad}px minmax(${sideMin}px, 460px)` }}
-        >
-          <section className="cell cell-viewer" aria-label="Viewer">
-            <SectionHead n="01" title="Viewer">
-              {meta && !mobile && (
-                <ViewerActions meta={meta} view={view} set={set} refEpoch={refEpoch} refs={derived ? derived.playable(view.band) : []} catalogStatus={catalogStatus} />
-              )}
-            </SectionHead>
-            <div className="cell-body viewer-body">
-              <div className="stage-stack" style={{ width: mobile ? "100%" : stackWidth }}>
-                {!mobile && (meta && derived ? <Toolbar meta={meta} derived={derived} view={view} set={set} /> : <div className="toolbar skeleton-row" aria-hidden><div className="skeleton" style={{ width: 360, height: 32 }} /></div>)}
-                {stage}
-                {!mobile && meta && <ModeHint view={view} />}
-                {transport}
-              </div>
+      {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
+      {meta && derived && (
+        <Rail
+          bandLabel={bandShort}
+          detector={<DetectorPanel meta={meta} derived={derived} view={view} set={set} refEpoch={refEpoch} />}
+          display={
+            <div className="panel-stack">
+              <DisplayPanel view={view} set={set} />
+              <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
             </div>
-          </section>
-          <section className="cell cell-data" aria-label="Data">
-            <SectionHead n="04" title="Data" />
-            <div className="cell-body">
-              {meta ? (
-                <SidePanel
-                  meta={meta}
-                  target={target}
-                  epoch={view.epoch}
-                  band={view.band}
-                  mode={view.mode}
-                  flagBits={flagBits}
-                  onFlagBits={(b) => set({ flagBits: b })}
-                  flagsOn={view.overlays.includes("flags")}
-                  onFlagsOn={(on) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") })}
-                />
-              ) : (
-                <div aria-hidden>
-                  <div className="skeleton" style={{ height: 34 }} />
-                  <div className="skeleton" style={{ height: 22, width: "60%", marginTop: 20 }} />
-                  <div className="skeleton" style={{ height: 160, marginTop: 12 }} />
-                </div>
-              )}
-            </div>
-          </section>
-          {meta ? <ChartSections meta={meta} epoch={view.epoch} ylog={view.ylog} onYlog={(ylog) => set({ ylog })} /> : <ChartSkeletons />}
-        </div>
-        <footer className="footer">
-          <Wordmark compact />
-          <span>
-            Data: NASA SPHEREx (DR1, QR3) via NASA/IPAC IRSA · Gaia DR3 (ESA) · CatWISE2020, 2MASS (IRSA). Built for the NASA Space Apps
-            Challenge 2026.
-          </span>
-        </footer>
-      </main>
-      {mobile && meta && derived && (
-        <BottomSheet summary={<ModeControl view={view} set={set} size="sm" />}>
-          <div className="sheet-section">
-            <MicroLabel>Detector</MicroLabel>
-            <DetectorControl meta={meta} derived={derived} view={view} set={set} />
-          </div>
-          {view.mode === "diff" && (
-            <div className="sheet-section">
-              <MicroLabel>Reference epoch</MicroLabel>
-              <select value={refEpoch} onChange={(e) => set({ ref: Number(e.target.value) })} aria-label="Reference epoch">
-                {derived.playable(view.band).map((e) => (
-                  <option key={e} value={e}>
-                    epoch {e + 1} · {meta.epochs[e].date_min.slice(0, 7)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="sheet-section">
-            <MicroLabel>Display</MicroLabel>
-            <DisplayPanel view={view} set={set} />
-          </div>
-          <div className="sheet-section">
-            <MicroLabel>Layers</MicroLabel>
-            <LayersPanel view={view} set={set} catalogStatus={catalogStatus} />
-          </div>
-        </BottomSheet>
+          }
+          layers={<LayersPanel view={view} set={set} catalogStatus={catalogStatus} />}
+          share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} />}
+          detailsOpen={!!drawer}
+          onDetails={() => openDetails("spectrum")}
+        />
+      )}
+      <div className="floating-bottom">{dock}</div>
+      {drawer && meta && (
+        <Drawer
+          tab={drawer}
+          onTab={setDrawer}
+          onClose={() => setDrawer(null)}
+          meta={meta}
+          target={target}
+          epoch={view.epoch}
+          band={view.band}
+          mode={view.mode}
+          ylog={view.ylog}
+          onYlog={(ylog) => set({ ylog })}
+          flagBits={flagBits}
+          onFlagBits={(b) => set({ flagBits: b })}
+          flagsOn={flagsOn}
+          onFlagsOn={setFlagsOn}
+        />
       )}
     </div>
   );

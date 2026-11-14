@@ -1,4 +1,4 @@
-/** Transport: previous / play / next, an epoch scrubber on a true time axis, speed and playback options. */
+/** Floating dock with the epoch scrubber on a true time axis, plus playback options for the Display panel. */
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { useRef } from "react";
 import { formatDate, formatMonth } from "../astro";
@@ -30,60 +30,68 @@ interface Props {
   exposures: { count: number; index: number; onIndex: (i: number) => void } | null;
 }
 
-export function Transport(p: Props) {
-  const showEnds = p.mode === "blink" || p.mode === "diff" || p.mode === "rgb";
-  const hasPartial = p.meta.epochs.some((e) => e.partial);
-  const speeds = SPEEDS.includes(p.speed) ? SPEEDS : [...SPEEDS, p.speed].sort((a, b) => b - a);
+/** Compact floating dock: previous / play / next, the epoch scrubber and the date; `children` holds the mode control. */
+export function Dock(p: Props & { date: string; children?: React.ReactNode }) {
   return (
-    <div className="transport">
-      <div className="transport-buttons">
-        <button className="btn ghost icon" onClick={() => p.onStep(-1)} disabled={!p.canPlay} aria-label="Previous (←)" title="Previous (←)">
-          <ChevronLeft size={16} />
-        </button>
-        <button className="btn play" onClick={p.onToggle} disabled={!p.canPlay} aria-label={p.playing ? "Pause (space)" : "Play (space)"} title="Play / pause (space)">
-          {p.playing ? <Pause size={16} /> : <Play size={16} />}
-        </button>
-        <button className="btn ghost icon" onClick={() => p.onStep(1)} disabled={!p.canPlay} aria-label="Next (→)" title="Next (→)">
-          <ChevronRight size={16} />
-        </button>
-      </div>
-      <div className="transport-track">
-        <Scrubber {...p} />
-        {p.exposures && p.exposures.count > 0 && (
-          <div className="exp-strip" role="group" aria-label="Exposures">
-            <span className="micro num">
-              Exposure {p.exposures.index + 1} / {p.exposures.count}
-            </span>
-            <div className="exp-dots">
-              {Array.from({ length: p.exposures.count }, (_, i) => (
-                <button key={i} className={i === p.exposures!.index ? "on" : ""} onClick={() => p.exposures!.onIndex(i)} aria-label={`Exposure ${i + 1}`} />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="transport-options">
-        <label className="speed" title="Playback speed">
-          <span className="micro">Speed</span>
-          <select value={p.speed} onChange={(e) => p.onSpeed(Number(e.target.value))} aria-label="Playback speed">
-            {speeds.map((s) => (
-              <option key={s} value={s}>
-                {Number.isInteger(1000 / s) ? 1000 / s : (1000 / s).toFixed(1)} fps
-              </option>
+    <div className="dock glass">
+      {p.exposures && p.exposures.count > 0 && (
+        <div className="exp-strip" role="group" aria-label="Exposures">
+          <span className="micro num">
+            Exposure {p.exposures.index + 1}/{p.exposures.count}
+          </span>
+          <div className="exp-dots">
+            {Array.from({ length: p.exposures.count }, (_, i) => (
+              <button key={i} className={i === p.exposures!.index ? "on" : ""} onClick={() => p.exposures!.onIndex(i)} aria-label={`Exposure ${i + 1}`} />
             ))}
-          </select>
-        </label>
-        {showEnds && (
-          <button className={`chip${p.ends ? " on" : ""}`} aria-pressed={p.ends} onClick={() => p.onEnds(!p.ends)} title="Blink only the first and last epoch: the longest baseline">
-            First ↔ last
+          </div>
+        </div>
+      )}
+      <div className="dock-row">
+        {p.children}
+        <div className="transport-buttons">
+          <button className="btn ghost icon" onClick={() => p.onStep(-1)} disabled={!p.canPlay} aria-label="Previous (←)" title="Previous (←)">
+            <ChevronLeft size={16} />
           </button>
-        )}
-        {hasPartial && p.mode !== "exp" && p.mode !== "stack" && (
-          <button className={`chip${p.partial ? " on" : ""}`} aria-pressed={p.partial} onClick={() => p.onPartial(!p.partial)} title="Short partial visits have few exposures and are skipped by default">
-            Partial visits
+          <button className="btn play" onClick={p.onToggle} disabled={!p.canPlay} aria-label={p.playing ? "Pause (space)" : "Play (space)"} title="Play / pause (space)">
+            {p.playing ? <Pause size={15} /> : <Play size={15} />}
           </button>
-        )}
+          <button className="btn ghost icon" onClick={() => p.onStep(1)} disabled={!p.canPlay} aria-label="Next (→)" title="Next (→)">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+        <div className="dock-scrub">
+          <Scrubber {...p} />
+        </div>
+        <div className="dock-date num">{p.date}</div>
       </div>
+    </div>
+  );
+}
+
+/** Playback options shown inside the Display panel. */
+export function PlaybackOptions(p: { meta: Meta; mode: Mode; speed: number; onSpeed: (ms: number) => void; ends: boolean; onEnds: (v: boolean) => void; partial: boolean; onPartial: (v: boolean) => void }) {
+  const speeds = SPEEDS.includes(p.speed) ? SPEEDS : [...SPEEDS, p.speed].sort((a, b) => b - a);
+  const hasPartial = p.meta.epochs.some((e) => e.partial);
+  return (
+    <div className="playback">
+      <label className="speed">
+        <span className="micro">Speed</span>
+        <select value={p.speed} onChange={(e) => p.onSpeed(Number(e.target.value))} aria-label="Playback speed">
+          {speeds.map((ms) => (
+            <option key={ms} value={ms}>
+              {Number.isInteger(1000 / ms) ? 1000 / ms : (1000 / ms).toFixed(1)} fps
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className={`chip${p.ends ? " on" : ""}`} aria-pressed={p.ends} onClick={() => p.onEnds(!p.ends)} title="Blink only the first and last epoch">
+        First ↔ last
+      </button>
+      {hasPartial && (
+        <button className={`chip${p.partial ? " on" : ""}`} aria-pressed={p.partial} onClick={() => p.onPartial(!p.partial)} title="Include short partial visits">
+          Partial visits
+        </button>
+      )}
     </div>
   );
 }

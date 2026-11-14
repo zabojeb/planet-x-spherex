@@ -1,12 +1,12 @@
 /** Always-visible toolbar (mode, detector) plus the Display and Layers panels used in popovers or the mobile sheet. */
-import { Compass, Crosshair, Flag, Layers, Route, SlidersHorizontal } from "lucide-react";
+import { Compass, Crosshair, Flag, Route } from "lucide-react";
 import { CATALOG_STYLE } from "../colors";
 import { rgbLabel, wlRange } from "../display";
 import type { Cmap, Derived, Stretch } from "../render";
 import { CMAP_LABEL, LUTS } from "../render";
 import { MODES, type Mode, type Overlay, type ViewState } from "../state";
 import type { Meta } from "../types";
-import { MicroLabel, Popover, Segmented, Switch } from "./ui/primitives";
+import { MicroLabel, Segmented, Switch } from "./ui/primitives";
 
 export type CatalogStatus = Record<string, { state: "loading" | "ready" | "error"; count?: number; message?: string }>;
 
@@ -152,49 +152,38 @@ export function LayersPanel({ view, set, catalogStatus }: { view: ViewState; set
   );
 }
 
-/** Mode and detector: the always-visible row above the stage. */
-export function Toolbar({ meta, derived, view, set }: { meta: Meta; derived: Derived; view: ViewState; set: Set }) {
+/** Detector picker for the rail: one row per detector with its wavelength range. */
+export function DetectorPanel({ meta, derived, view, set, refEpoch }: { meta: Meta; derived: Derived; view: ViewState; set: Set; refEpoch: number }) {
+  const rows = [
+    ...meta.bands.map((b, i) => ({ id: b.id, label: b.id, sub: `${wlRange(b)} · R≈${b.R}`, key: String(i + 1), disabled: !derived.playable(b.id).length })),
+    { id: "all", label: "All", sub: "every detector, noise-weighted", key: "0", disabled: view.mode === "exp" },
+  ];
   return (
-    <div className="toolbar">
-      <ModeControl view={view} set={set} />
-      <DetectorControl meta={meta} derived={derived} view={view} set={set} showWl={false} />
-    </div>
-  );
-}
-
-/** Secondary viewer actions in the section header: Difference reference, Display and Layers popovers. */
-export function ViewerActions(p: { meta: Meta; view: ViewState; set: Set; refEpoch: number; refs: number[]; catalogStatus: CatalogStatus }) {
-  return (
-    <>
-      {p.view.mode === "diff" && (
-        <label className="ref-select" title="Reference epoch subtracted from every frame">
-          <span className="micro">minus</span>
-          <select value={p.refEpoch} onChange={(e) => p.set({ ref: Number(e.target.value) })} aria-label="Reference epoch">
-            {p.refs.map((e) => (
+    <div className="detector-panel">
+      <div className="micro menu-title">Detector</div>
+      {view.mode === "rgb" ? (
+        <p className="form-hint">False colour uses all detectors: {rgbLabel(derived)}.</p>
+      ) : (
+        rows.map((r) => (
+          <button key={r.id} className={`det-row${view.band === r.id ? " on" : ""}`} disabled={r.disabled} onClick={() => set({ band: r.id })}>
+            <span className="det-id">{r.label}</span>
+            <span className="det-sub">{r.sub}</span>
+            <kbd className="kbd">{r.key}</kbd>
+          </button>
+        ))
+      )}
+      {view.mode === "diff" && (
+        <label className="form-row ref-row">
+          <span className="micro">Difference against</span>
+          <select value={refEpoch} onChange={(e) => set({ ref: Number(e.target.value) })} aria-label="Reference epoch">
+            {derived.playable(view.band).map((e) => (
               <option key={e} value={e}>
-                epoch {String(e + 1).padStart(2, "0")} · {p.meta.epochs[e].date_min.slice(0, 7)}
+                epoch {String(e + 1).padStart(2, "0")} · {meta.epochs[e].date_min.slice(0, 7)}
               </option>
             ))}
           </select>
         </label>
       )}
-      <Popover label={<><SlidersHorizontal size={15} /><span className="btn-text">Display</span></>} title="Display settings" width={300}>
-        <DisplayPanel view={p.view} set={p.set} />
-      </Popover>
-      <Popover label={<><Layers size={15} /><span className="btn-text">Layers</span></>} title="Overlays" width={310}>
-        <LayersPanel view={p.view} set={p.set} catalogStatus={p.catalogStatus} />
-      </Popover>
-    </>
+    </div>
   );
-}
-
-export function ModeHint({ view }: { view: ViewState }) {
-  const m = MODES.find((x) => x.id === view.mode);
-  const extra =
-    view.mode === "diff"
-      ? " Red is brighter than the reference, blue fainter: a moving star leaves a blue/red pair."
-      : view.mode === "stack"
-        ? " Click epochs on the timeline to include or exclude them."
-        : "";
-  return <p className="mode-hint">{m?.hint}.{extra}</p>;
 }
