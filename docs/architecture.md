@@ -37,7 +37,7 @@ flowchart LR
 - The **web viewer** never talks to archives directly. It downloads one sequence (metadata plus typed arrays) and does every display operation locally ([ADR-0005](adr/0005-server-side-alignment-client-side-display.md)). Search suggestions are computed in the browser from a local index of about 4,500 SIMBAD objects fetched once from `/api/objects` ([ADR-0021](adr/0021-local-object-index-for-search.md)).
 - The **HTTP API** validates requests, starts or reuses jobs, streams result files and proxies catalogue cones.
 - The **domain library** contains all SPHEREx knowledge and has no web dependencies, so the CLI and the future MCP server call exactly the same code.
-- **External services:** IRSA TAP for discovering images and for CatWISE/2MASS, the public S3 bucket for pixels, ESA Gaia TAP for Gaia DR3, CDS Sesame for names the local object index does not know, cached for 30 days ([ADR-0011](adr/0011-name-resolution-and-catalogs.md), [ADR-0021](adr/0021-local-object-index-for-search.md)).
+- **External services:** IRSA TAP for discovering images and for CatWISE/2MASS, the public S3 bucket for pixels, ESA Gaia TAP for Gaia DR3, SIMBAD TAP (CDS, CfA mirror) for named objects, CDS Sesame for names the local object index does not know, cached for 30 days ([ADR-0011](adr/0011-name-resolution-and-catalogs.md), [ADR-0021](adr/0021-local-object-index-for-search.md)).
 
 ## Request lifecycle
 
@@ -110,7 +110,7 @@ backend/
     io/                    HTTP range client, FITS header helpers, Level 2 cutout and wavelength reader
     processing/            output grid and resampling, background, epochs, co-adds
     photometry.py          forced aperture photometry
-    catalogs/              Gaia DR3, CatWISE2020, 2MASS behind one cone() function
+    catalogs/              Gaia DR3, CatWISE2020, 2MASS, SIMBAD behind one cone() function
     pipeline/              sequence parameters, per-exposure work, assembly, result format, background jobs
     services.py            facade called by every adapter (HTTP, MCP, CLI)
   spherex_api/             HTTP adapter

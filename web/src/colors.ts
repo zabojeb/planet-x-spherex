@@ -5,12 +5,19 @@ export const SERIES = {
   aqua: "#199e70", // slot 3
 };
 
-/** Overlay catalogs use the first three categorical slots (they validate all-pairs on the dark surface). */
-export const CATALOG_STYLE: Record<string, { color: string; label: string; shape: "circle" | "square" | "diamond" }> = {
+/** Overlay catalogs use the first three categorical slots (they validate all-pairs on the dark surface). SIMBAD's
+ *  orchid is not a palette slot: slots 4–8 fail all-pairs against the first three on black, this one passes every
+ *  check (worst CVD ΔE 9.1, normal-vision 19.2, ≥ 3:1 on #000), and it also carries its own shape and name labels. */
+export const CATALOG_STYLE: Record<string, { color: string; label: string; shape: "circle" | "square" | "diamond" | "plus" }> = {
   gaia: { color: SERIES.blue, label: "Gaia DR3", shape: "circle" },
   catwise: { color: SERIES.orange, label: "CatWISE2020", shape: "square" },
   "2mass": { color: SERIES.aqua, label: "2MASS", shape: "diamond" },
+  simbad: { color: "#c94fb0", label: "SIMBAD", shape: "plus" },
 };
+
+/** Catalogues that can be drawn on the sky, in drawing order (named objects last, on top). */
+export const CATALOG_IDS = ["gaia", "catwise", "2mass", "simbad"] as const;
+export type CatalogId = (typeof CATALOG_IDS)[number];
 
 export const STATUS = { warning: "#fab219", critical: "#d03b3b", good: "#0ca30c" };
 

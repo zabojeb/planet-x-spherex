@@ -44,7 +44,11 @@ export function useDismiss(ref: React.RefObject<HTMLElement>, active: boolean, o
     const down = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onDismiss();
     };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onDismiss();
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // the app's own Escape (close the card, then the drawer) waits for the next press
+      onDismiss();
+    };
     document.addEventListener("pointerdown", down);
     document.addEventListener("keydown", key);
     return () => {

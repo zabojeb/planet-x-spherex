@@ -2,11 +2,15 @@
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, loadObjectIndex, measureSource, prefetchSequence, type Progress } from "./api";
-import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
+import { formatDate, formatRange, mjdToYear, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, type CatalogStatus } from "./components/Controls";
 import { Drawer, type DrawerTab } from "./components/Drawer";
+import { GoToPanel, rememberPlace, type Place } from "./components/GoTo";
+import { ObjectsPanel } from "./components/Objects";
+import { PickCard } from "./components/PickCard";
 import { Rail } from "./components/Rail";
-import { SkyView } from "./components/SkyView";
+import { SkyView, selectionWorld, valueAt, type Selection, type StepDir } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
@@ -27,7 +31,6 @@ interface StageHud {
 }
 
 const INTRO_KEY = "spherex-intro-dismissed";
-const CATALOG_IDS = ["gaia", "catwise", "2mass"] as const;
 
 /** Default detector from the data: a single band only when the target is detected in just a few detectors. */
 function bestBand(meta: Meta): BandSel {
@@ -95,6 +98,9 @@ export default function App() {
   const [tablesTick, setTablesTick] = useState(0);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
+  const [sel, setSel] = useState<Selection | null>(null);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
 
@@ -127,6 +133,7 @@ export default function App() {
     )
       .then((data) => {
         metaId.current = data.meta.id;
+        rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
         setExp({ key: "", stack: null, error: null });
@@ -150,6 +157,10 @@ export default function App() {
 
   const derived = useMemo(() => (seq ? new Derived(seq) : null), [seq]);
   const meta = seq?.meta ?? null;
+  useEffect(() => {
+    setSel(null);
+    setHoverKey(null);
+  }, [meta?.id]);
   const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   const refEpoch = derived ? effectiveRef(derived, view) : -1;
 
@@ -241,7 +252,7 @@ export default function App() {
   );
 
   // ---- catalogs for overlays
-  const wanted = view.overlays.filter((o): o is (typeof CATALOG_IDS)[number] => (CATALOG_IDS as readonly string[]).includes(o));
+  const wanted = view.overlays.filter((o): o is CatalogId => (CATALOG_IDS as readonly string[]).includes(o));
   const catalogCtrl = useRef<AbortController | null>(null);
   useEffect(() => {
     catalogCtrl.current?.abort(); // a new sequence cancels catalog queries for the old one
@@ -300,8 +311,13 @@ export default function App() {
       const tag = el?.tagName ?? "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Escape") setDrawer(null);
-      else if (e.key === " ") {
+      if (e.key === "Escape") {
+        if (sel) setSel(null);
+        else setDrawer(null);
+      } else if (e.shiftKey && e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        stepField(({ ArrowUp: "N", ArrowDown: "S", ArrowLeft: "E", ArrowRight: "W" } as const)[e.key as "ArrowUp"] ?? "N");
+      } else if (e.key === " ") {
         if (tag === "BUTTON") return;
         e.preventDefault();
         setPlaying((p) => !p);
@@ -315,6 +331,7 @@ export default function App() {
         const b = meta.bands[Number(e.key) - 1];
         if (b && derived?.playable(b.id).length) set({ band: b.id });
       } else if (e.key === "0") set({ band: "all" });
+      else if (e.key.toLowerCase() === "g") toggleOverlay("grid");
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -366,26 +383,49 @@ export default function App() {
       pick(f, { label: f.kind === "target" ? f.target.name ?? "Patch of sky" : "", sub: "Random patch of sky", pick: f });
     }
   };
+  /** A new field at a position (the field of view is kept). */
+  const goTo = (pl: Place) => {
+    if (pl.preset && presets.some((t) => t.id === pl.preset)) return choosePreset(pl.preset);
+    setSpec({ kind: "coords", target: { ra: pl.ra, dec: pl.dec, pmra: pl.pmra, pmdec: pl.pmdec, ref_epoch: pl.ref_epoch, name: pl.name } });
+    setFovOverride(fov);
+    resetForNewTarget();
+  };
+  /** Slew: a new field half a field away (east is left on the sky view). A fixed point (every stepped field
+   *  is one) steps from the requested centre, so quick presses add up before the next field has loaded; a
+   *  moving target steps from the field on screen, which sits where the target was at the observations. */
+  const stepField = (dir: StepDir) => {
+    const fixed = target && !target.pmra && !target.pmdec;
+    const c = fixed ? target : meta?.grid ?? target;
+    if (!c) return;
+    const h = fov / 120;
+    const [xi, eta] = { N: [0, h], S: [0, -h], E: [h, 0], W: [-h, 0] }[dir];
+    const [ra, dec] = tanToWorld(c.ra, c.dec, xi, eta);
+    goTo({ name: null, ra, dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
+  };
+  const toggleOverlay = (o: (typeof view.overlays)[number]) =>
+    setView((v) => ({ ...v, overlays: v.overlays.includes(o) ? v.overlays.filter((x) => x !== o) : [...v.overlays, o] }));
   const prefetchPreset = (id: string) => {
     const t = presets.find((p) => p.id === id);
     if (t) prefetchSequence({ ra: t.ra, dec: t.dec, pmra: t.pmra, pmdec: t.pmdec, ref_epoch: t.ref_epoch, name: t.name ?? null, fov_arcmin: t.fov_arcmin ?? 6 });
   };
-  /** Forced photometry of a clicked catalogue source; its curves replace the target's in the drawer. */
-  const measure = async (cat: string, src: CatalogSource) => {
+  /** Forced photometry of a catalogue source or a pinned position; its curves replace the target's in the drawer. */
+  const measureAt = async (key: string, label: string, pos: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number }) => {
     if (!meta) return;
-    const res = await measureSource(meta.id, {
-      ra: src.ra,
-      dec: src.dec,
-      pmra: src.pmra ?? 0,
-      pmdec: src.pmdec ?? 0,
-      ref_epoch: src.epoch,
-      name: src.id,
-    }).catch((e) => {
+    const res = await measureSource(meta.id, { ...pos, name: label }).catch((e) => {
       throw e instanceof ApiError && (e.status === 404 || e.status === 405) ? new Error("Source photometry is not available on this server yet.") : e;
     });
-    setSource({ key: `${cat}:${src.id}`, label: src.id, photometry: res.photometry });
+    setSource({ key, label, photometry: res.photometry });
+    setSel(null);
     setHero(false);
     setDrawer((d) => (d && d !== "details" ? d : "spectrum"));
+  };
+  const measureSelection = (s: Selection) => {
+    if (s.kind === "source") {
+      const src = s.src;
+      return measureAt(`${s.cat}:${src.id}`, String(src.id), { ra: src.ra, dec: src.dec, pmra: src.pmra ?? 0, pmdec: src.pmdec ?? 0, ref_epoch: src.epoch });
+    }
+    if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
+    return Promise.resolve();
   };
   const dismissHero = () => {
     setHero(false);
@@ -449,6 +489,59 @@ export default function App() {
   };
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
+  // ---- the selected object, target or pin, and its card
+  const targetWorld = hud?.target ?? null;
+  const targetName = target?.name || meta?.target.name || "Field centre";
+  const selWorld = sel ? selectionWorld(sel, year, targetWorld) : null;
+  /** The same object in the other catalogues shown (nearest within 3″; 6″, about a SPHEREx pixel, for a pin). */
+  const counterparts = useMemo(() => {
+    if (!sel || !selWorld) return [];
+    const radius = (sel.kind === "point" ? 6 : 3) / 3600;
+    const out: { cat: string; src: CatalogSource; sep: number }[] = [];
+    for (const cat of CATALOG_IDS) {
+      if (!view.overlays.includes(cat) || (sel.kind === "source" && sel.cat === cat)) continue;
+      let best: (typeof out)[number] | null = null;
+      for (const src of catalogs[cat] ?? []) {
+        const [ra, dec] = propagate(src, year); // at the shown date: fast movers are far from their catalogue position
+        if (Math.abs(dec - selWorld[1]) > radius) continue;
+        const d = separation(selWorld[0], selWorld[1], ra, dec);
+        if (d < radius && (!best || d < best.sep)) best = { cat, src, sep: d };
+      }
+      if (best) out.push(best);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, selWorld?.[0], selWorld?.[1], catalogs, view.overlays, year]);
+  const card =
+    sel && meta ? (
+      <PickCard
+        sel={sel}
+        world={selWorld}
+        year={year}
+        targetName={targetName}
+        target={target}
+        targetWorld={targetWorld}
+        value={sel.kind === "point" ? valueAt(display, meta.grid.n, ...worldToPixel(meta.grid, sel.ra, sel.dec)) : null}
+        counterparts={counterparts}
+        fovArcmin={fov}
+        onClose={() => setSel(null)}
+        onSelect={setSel}
+        onDetails={() => {
+          setSel(null);
+          setSource(null);
+          setHero(false);
+          setDrawer("spectrum");
+        }}
+        onMeasure={sel.kind !== "target" ? () => measureSelection(sel) : undefined}
+        onCentre={sel.kind !== "target" && selWorld ? () => goTo({ name: sel.kind === "source" ? String(sel.src.id) : null, ra: selWorld[0], dec: selWorld[1], pmra: 0, pmdec: 0, ref_epoch: 2000 }) : undefined}
+        onFollow={
+          sel.kind === "source" && totalPm(sel.src) >= 20
+            ? () => goTo({ name: String(sel.src.id), ra: sel.src.ra, dec: sel.src.dec, pmra: sel.src.pmra ?? 0, pmdec: sel.src.pmdec ?? 0, ref_epoch: sel.src.epoch })
+            : undefined
+        }
+      />
+    ) : null;
+
   const sky = (
     <SkyView
       grid={meta?.grid ?? null}
@@ -461,9 +554,8 @@ export default function App() {
       year={year}
       span={span}
       targetPx={targetPx}
-      targetName={target?.name || meta?.target.name || "Target"}
       loading={target?.name ? { name: target.name, note: target.description } : null}
-      targetWorld={hud?.target ?? null}
+      targetWorld={targetWorld}
       track={track}
       trackIndex={view.epoch}
       dateLabel={dateLabel}
@@ -473,11 +565,15 @@ export default function App() {
       onRetry={() => setReloadKey((k) => k + 1)}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
-      onOpenDetails={() => {
-        setSource(null);
-        openDetails("spectrum");
+      selection={sel}
+      onSelect={(s) => {
+        setSel(s);
+        if (s) setHero(false);
       }}
-      onMeasure={seq ? measure : undefined}
+      card={card}
+      highlight={hoverKey}
+      focus={focus}
+      onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
     />
   );
@@ -551,22 +647,45 @@ export default function App() {
         onFov={(f) => setFovOverride(f)}
       />
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
-      {meta && derived && (
-        <Rail
-          bandLabel={bandShort}
-          detector={<DetectorPanel meta={meta} derived={derived} view={view} set={set} refEpoch={refEpoch} />}
-          display={
+      <Rail
+        bandLabel={bandShort}
+        goTo={(close: () => void) => (
+          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} close={close} />
+        )}
+        objects={
+          meta ? (
+            <ObjectsPanel
+              grid={meta.grid}
+              catalogs={catalogs}
+              status={catalogStatus}
+              overlays={view.overlays}
+              onToggle={toggleOverlay}
+              year={year}
+              targetWorld={targetWorld}
+              onHover={setHoverKey}
+              onPick={(cat, src) => {
+                const [ra, dec] = propagate(src, year);
+                setSel({ kind: "source", cat, src });
+                setFocus({ ra, dec, key: Date.now() });
+                setHero(false);
+              }}
+            />
+          ) : undefined
+        }
+        detector={meta && derived ? <DetectorPanel meta={meta} derived={derived} view={view} set={set} refEpoch={refEpoch} /> : undefined}
+        display={
+          meta ? (
             <div className="panel-stack">
               <DisplayPanel view={view} set={set} />
               <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
             </div>
-          }
-          layers={<LayersPanel view={view} set={set} catalogStatus={catalogStatus} />}
-          share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} />}
-          detailsOpen={!!drawer}
-          onDetails={() => openDetails("spectrum")}
-        />
-      )}
+          ) : undefined
+        }
+        layers={meta ? <LayersPanel view={view} set={set} catalogStatus={catalogStatus} /> : undefined}
+        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} /> : undefined}
+        detailsOpen={!!drawer}
+        onDetails={meta ? () => openDetails("spectrum") : undefined}
+      />
       <div className="floating-bottom">{dock}</div>
       {drawer && fullMeta && (
         <Drawer

@@ -144,7 +144,7 @@ python -c "import numpy as np, json, urllib.request as u; m=json.load(u.urlopen(
 
 ## Catalogues
 
-`GET /api/catalogs` lists the available catalogues: `gaia` (Gaia DR3, ESA), `catwise` (CatWISE2020, IRSA), `2mass` (2MASS point sources, IRSA).
+`GET /api/catalogs` lists the available catalogues: `gaia` (Gaia DR3, ESA), `catwise` (CatWISE2020, IRSA), `2mass` (2MASS point sources, IRSA), `simbad` (SIMBAD named objects, CDS).
 
 `GET /api/catalogs/{name}?ra=<deg>&dec=<deg>&radius_arcmin=<r>` (radius default 5, maximum 30) returns up to 3,000 sources:
 
@@ -153,4 +153,6 @@ python -c "import numpy as np, json, urllib.request as u; m=json.load(u.urlopen(
   "pmra": -801.55, "pmdec": 10362.39, "parallax": 546.98, "mag": 8.19, "mag_band": "G", "color": 2.83}]
 ```
 
-Every source has `epoch` (Julian year of `ra`/`dec`) and `pmra`/`pmdec` in mas/yr (null when unknown), so clients can place it at any date. `502` with a readable `detail` (naming the catalogue) if the upstream service fails, times out or returns something unusable; the client can simply retry. The example values above are illustrative, not a recorded response.
+Every source has `epoch` (Julian year of `ra`/`dec`) and `pmra`/`pmdec` in mas/yr (null when unknown), so clients can place it at any date.
+
+`simbad` rows come most-studied first and add `type` (object type, e.g. `BY Dra Variable`), `otype` (its short code), `sp_type`, `z` (redshift), `refs` (number of references) and `parallax`; `mag` is V, else Gaia G, else J, else K, named in `mag_band`; the `NAME ` prefix of SIMBAD identifiers is dropped (`Barnard's star`). SIMBAD services are tried in order from `SPHEREX_SIMBAD_TAP_URLS` (default: CDS, then the CfA mirror), so the layer keeps working while one of them is down. `502` with a readable `detail` (naming the catalogue) if the upstream service fails, times out or returns something unusable; the client can simply retry. The example values above are illustrative, not a recorded response.

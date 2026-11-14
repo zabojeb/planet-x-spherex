@@ -21,6 +21,11 @@ class Settings:
     irsa_base: str = _env("IRSA_BASE", "https://irsa.ipac.caltech.edu/")
     gaia_tap_url: str = _env("GAIA_TAP_URL", "https://gea.esac.esa.int/tap-server/tap/sync")
     sesame_url: str = _env("SESAME_URL", "https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/~SNV")
+    # SIMBAD TAP services tried in order (comma-separated): CDS, then the CfA mirror.
+    simbad_tap_urls: tuple[str, ...] = tuple(u.strip() for u in _env(
+        "SIMBAD_TAP_URLS",
+        "https://simbad.cds.unistra.fr/simbad/sim-tap/sync,https://simbad.harvard.edu/simbad/sim-tap/sync",
+    ).split(",") if u.strip())
     collections: tuple[str, ...] = tuple(
         c.strip() for c in _env("COLLECTIONS", DEFAULT_COLLECTIONS).split(",") if c.strip()
     )

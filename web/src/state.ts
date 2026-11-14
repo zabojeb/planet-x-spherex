@@ -11,7 +11,7 @@ export const MODES: { id: Mode; label: string; key: string; hint: string }[] = [
   { id: "exp", label: "Exposures", key: "e", hint: "Single exposures of one epoch: asteroids jump between frames" },
 ];
 
-export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "flags", "compass"] as const;
+export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "simbad", "flags", "grid", "compass"] as const;
 export type Overlay = (typeof OVERLAYS)[number];
 
 export interface ViewState {
