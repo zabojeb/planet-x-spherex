@@ -692,13 +692,13 @@ canvas.smooth { image-rendering: auto; }
 }
 
 /* ---- field-centre coordinates under the search row: click (or C) to type a new position */
-.coordfield { position: relative; display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 34px; padding: 0 8px 0 12px; border-radius: 17px; color: var(--text-1); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.coordfield { position: relative; display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 34px; padding: 0 12px; border-radius: 17px; color: var(--text-1); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 button.coordfield { cursor: text; transition: border-color var(--t) var(--ease); }
 button.coordfield:hover:not(:disabled) { border-color: var(--hair-3); }
 .coordfield i { font-style: normal; color: var(--text-3); margin-right: 5px; }
 .coordfield .cf-icon { color: var(--text-3); flex: none; }
-.coordfield .cf-edit, .coordfield .cf-kbd { color: var(--text-3); opacity: 0; transition: opacity var(--t) var(--ease); }
-button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordfield:focus-visible .cf-edit, button.coordfield:focus-visible .cf-kbd { opacity: 1; }
+.coordfield .cf-hint { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); opacity: 0; pointer-events: none; transition: opacity var(--t) var(--ease); }
+button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opacity: 1; }
 .coordfield-wrap { position: relative; align-self: flex-start; }
 .coordfield.editing { width: 340px; max-width: calc(100vw - 40px); padding-right: 4px; border-color: var(--accent-ring); background: rgba(8, 8, 8, 0.82); }
 .coordfield.editing input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; outline: none; }
