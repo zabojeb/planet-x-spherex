@@ -65,13 +65,16 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
   return { ...v, band, mode, epoch, ref: keep ? v.ref : -1, stack: keep ? v.stack : null };
 }
 
-/** Phone chrome: top bar above, HUD + dock below (keep in sync with the mobile CSS). */
+/** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
+ * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
 const MOBILE_FRAME = { top: 108, bottom: 224 };
+const MID_FRAME = { top: 108, bottom: 164 };
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
   const mobile = useMediaQuery("(max-width: 760px)");
+  const mid = useMediaQuery("(min-width: 761px) and (max-width: 1400px)");
   const [presets, setPresets] = useState<Target[]>([]);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
@@ -465,7 +468,7 @@ export default function App() {
       }}
       onMeasure={seq ? measure : undefined}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
-      frame={mobile && !drawer ? MOBILE_FRAME : undefined}
+      frame={drawer ? undefined : mobile ? MOBILE_FRAME : mid ? MID_FRAME : undefined}
     />
   );
 

@@ -528,3 +528,13 @@ canvas.smooth { image-rendering: auto; }
   .label-short { display: inline; }
   .dock .segmented button { font-size: 14px; }
 }
+
+/* ---- mid widths (tablets, small windows): the dock and the HUD no longer fit side by side.
+   The dock takes the width, the HUD sits above it, and the date goes when even the dock is tight. */
+@media (min-width: 761px) and (max-width: 1400px) {
+  .floating-bottom { width: min(760px, calc(100vw - 40px)); }
+  .hud-min { bottom: 90px; }
+}
+@media (min-width: 761px) and (max-width: 900px) {
+  .dock-date { display: none; }
+}
