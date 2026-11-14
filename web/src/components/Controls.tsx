@@ -1,5 +1,5 @@
 /** Always-visible toolbar (mode, detector) plus the Display and Layers panels used in popovers or the mobile sheet. */
-import { Compass, Crosshair, Flag, Route } from "lucide-react";
+import { Compass, Crosshair, Flag, Grid3x3, Route } from "lucide-react";
 import { CATALOG_STYLE } from "../colors";
 import { rgbLabel, wlRange } from "../display";
 import type { Cmap, Derived, Stretch } from "../render";
@@ -122,7 +122,9 @@ const LAYERS: { id: Overlay; label: string; hint?: string; icon?: React.ReactNod
   { id: "gaia", label: "Gaia DR3", hint: "moved to the shown date" },
   { id: "catwise", label: "CatWISE2020", hint: "moved to the shown date" },
   { id: "2mass", label: "2MASS", hint: "positions from 1997–2001, not moved" },
+  { id: "simbad", label: "SIMBAD named objects", hint: "names and object types, moved to the shown date" },
   { id: "flags", label: "Contamination flags", hint: "pick flags in the Flags tab", icon: <Flag size={16} /> },
+  { id: "grid", label: "Coordinate grid", hint: "RA/Dec lines with labels (G)", icon: <Grid3x3 size={16} /> },
   { id: "compass", label: "Compass & scale", icon: <Compass size={16} /> },
 ];
 

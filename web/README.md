@@ -41,12 +41,20 @@ src/
   types.ts          API payload types (meta.json, jobs, catalogs)
   App.tsx           wiring and layout: target -> build -> derived images -> sections; playback, keys
   components/
-    SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click-to-select,
-                       hairline overlays in screen space, minimal HUD, HUD loader
+    SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click to select a source
+                       or drop a pin, fly-to, hairline overlays, RA/Dec grid with captions, SIMBAD name labels, hover
+                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader
+    PickCard.tsx       card for the selection (target, catalogue source or pin): ICRS/degrees/Galactic/ecliptic with
+                       copy buttons, motion, distance, offset from the target, counterparts in the other catalogues,
+                       measure / centre / follow, links to SIMBAD, Aladin Lite and WiseView
+    GoTo.tsx           Go to panel: RA/Dec or Galactic l/b (sexagesimal or degrees, optional proper motion) with a live
+                       preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
+    Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
+                       fastest), hover highlights on the sky, click flies there
     TopBar.tsx         floating top-left: serif wordmark, search pill, FOV; the share panel
     CommandSearch.tsx  ⌘K / Ctrl+K search with the challenge targets as quick picks
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
-    Rail.tsx           right tool rail: Detector, Display, Layers, Details, Share
+    Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, Details, Share
     Controls.tsx       mode control, detector panel, Display and Layers panels
     Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
@@ -79,7 +87,7 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   frame stays on screen while the next one downloads; stretch limits use the epochs already in memory.
 - The exposure and photometry tables arrive as columns (`/columns/{table}`) only when needed: photometry
   when the drawer opens, exposures in Exposures mode or the Data tab.
-- Catalogs load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
+- Catalogs (Gaia, CatWISE, 2MASS, SIMBAD) load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
   the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
 - Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
   "Measure spectrum & light curve" on a catalogue source calls `POST .../photometry` and shows that source
@@ -118,7 +126,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `cmap` | `gray` or `ice` |
 | `zoom` | integer zoom, `0` = fit |
 | `smooth=1` | smooth instead of crisp pixels |
-| `ov` | overlays: `target,track,gaia,catwise,2mass,flags,compass` |
+| `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
 | `embed=1` | viewer and its controls only, for iframes |
@@ -128,4 +136,19 @@ the star leaves a red (now) and blue (then) pair, offset to the north.
 
 ## Keyboard
 
-Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes.
+Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
+Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+
+## Exploring
+
+- **Where am I.** The readout in the bottom-left corner follows the cursor (or the pin, selection or target): α δ in
+  sexagesimal and degrees, Galactic l b, the offset from the target and the pixel value. `g` draws an RA/Dec grid.
+- **Go somewhere.** Type a name or coordinates in the search, or open Go to (rail, top button) for RA/Dec or Galactic
+  input with a live preview, optional proper motion, an all-sky map to click on and recent places. The pad above the
+  compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
+- **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
+  motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,
+  build a field centred on it, or one that follows its proper motion. SIMBAD, Aladin Lite and WiseView open at the
+  same position.
+- **What is here.** Objects (rail) lists every catalogue source in the field at the shown date; turn on SIMBAD for
+  names and object types. Hover a row to see it on the sky, click to fly there.

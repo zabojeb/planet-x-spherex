@@ -13,10 +13,10 @@ import time
 
 from .. import cache
 from ..errors import UpstreamError
-from . import catwise, gaia, twomass
+from . import catwise, gaia, simbad, twomass
 
 log = logging.getLogger(__name__)
-_SOURCES = {"gaia": gaia, "catwise": catwise, "2mass": twomass}
+_SOURCES = {"gaia": gaia, "catwise": catwise, "2mass": twomass, "simbad": simbad}
 CATALOGS = {name: mod.LABEL for name, mod in _SOURCES.items()}
 
 
