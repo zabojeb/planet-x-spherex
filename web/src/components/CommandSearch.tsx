@@ -13,6 +13,7 @@ import {
   smallBodyName, solarSystemQuery, SOLAR_EXAMPLES, type Facet, type Pick, type Recent, type SkyObject,
 } from "../search";
 import type { Target } from "../types";
+import { ClaudeEgg } from "./ClaudeEgg";
 
 interface Props {
   space: SkyObject[];
@@ -42,6 +43,8 @@ type Section = { title: string; items: Item[] };
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const REMOTE_DELAY_MS = 350;
+/** The words that summon the easter egg instead of a search (and are never sent to the name resolver). */
+const EGG = new Set(["claude", "клод"]);
 
 const keyOf = (o: SkyObject) => (o.preset ? `p:${o.preset}` : `n:${o.name}`);
 const pickKey = (p: Pick) => (p.kind === "preset" ? `p:${p.id}` : `n:${p.target.name ?? ""}`);
@@ -96,6 +99,8 @@ export function CommandSearch(p: Props) {
   const narrow = useMediaQuery("(max-width: 760px)");
   const [remote, setRemote] = useState<Remote | null>(null);
   const [waiting, setWaiting] = useState(false); // Enter pressed on a name still being looked up
+  const [egg, setEgg] = useState(false);
+  const closeEgg = useCallback(() => setEgg(false), []);
   const wrap = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -134,7 +139,8 @@ export function CommandSearch(p: Props) {
   // Not while good local suggestions exist, except for catalogue numbers (HD 12345 may not be in the index
   // even when HD 123… are).
   const weak = !matches.length || matches[0].score - matches[0].obj.pop < 60;
-  const wantRemote = query.length >= 2 && !coords && !exact && !facet && solar !== "strong" && !looksLikeCoords(query) && (weak || /\d/.test(query));
+  const isEgg = EGG.has(query.toLowerCase());
+  const wantRemote = query.length >= 2 && !isEgg && !coords && !exact && !facet && solar !== "strong" && !looksLikeCoords(query) && (weak || /\d/.test(query));
   useEffect(() => {
     if (!wantRemote) {
       setRemote(null);
@@ -303,6 +309,11 @@ export function CommandSearch(p: Props) {
       setText(text + ghost);
     } else if (e.key === "Enter") {
       e.preventDefault();
+      if (isEgg) {
+        finish();
+        setEgg(true);
+        return;
+      }
       // A catalogue number typed in full and still being looked up: Enter means that object, not the
       // first near miss, so wait for the answer.
       if (pending && active === 0 && (!matches.length || /\d/.test(query))) setWaiting(true);
@@ -407,6 +418,7 @@ export function CommandSearch(p: Props) {
           <div className="cmdk-hint">{hint}</div>
         </div>
       )}
+      {egg && <ClaudeEgg onDone={closeEgg} />}
     </div>
   );
 }

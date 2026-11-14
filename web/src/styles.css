@@ -959,3 +959,53 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 @media (min-width: 761px) {
   .hero { bottom: max(110px, calc(var(--hud-clear, 0px) + 20px)); }
 }
+
+/* ------------------------------------------------------------------ easter egg: "claude" + Enter in the search */
+.egg {
+  --clay: #d97757;
+  position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 24px; overflow: hidden; cursor: pointer; user-select: none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(217, 119, 87, 0.16), rgba(0, 0, 0, 0.88) 62%);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: fade 500ms var(--ease) both;
+}
+.egg.leaving { animation: egg-out 420ms var(--ease) forwards; }
+@keyframes egg-out { from { opacity: 1; } to { opacity: 0; } }
+.egg-dust { position: absolute; border-radius: 50%; background: var(--text-1); opacity: 0.15; animation: egg-twinkle var(--d) ease-in-out var(--w) infinite alternate; }
+@keyframes egg-twinkle { to { opacity: 0.8; } }
+.egg-meteor {
+  position: absolute; width: 160px; height: 1px; opacity: 0; transform-origin: 100% 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 243, 234, 0.9));
+  animation: egg-meteor 7s ease-in var(--delay) infinite;
+}
+@keyframes egg-meteor {
+  0% { opacity: 0; transform: rotate(22deg) translateX(0); }
+  2% { opacity: 1; }
+  12% { opacity: 0; transform: rotate(22deg) translateX(520px); }
+  100% { opacity: 0; transform: rotate(22deg) translateX(520px); }
+}
+.egg-sky { width: min(56vmin, 430px); height: min(56vmin, 430px); flex: none; overflow: visible; }
+.egg-spin { animation: spin 120s linear 2.4s infinite; }
+.egg-star { fill: #fff3ea; transform-box: fill-box; transform-origin: center; animation: egg-gather 1500ms var(--ease) var(--delay) both; }
+.egg-star.tip { fill: #ffe6d6; animation: egg-gather 1500ms var(--ease) var(--delay) both, egg-glint 2.4s ease-in-out calc(var(--delay) + 1700ms) infinite alternate; }
+@keyframes egg-gather {
+  from { opacity: 0; transform: translate(var(--fx), var(--fy)) scale(0.4); }
+  35% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes egg-glint { from { opacity: 1; } to { opacity: 0.45; } }
+.egg-line { fill: none; stroke: var(--clay); stroke-width: 0.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0.85; animation: egg-draw 800ms var(--ease) var(--delay) forwards; }
+@keyframes egg-draw { to { stroke-dashoffset: 0; } }
+.egg-core { transform-box: fill-box; transform-origin: center; animation: egg-bloom 1200ms var(--ease) 1300ms both, egg-breathe 3.2s ease-in-out 2500ms infinite alternate; }
+@keyframes egg-bloom { from { opacity: 0; transform: scale(0); } 60% { opacity: 1; transform: scale(1.35); } to { opacity: 1; transform: none; } }
+@keyframes egg-breathe { from { transform: none; } to { transform: scale(1.18); } }
+.egg-caption { text-align: center; max-width: 600px; animation: egg-rise 900ms var(--ease) 2300ms both; }
+@keyframes egg-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.egg-kicker { color: var(--clay); }
+.egg-title { margin: 12px 0 0; font-family: var(--display); font-weight: 400; font-size: clamp(40px, 6vw, 76px); line-height: 1; letter-spacing: -0.015em; }
+.egg-sub { margin: 4px 0 0; font-family: var(--display); font-style: italic; font-size: clamp(20px, 2.6vw, 32px); line-height: 1.2; color: var(--text-2); }
+.egg-data { margin-top: 18px; font-size: 11.5px; letter-spacing: 0.02em; color: var(--text-3); }
+.egg-hint { margin-top: 22px; animation: egg-rise 900ms var(--ease) 3600ms both; }
+@media (prefers-reduced-motion: reduce) {
+  .egg, .egg * { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
+}
