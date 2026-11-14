@@ -492,3 +492,25 @@ canvas.smooth { image-rendering: auto; }
 .exports { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .exports a { justify-content: flex-start; font-size: 12px; text-decoration: none; }
 .exports a small { color: var(--text-3); margin-left: auto; font-family: var(--mono); font-size: 10px; }
+
+/* ---- phones: roomier dock with finger-sized targets (after the base rules so it wins the cascade) */
+@media (max-width: 760px) {
+  .floating-bottom { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .dock { gap: 0; padding: 10px 12px 6px; border-radius: 20px; }
+  .dock-row { column-gap: 12px; row-gap: 14px; }
+  .dock .segmented { display: flex; overflow: visible; border-radius: 10px; }
+  .dock .segmented button { flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 6px; font-size: 13px; }
+  .transport-buttons { gap: 6px; }
+  .dock .btn.icon { width: 40px; height: 44px; }
+  .dock .btn.play { width: 48px; height: 48px; }
+  .scrubber { height: 52px; }
+  .scrub-rail, .scrub-fill { top: 22px; }
+  .scrub-tick { top: 22.5px; }
+  .scrub-tick::before { content: ""; position: absolute; inset: -14px -10px; } /* larger tap area */
+  .scrub-ref { bottom: calc(100% + 6px); }
+  .scrub-label { top: 34px; font-size: 11px; }
+  .exp-strip { padding: 0 2px 10px; }
+  .exp-dots { gap: 6px; }
+  .exp-dots button { width: 14px; height: 14px; }
+  .hud-min { bottom: calc(176px + env(safe-area-inset-bottom)); }
+}
