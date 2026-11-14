@@ -924,7 +924,6 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 .measure-tools { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hair); }
 .badge.novelty .num { margin-left: 6px; }
 .field-panel .segmented { flex-wrap: wrap; height: auto; }
-||||||| 76d6a3d
 
 /* phones pan by dragging, so the N/E/S/W pad only takes room from the image */
 @media (max-width: 760px) {
