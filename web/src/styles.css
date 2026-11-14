@@ -307,6 +307,11 @@ textarea { background: var(--layer-1); border: 1px solid var(--hair-2); border-r
 .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .chart-sub { margin: 0; font-size: 12px; color: var(--text-3); }
 .chart-body { position: relative; }
+.chart-row { display: flex; }
+.chart-scroll { position: relative; flex: 1; min-width: 0; }
+.chart-axis { flex: none; }
+/* phones: only the plot scrolls sideways; the y axis (.chart-axis) and the notes below stay in place */
+.chart-body.split .chart-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .chart svg { display: block; overflow: visible; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 4px; padding: 0; list-style: none; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
 .legend li { display: inline-flex; align-items: center; gap: 6px; }
@@ -790,5 +795,4 @@ canvas.smooth { image-rendering: auto; }
   .drawer-head > .btn.icon { order: 1; margin-left: 0; flex: none; }
   .drawer-head > :not(:first-child):not(.btn) { order: 2; }
   .drawer-head > .segmented:not(:first-child) + .drawer-title.source-chip, .app.is-mobile .drawer-title.source-chip { margin-left: auto; }
-  .chart-body { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 }
