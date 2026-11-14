@@ -1,0 +1,30 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+dist/
+.next/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Astronomy data and caches (never commit FITS files)
+*.fits
+*.fits.gz
+data/
+cache/
