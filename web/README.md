@@ -54,12 +54,13 @@ src/
                        preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
     Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
                        fastest), hover highlights on the sky, click flies there
+    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer
     TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
     CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
                        challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
-    Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, Details, Share
-    Controls.tsx       mode control, detector panel, Display and Layers panels
+    Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, 3D, Details, Share
+    Controls.tsx       mode control, detector panel, Display and Layers panels, the 3D bar
     Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
     Progress.tsx       top progress bar and the landing index over the sky
@@ -110,6 +111,31 @@ One amber accent (`#ffc845`) marks active and focus states only; all data colour
 palette in `colors.ts` (contamination flags use the status red so they cannot be confused with the
 accent). Blinking is instant; a new target plays a short lock-on animation.
 
+## 3D views
+
+The rail's 3D button (or `v`) opens one of three views ([ADR-0022](../docs/adr/0022-3d-views.md)). They are
+independent of the mode and use the same stretch, colour map and percentile limits as the flat sky:
+
+- **Relief**: the frame on screen as a height field. Height is signal-to-noise above the sky on a log scale (flat
+  within 2σ, 1 at 200σ). Colours follow the stretch and colour map. Stars are peaks. In Difference a mover is a red
+  peak (now) beside a blue pit (then).
+- **Time cube**: every epoch as a glowing layer at its date, with the sky transparent. A still star is a vertical
+  column, and a mover leans along the predicted track (orange) that threads the epochs. In Exposures mode with one
+  detector, the layers are that visit's single exposures at their times, so a source that moves during the visit,
+  such as an asteroid, traces a straight diagonal.
+- **λ cube**: every detector of the current epoch, short to long wavelength. A source lights up only in the layers
+  where it is bright.
+
+Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset. Click a layer's label to show that epoch
+or detector. The bar at the top right switches the view, sets the height, spins the scene and goes back to 2D.
+North is the far side and east is left. three.js loads only when a 3D view opens.
+
+| Relief, Difference, seen from the side | Time cube, Blink, D2 |
+|---|---|
+| ![Barnard's Star in Difference: a peak where it is now, a pit where it was a year earlier](../docs/images/3d/relief-difference.jpg) | ![Barnard's Star as a column through three epochs, threaded by the predicted track](../docs/images/3d/time-cube.jpg) |
+| **Time cube, Exposures**: 18 single exposures of one visit | **λ cube**: the six detectors of one epoch (WISE 0855 field) |
+| ![Single D2 exposures stacked at their times](../docs/images/3d/time-cube-exposures.jpg) | ![Six detector layers from 0.75 to 5 µm](../docs/images/3d/lambda-cube.jpg) |
+
 ## URL parameters
 
 Every view is reproducible from its URL; the app keeps the address bar in sync.
@@ -137,6 +163,8 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
+| `v3d` | 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
+| `h3d` | vertical exaggeration of the 3D view (default 1) |
 | `embed=1` | viewer and its controls only, for iframes |
 
 Example: `/?target=barnard&mode=diff&band=D2&epoch=4` shows Barnard's Star in D2 minus the first visit:
@@ -157,7 +185,7 @@ The loading screen names what was drawn.
 ## Keyboard
 
 Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
-Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+v 3D on/off · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
 ⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
 
 ## Exploring

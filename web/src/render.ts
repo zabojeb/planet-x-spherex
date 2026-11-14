@@ -304,7 +304,87 @@ export class Derived {
   }
 }
 
+// ------------------------------------------------------------------ 3D: heights and slice opacity (grid order, row 0 = south)
+
+/** Sky level (median) and robust noise of an image, cached per array (Derived memoizes the arrays). */
+const skyCache = new WeakMap<object, [number, number]>();
+function skyStats(img: ArrayLike<number>): [number, number] {
+  let s = skyCache.get(img as object);
+  if (!s) {
+    const a = img instanceof Float32Array ? img : Float32Array.from(img);
+    s = [percentiles([a], [50])[0], robustSigma(a)];
+    skyCache.set(img as object, s);
+  }
+  return s;
+}
+
+/** Signal-to-noise to height: flat within 2σ of the sky, log-compressed above, 1 at 200σ (a little more
+ *  for saturated stars), plus a faint texture so the floor still reads as sky. */
+const LOG_TOP = Math.log10(1 + 198);
+function snrHeight(u: number): number {
+  const a = Math.abs(u);
+  const h = Math.min(1.2, Math.log10(1 + Math.max(0, a - 2)) / LOG_TOP) + 0.03 * Math.min(1, a / 3);
+  return u < 0 ? -h : h;
+}
+
+/** Relief heights, NaN where there is no data. Height is signal-to-noise above the sky on a log scale (see
+ *  snrHeight), so it does not depend on the stretch, stays put while blinking, and noise stays flat; the
+ *  colours still come from the stretch. Below the sky a scalar image only dips a quarter as deep. A
+ *  difference is signed: brighter now = peak, brighter then = pit. RGB uses the combined S/N of its channels. */
+export function heightField(d: Display3D): Float32Array {
+  const chans = d.kind === "rgb" ? d.ch : [d.img];
+  const stats = chans.map((c) => {
+    const [med, sig] = skyStats(c);
+    return [d.kind === "diverging" ? 0 : med, sig] as const;
+  });
+  const out = new Float32Array(chans[0].length);
+  for (let i = 0; i < out.length; i++) {
+    let sum = 0;
+    let k = 0;
+    for (let c = 0; c < chans.length; c++) {
+      const v = chans[c][i];
+      const [med, sig] = stats[c];
+      if (!Number.isFinite(v)) continue;
+      sum += sig > 0 ? (v - med) / sig : 0;
+      k++;
+    }
+    if (!k) {
+      out[i] = NaN;
+      continue;
+    }
+    const h = snrHeight(sum / Math.sqrt(k));
+    out[i] = d.kind !== "diverging" && h < 0 ? h * 0.25 : h;
+  }
+  return out;
+}
+
+/** Opacity for a cube slice from its heights: noise within 3σ stays nearly transparent, 10σ is opaque. */
+export function sliceAlpha(h: Float32Array, n: number, out: ImageData): void {
+  const d = out.data;
+  for (let y = 0; y < n; y++) {
+    const r = n - 1 - y;
+    for (let x = 0; x < n; x++) {
+      const v = h[y * n + x];
+      const a = Number.isFinite(v) ? Math.min(1, Math.max(0, (Math.abs(v) - 0.08) / 0.26)) : 0;
+      d[(r * n + x) * 4 + 3] = Math.round(255 * Math.pow(a, 1.2));
+    }
+  }
+}
+
 // ------------------------------------------------------------------ painting (rows flipped: north up)
+
+/** Displays that have pixels (everything but "empty"); kept structural so render.ts stays free of display.ts. */
+export type Display3D =
+  | { kind: "scalar"; img: ArrayLike<number>; lo: number; hi: number }
+  | { kind: "diverging"; img: ArrayLike<number>; lim: number }
+  | { kind: "rgb"; ch: [Float32Array, Float32Array, Float32Array]; lims: [number, number][] };
+
+/** Paints any display the way the 2D sky shows it. */
+export function paintDisplay(d: Display3D, n: number, stretch: Stretch, cmap: Cmap, out: ImageData): void {
+  if (d.kind === "scalar") paintScalar(d.img, n, d.lo, d.hi, stretch, LUTS[cmap], out);
+  else if (d.kind === "diverging") paintDiverging(d.img, n, d.lim, stretch, out);
+  else paintRGB(d.ch, n, d.lims, stretch, out);
+}
 
 export function paintScalar(img: ArrayLike<number>, n: number, lo: number, hi: number, stretch: Stretch,
   lut: Uint8ClampedArray, out: ImageData): void {

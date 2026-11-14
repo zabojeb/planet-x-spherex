@@ -12,7 +12,7 @@ import { compassPoint, formatAngle, formatDec, formatDeg, formatRA, gridLabel, g
 import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
-import { LUTS, paintDiverging, paintFlags, paintRGB, paintScalar } from "../render";
+import { paintDisplay, paintFlags } from "../render";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
 
@@ -81,7 +81,7 @@ const MAX_LABELS = 28;
 
 type Marker = { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number };
 
-function loaderText(p: Progress): { text: string; pct: number | null } {
+export function loaderText(p: Progress): { text: string; pct: number | null } {
   const pct = p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
   switch (p.stage) {
     case "busy":
@@ -151,9 +151,7 @@ export function SkyView(p: Props) {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     const out = ctx.createImageData(n, n);
-    if (d.kind === "scalar") paintScalar(d.img, n, d.lo, d.hi, p.view.stretch, LUTS[p.view.cmap], out);
-    else if (d.kind === "diverging") paintDiverging(d.img, n, d.lim, p.view.stretch, out);
-    else paintRGB(d.ch, n, d.lims, p.view.stretch, out);
+    paintDisplay(d, n, p.view.stretch, p.view.cmap, out);
     ctx.putImageData(out, 0, 0);
   }, [p.display, p.view.stretch, p.view.cmap, n]);
 

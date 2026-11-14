@@ -1,6 +1,6 @@
 /** Slim vertical tool rail on the right edge; each button opens a compact panel beside it. "Go to" is there
  *  even before a field has loaded; the rest need a sequence. */
-import { Info, Layers, ListTree, Navigation, Share2, SlidersHorizontal, Telescope } from "lucide-react";
+import { Box, Info, Layers, ListTree, Navigation, Share2, SlidersHorizontal, Telescope } from "lucide-react";
 import type { ReactNode } from "react";
 import { Popover } from "./ui/primitives";
 
@@ -16,6 +16,8 @@ export function Rail(p: {
   detailsOpen: boolean;
   onDetails?: () => void;
   bandLabel: string;
+  is3d?: boolean;
+  on3d?: () => void;
 }) {
   return (
     <nav className="rail glass" aria-label="Tools">
@@ -41,6 +43,12 @@ export function Rail(p: {
         <Popover label={<Layers size={16} />} title="Layers" align="side" width={300}>
           {p.layers}
         </Popover>
+      )}
+      {p.on3d && (
+        <button className={`btn ghost icon rail-btn${p.is3d ? " active" : ""}`} onClick={p.on3d} title="3D view: relief, time cube, λ cube (v)" aria-pressed={!!p.is3d}>
+          <Box size={16} />
+          <span className="rail-tag">3D</span>
+        </button>
       )}
       {p.onDetails && (
         <button className={`btn ghost icon rail-btn${p.detailsOpen ? " active" : ""}`} onClick={p.onDetails} title="Spectrum, light curve and data" aria-pressed={p.detailsOpen}>

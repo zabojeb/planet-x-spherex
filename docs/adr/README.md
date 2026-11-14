@@ -36,3 +36,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0019](0019-merge-small-epochs.md) | Merge small epochs into close neighbours, otherwise mark them partial | Accepted | 2026-11-14 |
 | [0020](0020-ring-photometry-for-saturated-stars.md) | Measure saturated stars in a fixed ring outside the core, as relative fluxes | Accepted | 2026-11-14 |
 | [0021](0021-local-object-index-for-search.md) | Suggest objects from a local index while typing; ask Sesame only for names it does not know | Accepted | 2026-11-14 |
+| [0022](0022-3d-views.md) | Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand | Accepted | 2026-11-14 |
