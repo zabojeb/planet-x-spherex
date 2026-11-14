@@ -114,13 +114,26 @@ def _r(x, nd: int = 4):
     return x
 
 
+_PRECISE = ("ra", "dec", "mjd", "t_ref", "x", "y", "lon", "lat")
+
+
+def _precise_key(k) -> bool:
+    """Coordinates and times must not lose precision (4 significant digits of an RA is 0.1 deg)."""
+    k = str(k).lower()
+    return any(k == p or k.startswith(p + "_") or k.endswith("_" + p) for p in _PRECISE)
+
+
 def compact(obj, depth: int = 0, max_list: int = 6):
-    """Shrink nested candidate records for an LLM: round floats, truncate long lists, drop big arrays."""
+    """Shrink nested candidate records for an LLM: round floats (not coordinates or times), truncate long lists,
+    drop big arrays."""
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
             if isinstance(v, (list, tuple)) and len(v) > 40:
                 out[k] = f"<{len(v)} values omitted>"
+                continue
+            if _precise_key(k) and isinstance(v, (float, np.floating)):
+                out[k] = round(float(v), 7) if math.isfinite(float(v)) else None
                 continue
             out[k] = compact(v, depth + 1, max_list)
         return out

@@ -120,6 +120,8 @@ def test_compact_shrinks_payloads():
     assert c["a"] == 1.235 and c["arr"].startswith("<100") and c["nested"][-1] == "... 4 more"
     assert c["nested"][0]["x"] is None
     json.dumps(c)
+    pos = tools.compact({"ra": 331.0441466, "dec": -56.7828442, "mjd": 60914.2131964, "pm_total": 4684.165})
+    assert pos == {"ra": 331.0441466, "dec": -56.7828442, "mjd": 60914.2131964, "pm_total": 4684.0}
 
 
 def test_http_endpoint_mounted(seq):
