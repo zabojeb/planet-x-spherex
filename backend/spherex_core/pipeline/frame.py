@@ -54,4 +54,5 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
         "ring": ring, "omega": omega,
         "flag_counts": count_bits(aligned_flags),
         "obs_id": frame.obs_id, "collection": frame.collection, "file": frame.file_name,
+        "t_process": time.perf_counter() - t0,
     }

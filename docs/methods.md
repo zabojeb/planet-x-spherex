@@ -115,9 +115,9 @@ ALGO_VERSION 2 rebuilds at each preset's field of view (cutouts cached except WI
 
 ## Analyses on a built sequence
 
-- **Photometry of any position** (ADR-0025): the pipeline's measurements on the cached native cutouts, at a new position with optional proper motion, PSF zone nearest to that position. Re-measuring the targets reproduces the build's fluxes exactly for Barnard's Star (357 of 358 exposures) and with a median difference of zero for ε Indi B (maximum 6 %, expected where the PSF zone nearest the source differs from the one nearest the cutout centre that the build used). 11–14 s for 358–458 exposures in a cold script, no downloads.
-- **Proper motion** (ADR-0026): flux-weighted centroids per epoch and detector, a straight-line fit with per-detector zero points. ε Indi B 3628 ± 305 / −2526 ± 260 mas/yr (Gaia 3982 / −2467); Barnard's Star −1316 ± 325 / 9557 ± 385 (Gaia −802 / 10362); three static Gaia stars −98 … +57 mas/yr. Precision is about 300 mas/yr with 3–4 visits; per-detector centroids of bright, saturated stars scatter by ~0.5″.
-- **Periodograms** (ADR-0027): Lomb–Scargle on the client-identical relative light curve. R Dra 235.7 d (standard) and 246.9 d (multiband) against ~245 d; RW Aur's three visits give the visit spacing (131 d), not a period.
+- **Photometry of any position** (ADR-0027): the pipeline's measurements on the cached native cutouts, at a new position with optional proper motion, PSF zone nearest to that position. Re-measuring the targets reproduces the build's fluxes exactly for Barnard's Star (357 of 358 exposures) and with a median difference of zero for ε Indi B (maximum 6 %, expected where the PSF zone nearest the source differs from the one nearest the cutout centre that the build used). 11–14 s for 358–458 exposures in a cold script, no downloads.
+- **Proper motion** (ADR-0028): flux-weighted centroids per epoch and detector, a straight-line fit with per-detector zero points. ε Indi B 3628 ± 305 / −2526 ± 260 mas/yr (Gaia 3982 / −2467); Barnard's Star −1316 ± 325 / 9557 ± 385 (Gaia −802 / 10362); three static Gaia stars −98 … +57 mas/yr. Precision is about 300 mas/yr with 3–4 visits; per-detector centroids of bright, saturated stars scatter by ~0.5″.
+- **Periodograms** (ADR-0029): Lomb–Scargle on the client-identical relative light curve. R Dra 235.7 d (standard) and 246.9 d (multiband) against ~245 d; RW Aur's three visits give the visit spacing (131 d), not a period.
 
 ### Calibration checks (2026-11-14)
 
@@ -126,7 +126,7 @@ ALGO_VERSION 2 rebuilds at each preset's field of view (cutouts cached except WI
 
 ## Archival epochs and solar-system objects
 
-### Archival epochs (ADR-0021)
+### Archival epochs (ADR-0023)
 
 1. CAOM TAP search around the grid centre: 2MASS and AllWISE images that intersect the field, NEOWISE-R
    frames that contain the centre (`spherex_core/archival/sources.py`).
@@ -151,7 +151,7 @@ Checks (2026-11-14, light-weighted centroid within 4 px of the predicted target 
 Limitations: AllWISE combines 2010 passes ~6 months apart, so fast movers look slightly elongated; 2MASS
 coverage of wide fields can be partial (`coverage`); bright stars saturate in 2MASS and WISE.
 
-### Solar-system objects (ADR-0022)
+### Solar-system objects (ADR-0024)
 
 IRSA MOST lists the SPHEREx files that contain the object with its predicted position at each exposure
 start. The co-moving build cuts out and resamples every exposure on a grid centred on that position, then

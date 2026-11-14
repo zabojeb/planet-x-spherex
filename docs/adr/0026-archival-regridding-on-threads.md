@@ -1,4 +1,4 @@
-# ADR-0024: Regrid archival images on threads, not on the shared process pool
+# ADR-0026: Regrid archival images on threads, not on the shared process pool
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

@@ -1,4 +1,4 @@
-# ADR-0034: Size pools and server workers from the cgroup CPU quota
+# ADR-0036: Size pools and server workers from the cgroup CPU quota
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

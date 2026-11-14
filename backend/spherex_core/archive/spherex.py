@@ -48,6 +48,8 @@ class Frame:
         return self.uri.rsplit("/", 1)[-1]
 
 
+log = logging.getLogger(__name__)
+
 def query_frames(ra: float, dec: float, collections: tuple[str, ...] | None = None,
                  use_cache: bool = True) -> list[Frame]:
     """All Level 2 images whose footprint contains (ra, dec), one per exposure and detector, oldest first.

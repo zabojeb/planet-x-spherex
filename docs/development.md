@@ -11,6 +11,7 @@ How to run, test and deploy the project. Architecture is in [architecture.md](ar
 | `web/` | web viewer (Vite + React + TypeScript), in progress |
 | `scripts/deploy.sh` | sync to the dev server, install, restart the API |
 | `scripts/build_sequence.py` | build sequences from the command line, warm the cache, write quick-look PNGs |
+| `scripts/build_object_index.py` | rebuild the local object index (`backend/spherex_core/targets/objects.json`) from SIMBAD |
 | `docs/` | documentation and ADRs |
 
 ## Backend
@@ -56,6 +57,26 @@ All settings are environment variables:
 | `SPHEREX_MAX_FRAMES_IN_FLIGHT` | 64 | exposures read concurrently |
 | `SPHEREX_CPU_WORKERS` | 24 | processes for per-exposure work |
 | `SPHEREX_TAP_CACHE_HOURS` | 12 | lifetime of cached archive queries |
+| `SPHEREX_JOBS_PER_WORKER` (alias `SPHEREX_MAX_JOBS`) | 2 | builds running at once per worker; the rest queue |
+| `SPHEREX_MAX_RUNTIME` (alias `SPHEREX_JOB_TIMEOUT`) | 900 | seconds before a build is stopped with an error |
+| `SPHEREX_INTEREST_TIMEOUT` (alias `SPHEREX_JOB_IDLE`) | 30 | seconds without a poll before an unpinned build is cancelled |
+| `SPHEREX_JOB_DETACH_GRACE` | 5 | seconds after the last client detached before a build is cancelled |
+| `SPHEREX_LOG_LEVEL` | INFO | `DEBUG` adds a line per exposure, retry and progress poll |
+| `SPHEREX_LOG_FORMAT` | text | `json` for one JSON object per line |
+| `SPHEREX_SLOW_FRAME` | 30 | seconds after which one exposure is logged as WARNING |
+| `SPHEREX_SLOW_REQUEST` | 5 | seconds after which an HTTP request is logged as WARNING |
+
+### Logs
+
+Every line reads `time level logger [sequence id] message key=value ...`, with durations in seconds (`s=`). The sequence id follows a build through the job queue, the pipeline and the HTTP requests about it, so one build reads top to bottom with:
+
+```bash
+grep 48006f61db3e73e6ae51 /workspace/api.log
+```
+
+At INFO a build logs: `job submitted` (or `job joined`, `job cached`), `job started queued_s=` (time spent waiting for a slot), `build start`, `tap query done` or `image search from cache`, `search done`, `fetch progress` every 10 % or 15 s, `fetch done`, one `fetch time <step>` line per step with p50/p90/max/sum over the exposures, `fetch slowest` (the three slowest exposures), `assemble done`, `write done`, `build done` and `job done`. Cancellations, timeouts and failures say so with the stage they reached. Every API request logs `METHOD path status= s=`; progress polls (202) and static files only at DEBUG. Reading the fetch breakdown: a large `slot` means `SPHEREX_MAX_FRAMES_IN_FLIGHT` is the limit, `read`/`tables` is S3 latency (check `retries`), `pool_wait` means the CPU workers are busy (several builds at once or too few `SPHEREX_CPU_WORKERS`), `process` is our own computation. The same numbers are stored in `meta.json` under `stats.seconds` and `stats.timings`.
+
+`scripts/deploy.sh` starts uvicorn with `--no-access-log` (the API logs requests itself) and passes `DEPLOY_LOG_LEVEL` from `.env.deploy` as `SPHEREX_LOG_LEVEL`.
 
 ### Tests
 
@@ -84,6 +105,16 @@ python scripts/build_sequence.py "133.79 -7.245" --pmra -8118 --pmdec 677 --ref-
 ```
 
 The target is a preset id, `all`, an object name or coordinates. Options: `--fov`, `--pmra`, `--pmdec`, `--ref-epoch`, `--max-epoch-days`. Each run prints exposures, epochs, requests, megabytes and time, and writes `quicklook.png` (epochs × detectors) into the sequence directory. Results land in the same cache the API reads, so running `all` before a demo makes the presets instant, provided the API requests the same parameters.
+
+### Object index
+
+Search suggestions come from `backend/spherex_core/targets/objects.json`, a committed snapshot of about 4,500 SIMBAD objects ([ADR-0021](adr/0021-local-object-index-for-search.md)). Rebuild it when the selection changes or SIMBAD has new objects worth adding:
+
+```bash
+python scripts/build_object_index.py --tap https://simbad.harvard.edu/simbad/sim-tap/sync --cache /tmp/simbad_raw.json
+```
+
+The script needs only the standard library and the backend package (to link rows to the challenge presets). It runs 19 selections plus a cone per preset and identifier queries in chunks (the selections are listed at the top of the script), picks a display name and up to 8 search aliases per object, and prints a summary per category. `--tap` may be repeated; a service that fails is dropped for the rest of the run (CDS SIMBAD TAP was down on 2026-11-14, the Harvard mirror worked). `--cache` keeps the raw answers so that changes to naming or ranking can be re-run offline. Review the diff of `objects.json` before committing: display names come from heuristics.
 
 ## Web
 

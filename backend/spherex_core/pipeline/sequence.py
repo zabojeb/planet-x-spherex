@@ -136,9 +136,9 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
     half = int(math.ceil(grid.n * grid.pixscale / NATIVE_PIXSCALE * 0.5 * 1.42)) + 3  # covers any rotation
 
     per_frame: list[dict | None] = [None] * len(frames)
+    timing: list[dict] = []  # per exposure: slot, read, tables, pool_wait, process, work, total (seconds)
     errors: list[str] = []
     done = 0
-    timing: list[dict] = []  # per exposure: slot, read, tables, pool_wait, process, work, total (seconds)
     n_frames = len(frames)
     next_log = {"pct": 10, "at": time.perf_counter() + 15}
     report("fetch", 0, n_frames)
@@ -190,13 +190,12 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
                     t["error"] = repr(e)[:200]
                     log.warning("frame failed: %s %r", f.file_name, e)
                 finally:
-                    done += 1
                     t["total"] = time.perf_counter() - tq
                     t["work"] = time.perf_counter() - ta
                     timing.append(t)
                     lvl = logging.WARNING if t["work"] > settings.slow_frame_s else logging.DEBUG
-                    logs.event(log, lvl, "frame",
-                               **{k: (round(v, 3) if isinstance(v, float) else v) for k, v in t.items()})
+                    logs.event(log, lvl, "frame", **{k: (round(v, 3) if isinstance(v, float) else v) for k, v in t.items()})
+                    done += 1
                     report("fetch", done, n_frames)
                     log_progress()
 
@@ -218,6 +217,7 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
         logs.event(log, logging.INFO, "fetch slowest",
                    frames="; ".join(f"{t['file']} {t['work']:.1f}s (read {t.get('read') or 0:.1f}, "
                                     f"process {t.get('process') or 0:.1f})" for t in slowest))
+
 
     report("stack", 0, 0)
     with logs.timed(log, "assemble") as info:

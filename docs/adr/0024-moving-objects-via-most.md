@@ -1,4 +1,4 @@
-# ADR-0022: Follow solar-system objects with IRSA MOST and a co-moving sequence mode
+# ADR-0024: Follow solar-system objects with IRSA MOST and a co-moving sequence mode
 
 - **Status:** Accepted
 - **Date:** 2026-11-14
@@ -37,7 +37,7 @@ uri (3I/ATLAS, Aug 1–20 2025: 160 files in ~2 s; 433 Eros over a year: 954 fil
 - Photometry runs at the object; the ePSF fit assumes a point source, so for comets the aperture flux
   (`flux_ap_mjy`) is the better number.
 - Catalog overlays and archival epochs do not apply in the co-moving frame (archival returns 404).
-- MOST is a dependency: long windows can take minutes, hence background searches (ADR-0023).
+- MOST is a dependency: long windows can take minutes, hence background searches (ADR-0025).
 
 ## Alternatives considered
 

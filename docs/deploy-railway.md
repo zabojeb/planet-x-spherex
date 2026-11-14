@@ -1,6 +1,6 @@
 # Deploying to Railway
 
-Architecture: [ADR-0030](adr/0030-api-worker-split-on-railway.md) (services), [ADR-0031](adr/0031-job-queue-heartbeats-and-cancellation.md) (queue and cancellation), [ADR-0032](adr/0032-immutable-http-caching-and-light-endpoints.md) (caching), [ADR-0033](adr/0033-packaging-docker-and-railway-config.md) (packaging).
+Architecture: [ADR-0032](adr/0032-api-worker-split-on-railway.md) (services), [ADR-0033](adr/0033-job-queue-heartbeats-and-cancellation.md) (queue and cancellation), [ADR-0034](adr/0034-immutable-http-caching-and-light-endpoints.md) (caching), [ADR-0035](adr/0035-packaging-docker-and-railway-config.md) (packaging).
 
 ```
 browser ──► api ×N (FastAPI + SPA, stateless) ──► Redis (queue, job state, heartbeats, rate limits)

@@ -1,4 +1,4 @@
-# ADR-0032: Immutable HTTP caching, precompressed metadata and lightweight result endpoints
+# ADR-0034: Immutable HTTP caching, precompressed metadata and lightweight result endpoints
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

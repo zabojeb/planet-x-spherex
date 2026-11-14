@@ -1,4 +1,4 @@
-# ADR-0029: Release summary, freshness checks and optional build filters
+# ADR-0031: Release summary, freshness checks and optional build filters
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

@@ -1,4 +1,4 @@
-# ADR-0027: Lomb–Scargle periodograms on the client's relative light curve
+# ADR-0029: Lomb–Scargle periodograms on the client's relative light curve
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

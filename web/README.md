@@ -35,19 +35,32 @@ src/
   display.ts        what the viewer shows for a mode (pure): limits over all epochs, reference epoch,
                     playable epochs (partial visits skipped unless asked)
   astro.ts          TAN projection onto the grid, proper-motion propagation, coordinate/date formatting
+  search.ts         search without React: name normalisation (same rules as the backend), ranking with
+                    typo tolerance, object-type facets, coordinate parsing, nearby objects, Random draws,
+                    recent picks in localStorage
   photometry.ts     shared presentation of measurements (method, saturation, relative-only points)
   colors.ts         palette slots used by charts and overlays (validated dataviz values; never the UI accent)
   hooks.ts          element size, media query, viewport height, dismiss-on-outside-click, safe localStorage
   types.ts          API payload types (meta.json, jobs, catalogs)
   App.tsx           wiring and layout: target -> build -> derived images -> sections; playback, keys
   components/
-    SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click-to-select,
-                       hairline overlays in screen space, minimal HUD, HUD loader
-    TopBar.tsx         floating top-left: serif wordmark, search pill, FOV; the share panel
-    CommandSearch.tsx  ⌘K / Ctrl+K search with the challenge targets as quick picks
+    SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click to select a source
+                       or drop a pin, fly-to, hairline overlays, RA/Dec grid with captions, SIMBAD name labels, hover
+                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader
+    PickCard.tsx       card for the selection (target, catalogue source or pin): ICRS/degrees/Galactic/ecliptic with
+                       copy buttons, motion, distance, offset from the target, counterparts in the other catalogues,
+                       measure / centre / follow, links to SIMBAD, Aladin Lite and WiseView
+    GoTo.tsx           Go to panel: RA/Dec or Galactic l/b (sexagesimal or degrees, optional proper motion) with a live
+                       preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
+    Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
+                       fastest), hover highlights on the sky, click flies there
+    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer
+    TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
+    CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
+                       challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
-    Rail.tsx           right tool rail: Detector, Display, Layers, Details, Share
-    Controls.tsx       mode control, detector panel, Display and Layers panels
+    Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, 3D, Details, Share
+    Controls.tsx       mode control, detector panel, Display and Layers panels, the 3D bar
     Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
     Progress.tsx       top progress bar and the landing index over the sky
@@ -79,7 +92,11 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   frame stays on screen while the next one downloads; stretch limits use the epochs already in memory.
 - The exposure and photometry tables arrive as columns (`/columns/{table}`) only when needed: photometry
   when the drawer opens, exposures in Exposures mode or the Data tab.
-- Catalogs load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
+- Search: the object index (`GET /api/objects`, ~240 kB gzipped, ETag + 1 h max-age) loads when the
+  browser is idle or when the search box gets focus. Suggestions are ranked locally on every keystroke
+  (1–3 ms); nothing is requested until a suggestion is chosen. `GET /api/resolve` is asked only after a
+  350 ms pause, when local suggestions are weak or the query has digits, and answers are memoised per tab.
+- Catalogs (Gaia, CatWISE, 2MASS, SIMBAD) load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
   the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
 - Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
   "Measure spectrum & light curve" on a catalogue source calls `POST .../photometry` and shows that source
@@ -93,6 +110,31 @@ self-hosted: Geist (UI), Geist Mono (data and HUD) and Instrument Serif (display
 One amber accent (`#ffc845`) marks active and focus states only; all data colours come from the dataviz
 palette in `colors.ts` (contamination flags use the status red so they cannot be confused with the
 accent). Blinking is instant; a new target plays a short lock-on animation.
+
+## 3D views
+
+The rail's 3D button (or `v`) opens one of three views ([ADR-0022](../docs/adr/0022-3d-views.md)). They are
+independent of the mode and use the same stretch, colour map and percentile limits as the flat sky:
+
+- **Relief**: the frame on screen as a height field. Height is signal-to-noise above the sky on a log scale (flat
+  within 2σ, 1 at 200σ). Colours follow the stretch and colour map. Stars are peaks. In Difference a mover is a red
+  peak (now) beside a blue pit (then).
+- **Time cube**: every epoch as a glowing layer at its date, with the sky transparent. A still star is a vertical
+  column, and a mover leans along the predicted track (orange) that threads the epochs. In Exposures mode with one
+  detector, the layers are that visit's single exposures at their times, so a source that moves during the visit,
+  such as an asteroid, traces a straight diagonal.
+- **λ cube**: every detector of the current epoch, short to long wavelength. A source lights up only in the layers
+  where it is bright.
+
+Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset. Click a layer's label to show that epoch
+or detector. The bar at the top right switches the view, sets the height, spins the scene and goes back to 2D.
+North is the far side and east is left. three.js loads only when a 3D view opens.
+
+| Relief, Difference, seen from the side | Time cube, Blink, D2 |
+|---|---|
+| ![Barnard's Star in Difference: a peak where it is now, a pit where it was a year earlier](../docs/images/3d/relief-difference.jpg) | ![Barnard's Star as a column through three epochs, threaded by the predicted track](../docs/images/3d/time-cube.jpg) |
+| **Time cube, Exposures**: 18 single exposures of one visit | **λ cube**: the six detectors of one epoch (WISE 0855 field) |
+| ![Single D2 exposures stacked at their times](../docs/images/3d/time-cube-exposures.jpg) | ![Six detector layers from 0.75 to 5 µm](../docs/images/3d/lambda-cube.jpg) |
 
 ## URL parameters
 
@@ -118,14 +160,44 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `cmap` | `gray` or `ice` |
 | `zoom` | integer zoom, `0` = fit |
 | `smooth=1` | smooth instead of crisp pixels |
-| `ov` | overlays: `target,track,gaia,catwise,2mass,flags,compass` |
+| `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
+| `v3d` | 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
+| `h3d` | vertical exaggeration of the 3D view (default 1) |
 | `embed=1` | viewer and its controls only, for iframes |
 
 Example: `/?target=barnard&mode=diff&band=D2&epoch=4` shows Barnard's Star in D2 minus the first visit:
 the star leaves a red (now) and blue (then) pair, offset to the north.
 
+## Search and Random
+
+Type a name, an alias or catalogue number (`Vega`, `α Lyr`, `GJ 699`, `HD 12345`, `M 42`, `WISE 0855-0714`),
+an object type (`brown dwarf`, `mira`, `young star`, `galaxy`, `nebula`) or coordinates (`269.452 4.693`,
+`17:57:48.5 +04:41:36`). Suggestions show the type, spectral type, distance and proper motion; small typos
+in names are forgiven (`Betelguese`, `andromda`), digits are not. Names outside the index are looked up
+through CDS Sesame and marked "Sesame". An empty box shows recent picks, the challenge targets and Random.
+
+The Random button picks an object from the index (weighted by category and how well studied it is) or,
+one time in four, a uniformly random patch of sky; its menu chooses a patch of sky or a kind of object.
+The loading screen names what was drawn.
+
 ## Keyboard
 
-Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes.
+Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
+v 3D on/off · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
+
+## Exploring
+
+- **Where am I.** The readout in the bottom-left corner follows the cursor (or the pin, selection or target): α δ in
+  sexagesimal and degrees, Galactic l b, the offset from the target and the pixel value. `g` draws an RA/Dec grid.
+- **Go somewhere.** Type a name or coordinates in the search, or open Go to (rail, top button) for RA/Dec or Galactic
+  input with a live preview, optional proper motion, an all-sky map to click on and recent places. The pad above the
+  compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
+- **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
+  motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,
+  build a field centred on it, or one that follows its proper motion. SIMBAD, Aladin Lite and WiseView open at the
+  same position.
+- **What is here.** Objects (rail) lists every catalogue source in the field at the shown date; turn on SIMBAD for
+  names and object types. Hover a row to see it on the sky, click to fly there.

@@ -1,20 +1,29 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, measureSource, prefetchSequence, resolveQuery, type Progress } from "./api";
-import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
-import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, type CatalogStatus } from "./components/Controls";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, loadObjectIndex, measureSource, prefetchSequence, type Progress } from "./api";
+import { formatDate, formatRange, mjdToYear, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { CATALOG_IDS, type CatalogId } from "./colors";
+import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
+import type { Layer, TrackPoint3D } from "./components/Sky3D";
 import { Drawer, type DrawerTab } from "./components/Drawer";
+import { GoToPanel, rememberPlace, type Place } from "./components/GoTo";
+import { ObjectsPanel } from "./components/Objects";
+import { PickCard } from "./components/PickCard";
 import { Rail } from "./components/Rail";
-import { SkyView } from "./components/SkyView";
+import { SkyView, selectionWorld, valueAt, type Selection, type StepDir } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, playableEpochs, rgbLabel, stackEpochs, type Display, type ExposureView } from "./display";
+import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, type Display, type ExposureView } from "./display";
 import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
-import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type ViewState } from "./state";
+import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
+import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
 import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
+
+// three.js is a separate chunk, fetched the first time a 3D view opens.
+const Sky3D = lazy(() => import("./components/Sky3D"));
 
 interface StageHud {
   epoch: string;
@@ -26,7 +35,6 @@ interface StageHud {
 }
 
 const INTRO_KEY = "spherex-intro-dismissed";
-const CATALOG_IDS = ["gaia", "catwise", "2mass"] as const;
 
 /** Default detector from the data: a single band only when the target is detected in just a few detectors. */
 function bestBand(meta: Meta): BandSel {
@@ -80,8 +88,8 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
+  const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>({});
   const [exp, setExp] = useState<{ key: string; stack: ExposureStack | null; error: string | null }>({ key: "", stack: null, error: null });
@@ -94,12 +102,29 @@ export default function App() {
   const [tablesTick, setTablesTick] = useState(0);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
+  const [spin, setSpin] = useState(false);
+  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "relief");
+  const [sel, setSel] = useState<Selection | null>(null);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
+  if (view.view3d !== "off") last3d.current = view.view3d;
+  const is3d = view.view3d !== "off";
+  const isCube = view.view3d === "time" || view.view3d === "bands";
+  const toggle3d = () => set({ view3d: is3d ? "off" : last3d.current });
 
   useEffect(() => {
     getTargets().then(setPresets).catch((e) => setPresetsError(`Cannot reach the API: ${e.message || e}`));
   }, []);
+
+  // The search index loads when the browser is idle, or at once when the search box or Random is touched.
+  const warmIndex = useCallback(() => void loadObjectIndex().then(setObjectIndex), []);
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 1500));
+    idle(warmIndex, { timeout: 4000 });
+  }, [warmIndex]);
+  const space = useMemo(() => searchSpace(objectIndex, presets), [objectIndex, presets]);
 
   const target: Target | null = spec.kind === "coords" ? spec.target : presets.find((t) => t.id === spec.id) ?? null;
   const fov = fovOverride ?? target?.fov_arcmin ?? 6;
@@ -118,6 +143,7 @@ export default function App() {
     )
       .then((data) => {
         metaId.current = data.meta.id;
+        rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
         setExp({ key: "", stack: null, error: null });
@@ -141,6 +167,10 @@ export default function App() {
 
   const derived = useMemo(() => (seq ? new Derived(seq) : null), [seq]);
   const meta = seq?.meta ?? null;
+  useEffect(() => {
+    setSel(null);
+    setHoverKey(null);
+  }, [meta?.id]);
   const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   const refEpoch = derived ? effectiveRef(derived, view) : -1;
 
@@ -165,9 +195,9 @@ export default function App() {
   const flagsOn = view.overlays.includes("flags");
   const willPlay = playing && view.mode !== "stack" && view.mode !== "exp" && playable.length > 1;
   const need = useMemo(
-    () => (derived ? planesNeeded(derived, view, willPlay, flagsOn) : null),
+    () => (derived ? (isCube ? planesNeeded3d(derived, view, willPlay) : planesNeeded(derived, view, willPlay, flagsOn && !is3d)) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, willPlay, flagsOn],
+    [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, view.view3d, willPlay, flagsOn],
   );
   const needKey = need ? [...need.now, ...need.soon].map((k) => `${k.array}${k.e}${k.b}`).join(",") : "";
   useEffect(() => {
@@ -231,8 +261,39 @@ export default function App() {
     [meta, exposures, photometry, tablesTick],
   );
 
+  // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
+  const slices = useMemo(
+    () => (derived && isCube ? slices3d(derived, view) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [derived, isCube, view.view3d, view.mode, view.band, view.epoch, view.ref, view.stack, view.lo, view.hi],
+  );
+  // In Exposures mode the time cube stacks the single exposures of the epoch at their times instead: an
+  // asteroid crossing the field during a visit becomes a diagonal line through the layers.
+  const expCube = view.view3d === "time" && view.mode === "exp" && view.band !== "all";
+  const expRows = useMemo(
+    () => (expCube && expStack && exposures ? expStack.indices.map((i) => exposures[i]).filter(Boolean) : []),
+    [expCube, expStack, exposures],
+  );
+  const layers: Layer[] = useMemo(() => {
+    if (!derived) return [];
+    if (expCube) {
+      if (!expRows.length || expRows.length !== expStack?.indices.length) return [];
+      const t0 = expRows[0].mjd;
+      const span = expRows[expRows.length - 1].mjd - t0;
+      return expRows.map((ex, i) => ({
+        key: `x${i}`,
+        label: formatDate(ex.mjd, true).slice(5),
+        z: span > 0 ? (ex.mjd - t0) / span : 0.5,
+        current: i === expIndex,
+        display: computeDisplay(derived, view, { ...expView, index: i }),
+      }));
+    }
+    return slices.map((s) => ({ key: s.key, label: s.label, z: s.z, current: s.current, display: computeDisplay(derived, s.view, expView) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derived, slices, planesTick, expCube, expRows, expIndex, view.lo, view.hi]);
+
   // ---- catalogs for overlays
-  const wanted = view.overlays.filter((o): o is (typeof CATALOG_IDS)[number] => (CATALOG_IDS as readonly string[]).includes(o));
+  const wanted = view.overlays.filter((o): o is CatalogId => (CATALOG_IDS as readonly string[]).includes(o));
   const catalogCtrl = useRef<AbortController | null>(null);
   useEffect(() => {
     catalogCtrl.current?.abort(); // a new sequence cancels catalog queries for the old one
@@ -291,8 +352,13 @@ export default function App() {
       const tag = el?.tagName ?? "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Escape") setDrawer(null);
-      else if (e.key === " ") {
+      if (e.key === "Escape") {
+        if (sel) setSel(null);
+        else setDrawer(null);
+      } else if (e.shiftKey && e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        stepField(({ ArrowUp: "N", ArrowDown: "S", ArrowLeft: "E", ArrowRight: "W" } as const)[e.key as "ArrowUp"] ?? "N");
+      } else if (e.key === " ") {
         if (tag === "BUTTON") return;
         e.preventDefault();
         setPlaying((p) => !p);
@@ -306,6 +372,8 @@ export default function App() {
         const b = meta.bands[Number(e.key) - 1];
         if (b && derived?.playable(b.id).length) set({ band: b.id });
       } else if (e.key === "0") set({ band: "all" });
+      else if (e.key.toLowerCase() === "v") toggle3d();
+      else if (e.key.toLowerCase() === "g") toggleOverlay("grid");
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -326,7 +394,6 @@ export default function App() {
     keepView.current = false;
     setView((v) => ({ ...v, epoch: 0, ref: -1, stack: null, mode: v.mode === "exp" ? "blink" : v.mode }));
     setPlaying(true);
-    setSearchError(null);
     setHero(false);
   };
   const choosePreset = (id: string) => {
@@ -334,42 +401,73 @@ export default function App() {
     setFovOverride(null);
     resetForNewTarget();
   };
-  const search = async (q: string) => {
-    setSearching(true);
-    setSearchError(null);
-    try {
-      const t = await resolveQuery(q);
-      if (t.id && presets.some((p) => p.id === t.id)) choosePreset(t.id);
-      else {
-        setSpec({ kind: "coords", target: { ...t, name: t.name || q } });
-        resetForNewTarget();
-      }
-    } catch (e) {
-      setSearchError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSearching(false);
+  /** Open what a search suggestion or Random picked. Only now does anything load. */
+  const pick = (p: Pick, recent?: Recent) => {
+    if (p.kind === "preset") choosePreset(p.id);
+    else {
+      setSpec({ kind: "coords", target: p.target });
+      if (p.target.fov_arcmin) setFovOverride(null); // extended objects come with a field that fits them
+      resetForNewTarget();
+    }
+    if (recent) setRecents(saveRecent(recent));
+  };
+  const lastRandom = useRef<string | undefined>(undefined);
+  /** Random: an object (of a kind, or weighted over kinds) or, for "field" and a quarter of plain clicks, a patch of sky. */
+  const random = async (what: Facet | "field" | null) => {
+    const idx = objectIndex ?? (await loadObjectIndex());
+    const all = searchSpace(idx, presets);
+    const obj = what === "field" || (what === null && Math.random() < 0.25) ? null : randomObject(all, what, lastRandom.current);
+    if (obj) {
+      lastRandom.current = obj.name;
+      pick(pickFor(obj), { label: obj.name, sub: describe(obj), pick: pickFor(obj) });
+    } else {
+      const f = randomField();
+      pick(f, { label: f.kind === "target" ? f.target.name ?? "Patch of sky" : "", sub: "Random patch of sky", pick: f });
     }
   };
+  /** A new field at a position (the field of view is kept). */
+  const goTo = (pl: Place) => {
+    if (pl.preset && presets.some((t) => t.id === pl.preset)) return choosePreset(pl.preset);
+    setSpec({ kind: "coords", target: { ra: pl.ra, dec: pl.dec, pmra: pl.pmra, pmdec: pl.pmdec, ref_epoch: pl.ref_epoch, name: pl.name } });
+    setFovOverride(fov);
+    resetForNewTarget();
+  };
+  /** Slew: a new field half a field away (east is left on the sky view). A fixed point (every stepped field
+   *  is one) steps from the requested centre, so quick presses add up before the next field has loaded; a
+   *  moving target steps from the field on screen, which sits where the target was at the observations. */
+  const stepField = (dir: StepDir) => {
+    const fixed = target && !target.pmra && !target.pmdec;
+    const c = fixed ? target : meta?.grid ?? target;
+    if (!c) return;
+    const h = fov / 120;
+    const [xi, eta] = { N: [0, h], S: [0, -h], E: [h, 0], W: [-h, 0] }[dir];
+    const [ra, dec] = tanToWorld(c.ra, c.dec, xi, eta);
+    goTo({ name: null, ra, dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
+  };
+  const toggleOverlay = (o: (typeof view.overlays)[number]) =>
+    setView((v) => ({ ...v, overlays: v.overlays.includes(o) ? v.overlays.filter((x) => x !== o) : [...v.overlays, o] }));
   const prefetchPreset = (id: string) => {
     const t = presets.find((p) => p.id === id);
     if (t) prefetchSequence({ ra: t.ra, dec: t.dec, pmra: t.pmra, pmdec: t.pmdec, ref_epoch: t.ref_epoch, name: t.name ?? null, fov_arcmin: t.fov_arcmin ?? 6 });
   };
-  /** Forced photometry of a clicked catalogue source; its curves replace the target's in the drawer. */
-  const measure = async (cat: string, src: CatalogSource) => {
+  /** Forced photometry of a catalogue source or a pinned position; its curves replace the target's in the drawer. */
+  const measureAt = async (key: string, label: string, pos: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number }) => {
     if (!meta) return;
-    const res = await measureSource(meta.id, {
-      ra: src.ra,
-      dec: src.dec,
-      pmra: src.pmra ?? 0,
-      pmdec: src.pmdec ?? 0,
-      ref_epoch: src.epoch,
-      name: src.id,
-    }).catch((e) => {
+    const res = await measureSource(meta.id, { ...pos, name: label }).catch((e) => {
       throw e instanceof ApiError && (e.status === 404 || e.status === 405) ? new Error("Source photometry is not available on this server yet.") : e;
     });
-    setSource({ key: `${cat}:${src.id}`, label: src.id, photometry: res.photometry });
+    setSource({ key, label, photometry: res.photometry });
+    setSel(null);
     setHero(false);
     setDrawer((d) => (d && d !== "details" ? d : "spectrum"));
+  };
+  const measureSelection = (s: Selection) => {
+    if (s.kind === "source") {
+      const src = s.src;
+      return measureAt(`${s.cat}:${src.id}`, String(src.id), { ra: src.ra, dec: src.dec, pmra: src.pmra ?? 0, pmdec: src.pmdec ?? 0, ref_epoch: src.epoch });
+    }
+    if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
+    return Promise.resolve();
   };
   const dismissHero = () => {
     setHero(false);
@@ -433,7 +531,124 @@ export default function App() {
   };
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
-  const sky = (
+  // ---- the selected object, target or pin, and its card
+  const targetWorld = hud?.target ?? null;
+  const targetName = target?.name || meta?.target.name || "Field centre";
+  const selWorld = sel ? selectionWorld(sel, year, targetWorld) : null;
+  /** The same object in the other catalogues shown (nearest within 3″; 6″, about a SPHEREx pixel, for a pin). */
+  const counterparts = useMemo(() => {
+    if (!sel || !selWorld) return [];
+    const radius = (sel.kind === "point" ? 6 : 3) / 3600;
+    const out: { cat: string; src: CatalogSource; sep: number }[] = [];
+    for (const cat of CATALOG_IDS) {
+      if (!view.overlays.includes(cat) || (sel.kind === "source" && sel.cat === cat)) continue;
+      let best: (typeof out)[number] | null = null;
+      for (const src of catalogs[cat] ?? []) {
+        const [ra, dec] = propagate(src, year); // at the shown date: fast movers are far from their catalogue position
+        if (Math.abs(dec - selWorld[1]) > radius) continue;
+        const d = separation(selWorld[0], selWorld[1], ra, dec);
+        if (d < radius && (!best || d < best.sep)) best = { cat, src, sep: d };
+      }
+      if (best) out.push(best);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, selWorld?.[0], selWorld?.[1], catalogs, view.overlays, year]);
+  const card =
+    sel && meta ? (
+      <PickCard
+        sel={sel}
+        world={selWorld}
+        year={year}
+        targetName={targetName}
+        target={target}
+        targetWorld={targetWorld}
+        value={sel.kind === "point" ? valueAt(display, meta.grid.n, ...worldToPixel(meta.grid, sel.ra, sel.dec)) : null}
+        counterparts={counterparts}
+        fovArcmin={fov}
+        onClose={() => setSel(null)}
+        onSelect={setSel}
+        onDetails={() => {
+          setSel(null);
+          setSource(null);
+          setHero(false);
+          setDrawer("spectrum");
+        }}
+        onMeasure={sel.kind !== "target" ? () => measureSelection(sel) : undefined}
+        onCentre={sel.kind !== "target" && selWorld ? () => goTo({ name: sel.kind === "source" ? String(sel.src.id) : null, ra: selWorld[0], dec: selWorld[1], pmra: 0, pmdec: 0, ref_epoch: 2000 }) : undefined}
+        onFollow={
+          sel.kind === "source" && totalPm(sel.src) >= 20
+            ? () => goTo({ name: String(sel.src.id), ra: sel.src.ra, dec: sel.src.dec, pmra: sel.src.pmra ?? 0, pmdec: sel.src.pmdec ?? 0, ref_epoch: sel.src.epoch })
+            : undefined
+        }
+      />
+    ) : null;
+
+
+  const zOf = new Map(slices.map((s) => [s.view.epoch, s.z]));
+  const track3d: TrackPoint3D[] = !meta
+    ? []
+    : expCube
+      ? expRows.map((ex, i) => ({ x: ex.target_px[0], y: ex.target_px[1], z: layers[i]?.z ?? 0, current: i === expIndex }))
+      : meta.target.track
+          .filter((t) => view.view3d !== "time" || zOf.has(t.epoch))
+          .map((t) => ({ x: t.x, y: t.y, z: view.view3d === "time" ? zOf.get(t.epoch)! : null, current: t.epoch === view.epoch }));
+  const cur3d = track3d.find((t) => t.current);
+  const currentTrack3d: [number, number] | null = cur3d ? [cur3d.x, cur3d.y] : null;
+  const sliceMode = MODES.find((m) => m.id === slices[0]?.view.mode)?.label ?? "";
+  // Short lines: they sit left of the dock (the rail shows the detector, the dock the epoch).
+  const label3d = (() => {
+    const first = slices[0];
+    const last = slices[slices.length - 1];
+    if (expCube && layers.length)
+      return { date: `Time cube · ${layers.length} exposures`, sub: `${layers[0].label.slice(0, 5)} → ${layers[layers.length - 1].label.slice(0, 5)} · ${view.band}` };
+    if (expCube) return { date: "Loading exposures…", sub: undefined };
+    if (view.view3d === "time" && first)
+      return { date: `Time cube · ${slices.length} epochs`, sub: `${first.label} → ${last.label} · ${sliceMode}` };
+    if (view.view3d === "bands" && first && meta) {
+      const wl = (id: string) => meta.bands.find((b) => b.id === id)!;
+      const range = `${wl(first.view.band).wl_min.toFixed(2)}–${wl(last.view.band).wl_max.toFixed(2)} µm`;
+      return { date: `λ cube · ${slices.length} detectors`, sub: `${range} · ${sliceMode}` };
+    }
+    return { date: dateLabel, sub: hud?.spectral };
+  })();
+
+  const sky = is3d ? (
+    <Suspense fallback={<div className="sky" />}>
+      <Sky3D
+        kind={view.view3d as Exclude<View3D, "off">}
+        n={meta?.grid.n ?? 0}
+        display={display}
+        layers={layers}
+        stretch={view.stretch}
+        cmap={view.cmap}
+        smooth={view.smooth}
+        height={view.height3d}
+        spin={spin}
+        track={track3d}
+        targetPx={view.view3d === "time" ? currentTrack3d : targetPx}
+        showTarget={overlays.has("target")}
+        showTrack={overlays.has("track")}
+        showCompass={overlays.has("compass")}
+        axisLabel={view.view3d === "time" ? "time" : "λ"}
+        dateLabel={label3d.date}
+        subLabel={label3d.sub}
+        progress={progress}
+        error={errorText}
+        onRetry={() => setReloadKey((k) => k + 1)}
+        lockKey={meta?.id ?? "none"}
+        onPick={(key) => {
+          if (expCube) return setExpIndex(Number(key.slice(1)));
+          const s = slices.find((x) => x.key === key);
+          if (!s) return;
+          if (view.view3d === "time") set({ epoch: s.view.epoch });
+          else set({ band: s.view.band });
+        }}
+        onInteract={() => hero && setHero(false)}
+        shiftX={hero && !mobile && presets.length ? 180 : 0}
+      />
+    </Suspense>
+  ) : (
     <SkyView
       grid={meta?.grid ?? null}
       display={display}
@@ -445,8 +660,8 @@ export default function App() {
       year={year}
       span={span}
       targetPx={targetPx}
-      targetName={target?.name || meta?.target.name || "Target"}
-      targetWorld={hud?.target ?? null}
+      loading={target?.name ? { name: target.name, note: target.description } : null}
+      targetWorld={targetWorld}
       track={track}
       trackIndex={view.epoch}
       dateLabel={dateLabel}
@@ -456,11 +671,15 @@ export default function App() {
       onRetry={() => setReloadKey((k) => k + 1)}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
-      onOpenDetails={() => {
-        setSource(null);
-        openDetails("spectrum");
+      selection={sel}
+      onSelect={(s) => {
+        setSel(s);
+        if (s) setHero(false);
       }}
-      onMeasure={seq ? measure : undefined}
+      card={card}
+      highlight={hoverKey}
+      focus={focus}
+      onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
     />
   );
@@ -522,33 +741,61 @@ export default function App() {
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
       <TopLeft
-        presets={presets}
-        activeId={spec.kind === "preset" ? spec.id : null}
-        busy={searching}
-        searchError={searchError}
+        space={space}
+        indexReady={!!objectIndex}
+        current={spec.kind === "preset" ? `p:${spec.id}` : `n:${spec.target.name ?? ""}`}
+        recents={recents}
         fov={fov}
         compact={mobile}
-        onSearch={search}
-        onPreset={choosePreset}
+        onPick={pick}
+        onRandom={random}
+        onWarm={warmIndex}
         onFov={(f) => setFovOverride(f)}
       />
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
-      {meta && derived && (
-        <Rail
-          bandLabel={bandShort}
-          detector={<DetectorPanel meta={meta} derived={derived} view={view} set={set} refEpoch={refEpoch} />}
-          display={
+      <Rail
+        bandLabel={bandShort}
+        goTo={(close: () => void) => (
+          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} close={close} />
+        )}
+        objects={
+          meta ? (
+            <ObjectsPanel
+              grid={meta.grid}
+              catalogs={catalogs}
+              status={catalogStatus}
+              overlays={view.overlays}
+              onToggle={toggleOverlay}
+              year={year}
+              targetWorld={targetWorld}
+              onHover={setHoverKey}
+              onPick={(cat, src) => {
+                const [ra, dec] = propagate(src, year);
+                if (is3d) set({ view3d: "off" }); // the card and the fly-to live on the flat sky
+                setSel({ kind: "source", cat, src });
+                setFocus({ ra, dec, key: Date.now() });
+                setHero(false);
+              }}
+            />
+          ) : undefined
+        }
+        detector={meta && derived ? <DetectorPanel meta={meta} derived={derived} view={view} set={set} refEpoch={refEpoch} /> : undefined}
+        display={
+          meta ? (
             <div className="panel-stack">
               <DisplayPanel view={view} set={set} />
               <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
             </div>
-          }
-          layers={<LayersPanel view={view} set={set} catalogStatus={catalogStatus} />}
-          share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} />}
-          detailsOpen={!!drawer}
-          onDetails={() => openDetails("spectrum")}
-        />
-      )}
+          ) : undefined
+        }
+        layers={meta ? <LayersPanel view={view} set={set} catalogStatus={catalogStatus} /> : undefined}
+        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} /> : undefined}
+        detailsOpen={!!drawer}
+        onDetails={meta ? () => openDetails("spectrum") : undefined}
+        is3d={is3d}
+        on3d={meta ? toggle3d : undefined}
+      />
+      {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
       {drawer && fullMeta && (
         <Drawer

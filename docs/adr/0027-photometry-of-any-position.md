@@ -1,4 +1,4 @@
-# ADR-0025: Measure any position on the sequence's cached cutouts, synchronously
+# ADR-0027: Measure any position on the sequence's cached cutouts, synchronously
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

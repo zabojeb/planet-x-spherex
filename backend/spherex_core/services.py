@@ -21,10 +21,10 @@ from .jobs import PRIORITY_INTERACTIVE, JobQueue, QueueFull, TooManyJobs, make_q
 from .pipeline import results
 from .pipeline.params import SequenceParams
 from .store import store
-from .targets import PRESETS, resolve
+from .targets import PRESETS, objects, resolve
 
 __all__ = ["NotFound", "QueueFull", "SequenceParams", "TooManyJobs", "UpstreamError", "array_file", "catalog_cone",
-           "configure", "health", "jobs", "list_catalogs", "list_presets", "load_sequence", "poll_sequence",
+           "configure", "health", "jobs", "list_catalogs", "list_presets", "load_sequence", "object_index", "poll_sequence",
            "queue_stats", "read_array", "read_exposures", "readiness", "resolve_target", "result_dir",
            "sequence_meta_bytes", "sequence_status", "submit_sequence", "withdraw_sequence"]
 
@@ -56,8 +56,15 @@ def list_presets() -> list[dict]:
 
 
 def resolve_target(query: str) -> dict:
-    """Coordinates, preset id/name or object name -> target dict. Raises LookupError."""
+    """Coordinates, preset id/name, a name in the local object index or any name Sesame knows -> target
+    dict. Raises LookupError."""
     return resolve(query).to_dict()
+
+
+def object_index() -> tuple[bytes, str]:
+    """The local object index as served to clients (JSON bytes) and its ETag."""
+    idx = objects.index()
+    return idx.raw, idx.etag
 
 
 # ---------------------------------------------------------------- sequences

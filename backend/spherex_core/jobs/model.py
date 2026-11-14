@@ -14,8 +14,13 @@ PRIORITY_PREWARM = 10
 ACTIVE = ("queued", "running")
 
 
-def _env(name: str, default: str) -> str:
-    return os.environ.get(f"SPHEREX_{name}", default)
+def _env(name: str, default: str, *aliases: str) -> str:
+    """SPHEREX_<name>, else the first set SPHEREX_<alias> (older names kept working), else default."""
+    for n in (name, *aliases):
+        v = os.environ.get(f"SPHEREX_{n}")
+        if v not in (None, ""):
+            return v
+    return default
 
 
 @dataclass(frozen=True)
@@ -37,11 +42,11 @@ def queue_settings() -> QueueSettings:
     backend = _env("QUEUE", "redis" if redis_url else "inprocess")
     return QueueSettings(
         backend=backend, redis_url=redis_url or "redis://localhost:6379/0",
-        interest_timeout=float(_env("INTEREST_TIMEOUT", "30")),
+        interest_timeout=float(_env("INTEREST_TIMEOUT", "30", "JOB_IDLE")),
         max_active_per_ip=int(_env("MAX_ACTIVE_PER_IP", "3")),
         max_queue=int(_env("MAX_QUEUE", "40")),
-        max_runtime=float(_env("MAX_RUNTIME", "900")),
-        jobs_per_worker=int(_env("JOBS_PER_WORKER", "2")),
+        max_runtime=float(_env("MAX_RUNTIME", "900", "JOB_TIMEOUT")),
+        jobs_per_worker=int(_env("JOBS_PER_WORKER", "2", "MAX_JOBS")),
         max_frames=int(_env("MAX_FRAMES", "4000")),
         post_rate_per_min=int(_env("POST_RATE_PER_MIN", "30")),
     )
@@ -97,4 +102,5 @@ class Job:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "status": self.status, "stage": self.stage, "done": self.done, "total": self.total,
-                "error": self.error, "elapsed": (self.finished or time.time()) - self.started}
+                "error": self.error, "position": None,
+                "elapsed": (self.finished or time.time()) - self.started}

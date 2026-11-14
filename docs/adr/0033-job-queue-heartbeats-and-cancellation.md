@@ -1,4 +1,4 @@
-# ADR-0031: Job queue with dedupe, heartbeats, cancellation, priorities and limits
+# ADR-0033: Job queue with dedupe, heartbeats, cancellation, priorities and limits
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

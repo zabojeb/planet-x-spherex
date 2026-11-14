@@ -7,10 +7,7 @@ otherwise.
 
 Levels: INFO is one line per operation (an HTTP request, a build stage, an archive query); DEBUG adds one
 line per exposure and every retry; WARNING marks slow or failed work. Set SPHEREX_LOG_LEVEL and
-SPHEREX_LOG_FORMAT (`text` or `json`, one object per line for log tools); SPHEREX_LOG_JSON=1 also selects
-json for compatibility with the Railway setup.
-
-Written by Max0072 (branch fix/job-queue-cancel) and ported onto the job queue; see ADR-0046.
+SPHEREX_LOG_FORMAT (`text` or `json`, one object per line for log tools).
 """
 
 from __future__ import annotations

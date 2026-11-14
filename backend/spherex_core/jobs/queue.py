@@ -103,7 +103,11 @@ class InProcessQueue:
             return None
         if heartbeat and job.status in ACTIVE:
             job.touch(client)
-        return job.to_dict()
+        d = job.to_dict()
+        if job.status == "queued":  # builds that start before this one (wording from Max0072's queue)
+            mine = next((e for e in self._heap if e[2] == job_id), None)
+            d["position"] = sum(1 for e in self._heap if mine is not None and e < mine)
+        return d
 
     async def withdraw(self, job_id, *, client=None) -> dict | None:
         job = self.jobs.get(job_id)
@@ -212,7 +216,7 @@ def job_from_hash(job_id: str, h: dict) -> dict:
     finished = float(h["finished"]) if h.get("finished") else None
     return {"id": job_id, "status": h.get("status", "queued"), "stage": h.get("stage", "queued"),
             "done": int(h.get("done") or 0), "total": int(h.get("total") or 0), "error": h.get("error") or None,
-            "elapsed": (finished or _now()) - started}
+            "position": None, "elapsed": (finished or _now()) - started}
 
 
 class RedisQueue:
@@ -273,7 +277,11 @@ class RedisQueue:
             h = await self.r.hgetall(K_JOB.format(job_id))
         elif heartbeat and h.get("status") in ACTIVE:
             await self._touch(job_id, client)
-        return job_from_hash(job_id, h)
+        d = job_from_hash(job_id, h)
+        if d["status"] == "queued":
+            rank = await self.r.zrank(K_QUEUE, job_id)
+            d["position"] = int(rank) if rank is not None else None
+        return d
 
     async def withdraw(self, job_id, *, client=None) -> dict | None:
         jk = K_JOB.format(job_id)

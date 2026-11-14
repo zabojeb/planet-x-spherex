@@ -1,4 +1,4 @@
-# ADR-0026: Fit proper motion to per-epoch co-add centroids with per-detector zero points
+# ADR-0028: Fit proper motion to per-epoch co-add centroids with per-detector zero points
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

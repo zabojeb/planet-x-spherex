@@ -3,7 +3,7 @@
     InProcessQueue   asyncio tasks inside the API process, local disk (laptop, tests, single dev server)
     RedisQueue       jobs in Redis, executed by `python -m spherex_core.jobs.worker` replicas (Railway)
 
-Shared semantics (see ADR-0031):
+Shared semantics (see ADR-0033):
 - dedupe: one job per SequenceParams.key(); every POST and status poll from a client is a heartbeat;
 - interest: a job nobody has polled for `interest_timeout` seconds, or that every client withdrew from
   (DELETE), is cancelled — unless pinned (prewarm). Cancelling aborts in-flight S3 range requests,

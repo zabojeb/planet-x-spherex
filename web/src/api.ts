@@ -14,6 +14,7 @@ import type {
   ArrayName, BandId, CatalogSource, Exposure, ExposureStack, Job, Meta, PeriodogramResult, Photometry, PlaneArray,
   PlaneKey, PlaneSource, SequenceData, SourcePhotometry, Target,
 } from "./types";
+import { parseIndex, type ObjectIndex } from "./search";
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 const POLL_VISIBLE_MS = 1000;
@@ -92,6 +93,35 @@ async function json<T>(path: string, init?: RequestInit, retries?: number): Prom
 export const getTargets = () => json<Target[]>("/api/targets");
 export const resolveQuery = (q: string) => json<Target>(`/api/resolve?q=${encodeURIComponent(q)}`);
 
+let objectIndex: Promise<ObjectIndex> | null = null;
+
+/** The local object index for search suggestions: one download per tab (the browser revalidates it by
+ *  ETag). An older server without /api/objects yields an empty index: presets and name lookup still work. */
+export function loadObjectIndex(): Promise<ObjectIndex> {
+  objectIndex ??= json<Parameters<typeof parseIndex>[0]>("/api/objects", undefined, 1)
+    .then(parseIndex)
+    .catch(() => {
+      objectIndex = null; // try again on the next focus of the search box
+      return parseIndex({ fields: [], rows: [] });
+    });
+  return objectIndex;
+}
+
+const names = new Map<string, Promise<Target>>();
+
+/** What a name is (CDS Sesame through the API, cached server-side), for a suggestion row: nothing is built.
+ *  Unknown names are remembered for the tab; network failures are not, so they can be retried. */
+export function lookupName(q: string): Promise<Target> {
+  const key = q.trim().toLowerCase();
+  let p = names.get(key);
+  if (!p) {
+    p = json<Target>(`/api/resolve?q=${encodeURIComponent(q.trim())}`, undefined, 0);
+    p.catch((e) => !(e instanceof ApiError && e.status === 404) && names.delete(key));
+    names.set(key, p);
+  }
+  return p;
+}
+
 export interface SequenceRequest {
   ra: number;
   dec: number;
@@ -105,7 +135,7 @@ export interface SequenceRequest {
 }
 
 /** stage "busy" = rate-limited by the server; retryIn says when the client tries again (seconds). */
-export type Progress = { stage: string; done: number; total: number; elapsed: number; retryIn?: number };
+export type Progress = { stage: string; done: number; total: number; elapsed: number; retryIn?: number; ahead?: number | null };
 
 // ------------------------------------------------------------------ helpers
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -309,7 +339,7 @@ export async function loadSequence(
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
     if (!finished) {
-      onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed });
+      onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
       for (;;) {
         const res = await withBackoff(() => poll(id, signal), onProgress, signal);
         if (res.state === "done") break;
@@ -317,8 +347,8 @@ export async function loadSequence(
           // Cancelled (e.g. everyone left while it was queued): ask again, which restarts it.
           job = await withBackoff(() => postSequence(req, signal), onProgress, signal);
           if (job.status === "done") break;
-          onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed });
-        } else onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed });
+          onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
+        } else onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed, ahead: res.job.position });
         await heartbeat(signal);
       }
     }

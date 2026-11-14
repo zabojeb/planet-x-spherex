@@ -1,13 +1,13 @@
-# ADR-0023: Run archival builds and MOST searches as polled background tasks in the API process
+# ADR-0025: Run archival builds and MOST searches as polled background tasks in the API process
 
 - **Status:** Accepted
 - **Date:** 2026-11-14
 
 ## Context
 
-Archival builds (ADR-0021) take 1–2 minutes on a cold cache and MOST searches (ADR-0022) from 2 s to ~3
+Archival builds (ADR-0023) take 1–2 minutes on a cold cache and MOST searches (ADR-0024) from 2 s to ~3
 minutes. Neither fits a synchronous HTTP request. Sequence builds already use a job queue with an in-process
-and a Redis implementation (ADR-0030, ADR-0031), but that queue is specialised to `SequenceParams` and
+and a Redis implementation (ADR-0032, ADR-0033), but that queue is specialised to `SequenceParams` and
 `build_sequence`. In local and dev-server mode the API runs as one uvicorn process; on Railway it runs
 several uvicorn processes per replica that share a disk.
 
@@ -18,7 +18,7 @@ several uvicorn processes per replica that share a disk.
   is served from disk. Failed tasks are kept for two minutes, then a new GET retries.
 - A cross-process lock file next to the result (`claim`/`release`, stale after 15 minutes) stops several
   uvicorn workers on one replica from building the same thing twice.
-- Archival regridding runs in threads, not in the shared process pool (ADR-0024).
+- Archival regridding runs in threads, not in the shared process pool (ADR-0026).
 
 ## Consequences
 

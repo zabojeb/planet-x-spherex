@@ -1,4 +1,4 @@
-# ADR-0033: One multi-stage image, docker compose for local runs, Railway config as code
+# ADR-0035: One multi-stage image, docker compose for local runs, Railway config as code
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

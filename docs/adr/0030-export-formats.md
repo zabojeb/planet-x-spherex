@@ -1,4 +1,4 @@
-# ADR-0028: Exports as FITS with WCS, CSV/VOTable photometry and a download script
+# ADR-0030: Exports as FITS with WCS, CSV/VOTable photometry and a download script
 
 - **Status:** Accepted
 - **Date:** 2026-11-14

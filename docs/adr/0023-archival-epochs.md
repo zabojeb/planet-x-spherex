@@ -1,4 +1,4 @@
-# ADR-0021: Add 2MASS, AllWISE and NEOWISE epochs on the sequence's own grid
+# ADR-0023: Add 2MASS, AllWISE and NEOWISE epochs on the sequence's own grid
 
 - **Status:** Accepted
 - **Date:** 2026-11-14
@@ -38,7 +38,7 @@ overloaded (ADR-0002).
   the light-weighted centroid sits 0.1–2.5″ from the proper-motion prediction in every frame; 134 s and
   1.1 GB for the first build. ε Indi B at 16′: 50 frames, 0.2–1.4″ offsets, 130 s.
 - Builds are seconds-to-minutes and read up to ~1.8 GB for 20′ fields, so they are background tasks
-  (ADR-0023) and cached; the bucket is in us-west-2, ~70 ms from the US-East server.
+  (ADR-0025) and cached; the bucket is in us-west-2, ~70 ms from the US-East server.
 - Not for solar-system objects (404). 2MASS coverage can be partial at wide fields; `coverage` reports it.
 
 ## Alternatives considered

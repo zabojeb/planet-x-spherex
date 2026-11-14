@@ -1,7 +1,7 @@
 """A small registry of background tasks with progress, for builds that are not sequences.
 
 Archival epochs and MOST searches can take from seconds to minutes; adapters start them here and poll
-status(), the same way sequence jobs work (pipeline.jobs). start() must run on the event loop thread.
+status(), the same polling contract as sequence jobs (spherex_core.jobs). start() must run on the event loop thread.
 """
 
 from __future__ import annotations
