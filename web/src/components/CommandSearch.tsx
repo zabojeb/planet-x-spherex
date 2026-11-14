@@ -1,7 +1,7 @@
 /** Command-palette search: object names or coordinates, with the challenge targets as quick picks (⌘K / Ctrl+K). */
 import { CornerDownLeft, Loader2, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDismiss } from "../hooks";
+import { useDismiss, useMediaQuery } from "../hooks";
 import type { Target } from "../types";
 
 interface Props {
@@ -22,6 +22,9 @@ export function CommandSearch(p: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [active, setActive] = useState(0);
+  const narrow = useMediaQuery("(max-width: 760px)");
+  // the shortcut hint only helps with a hardware keyboard and a mouse/trackpad
+  const hasKeyboard = useMediaQuery("(hover: hover) and (pointer: fine)") && !narrow;
   const wrap = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -107,7 +110,7 @@ export function CommandSearch(p: Props) {
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={onKeyDown}
-            placeholder="Search an object or coordinates"
+            placeholder={narrow ? "Object or RA Dec" : "Search an object or coordinates"}
             aria-label="Search an object or coordinates"
             aria-expanded={open}
             aria-controls="cmdk-list"
@@ -122,7 +125,7 @@ export function CommandSearch(p: Props) {
               <X size={14} />
             </button>
           ) : (
-            !p.compact && <kbd className="kbd">{isMac ? "⌘" : "Ctrl"} K</kbd>
+            !p.compact && hasKeyboard && <kbd className="kbd">{isMac ? "⌘" : "Ctrl"} K</kbd>
           )}
         </div>
       )}

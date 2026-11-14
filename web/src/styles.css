@@ -514,3 +514,17 @@ canvas.smooth { image-rendering: auto; }
   .exp-dots button { width: 14px; height: 14px; }
   .hud-min { bottom: calc(176px + env(safe-area-inset-bottom)); }
 }
+
+/* ---- phones: top bar fits the width; short mode names */
+.label-short { display: none; }
+@media (max-width: 760px) {
+  .search-row { min-width: 0; }
+  .search-row .cmdk { min-width: 0; }
+  .search-row .cmdk-input { height: 44px; border-radius: 22px; }
+  .search-row .cmdk-input input { font-size: 16px; } /* < 16px makes iOS zoom the page on focus */
+  .fov { flex: none; height: 44px; border-radius: 22px; padding: 0 2px 0 12px; }
+  .fov select { height: 40px; font-size: 14px; }
+  .label-full { display: none; }
+  .label-short { display: inline; }
+  .dock .segmented button { font-size: 14px; }
+}

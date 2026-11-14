@@ -65,6 +65,9 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
   return { ...v, band, mode, epoch, ref: keep ? v.ref : -1, stack: keep ? v.stack : null };
 }
 
+/** Phone chrome: top bar above, HUD + dock below (keep in sync with the mobile CSS). */
+const MOBILE_FRAME = { top: 108, bottom: 224 };
+
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
@@ -462,6 +465,7 @@ export default function App() {
       }}
       onMeasure={seq ? measure : undefined}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
+      frame={mobile && !drawer ? MOBILE_FRAME : undefined}
     />
   );
 
