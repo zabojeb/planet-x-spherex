@@ -13,7 +13,7 @@ flowchart LR
     API["HTTP API (spherex_api, FastAPI)<br/>routes · schemas · static web"]
     JOBS["Job runner<br/>asyncio + process pool"]
     CORE["Domain library (spherex_core)<br/>targets · archive · io · processing<br/>photometry · catalogs · pipeline"]
-    CACHE[("Cache dir<br/>TAP results · cutouts · wave maps<br/>catalog cones · sequence results")]
+    CACHE[("Cache dir<br/>TAP results · cutouts · wave maps<br/>catalog cones · name lookups · sequence results")]
     MCP["MCP server (planned)"]
     CLI["CLI scripts/build_sequence.py"]
   end
@@ -21,7 +21,7 @@ flowchart LR
     TAP["IRSA TAP<br/>spherex.* · catwise_2020 · fp_psc"]
     S3["S3 nasa-irsa-spherex<br/>Level 2 MEF files (range reads)"]
     GAIA["ESA Gaia TAP<br/>gaiadr3.gaia_source"]
-    SES["CDS Sesame<br/>name resolver"]
+    SES["CDS Sesame<br/>name resolver (mirrors raced)"]
   end
   WEB -- "JSON + binary arrays" --> API
   API --> JOBS --> CORE
@@ -34,10 +34,10 @@ flowchart LR
   CORE --> SES
 ```
 
-- The **web viewer** never talks to archives directly. It downloads one sequence (metadata plus typed arrays) and does every display operation locally ([ADR-0005](adr/0005-server-side-alignment-client-side-display.md)).
+- The **web viewer** never talks to archives directly. It downloads one sequence (metadata plus typed arrays) and does every display operation locally ([ADR-0005](adr/0005-server-side-alignment-client-side-display.md)). Search suggestions are computed in the browser from a local index of about 4,500 SIMBAD objects fetched once from `/api/objects` ([ADR-0021](adr/0021-local-object-index-for-search.md)).
 - The **HTTP API** validates requests, starts or reuses jobs, streams result files and proxies catalogue cones.
 - The **domain library** contains all SPHEREx knowledge and has no web dependencies, so the CLI and the future MCP server call exactly the same code.
-- **External services:** IRSA TAP for discovering images and for CatWISE/2MASS, the public S3 bucket for pixels, ESA Gaia TAP for Gaia DR3, SIMBAD TAP (CDS, CfA mirror) for named objects, CDS Sesame for names ([ADR-0011](adr/0011-name-resolution-and-catalogs.md)).
+- **External services:** IRSA TAP for discovering images and for CatWISE/2MASS, the public S3 bucket for pixels, ESA Gaia TAP for Gaia DR3, SIMBAD TAP (CDS, CfA mirror) for named objects, CDS Sesame for names the local object index does not know, cached for 30 days ([ADR-0011](adr/0011-name-resolution-and-catalogs.md), [ADR-0021](adr/0021-local-object-index-for-search.md)).
 
 ## Request lifecycle
 
@@ -104,7 +104,8 @@ backend/
     flags.py               flag bit names, the masks the pipeline applies, MSKN/MSKD parsing
     cache.py               every on-disk cache location and key
     errors.py              exceptions shared by the library and its adapters
-    targets/               Target model with proper motion, presets, coordinate parser, name resolution
+    targets/               Target model with proper motion, presets, coordinate parser, name resolution,
+                           objects.json (local SIMBAD object index) and its loader
     archive/               generic TAP client, SPHEREx Level 2 image search
     io/                    HTTP range client, FITS header helpers, Level 2 cutout and wavelength reader
     processing/            output grid and resampling, background, epochs, co-adds

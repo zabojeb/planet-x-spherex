@@ -35,6 +35,9 @@ src/
   display.ts        what the viewer shows for a mode (pure): limits over all epochs, reference epoch,
                     playable epochs (partial visits skipped unless asked)
   astro.ts          TAN projection onto the grid, proper-motion propagation, coordinate/date formatting
+  search.ts         search without React: name normalisation (same rules as the backend), ranking with
+                    typo tolerance, object-type facets, coordinate parsing, nearby objects, Random draws,
+                    recent picks in localStorage
   photometry.ts     shared presentation of measurements (method, saturation, relative-only points)
   colors.ts         palette slots used by charts and overlays (validated dataviz values; never the UI accent)
   hooks.ts          element size, media query, viewport height, dismiss-on-outside-click, safe localStorage
@@ -51,8 +54,9 @@ src/
                        preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
     Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
                        fastest), hover highlights on the sky, click flies there
-    TopBar.tsx         floating top-left: serif wordmark, search pill, FOV; the share panel
-    CommandSearch.tsx  ⌘K / Ctrl+K search with the challenge targets as quick picks
+    TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
+    CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
+                       challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
     Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, Details, Share
     Controls.tsx       mode control, detector panel, Display and Layers panels
@@ -87,6 +91,10 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   frame stays on screen while the next one downloads; stretch limits use the epochs already in memory.
 - The exposure and photometry tables arrive as columns (`/columns/{table}`) only when needed: photometry
   when the drawer opens, exposures in Exposures mode or the Data tab.
+- Search: the object index (`GET /api/objects`, ~240 kB gzipped, ETag + 1 h max-age) loads when the
+  browser is idle or when the search box gets focus. Suggestions are ranked locally on every keystroke
+  (1–3 ms); nothing is requested until a suggestion is chosen. `GET /api/resolve` is asked only after a
+  350 ms pause, when local suggestions are weak or the query has digits, and answers are memoised per tab.
 - Catalogs (Gaia, CatWISE, 2MASS, SIMBAD) load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
   the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
 - Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
@@ -134,10 +142,23 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 Example: `/?target=barnard&mode=diff&band=D2&epoch=4` shows Barnard's Star in D2 minus the first visit:
 the star leaves a red (now) and blue (then) pair, offset to the north.
 
+## Search and Random
+
+Type a name, an alias or catalogue number (`Vega`, `α Lyr`, `GJ 699`, `HD 12345`, `M 42`, `WISE 0855-0714`),
+an object type (`brown dwarf`, `mira`, `young star`, `galaxy`, `nebula`) or coordinates (`269.452 4.693`,
+`17:57:48.5 +04:41:36`). Suggestions show the type, spectral type, distance and proper motion; small typos
+in names are forgiven (`Betelguese`, `andromda`), digits are not. Names outside the index are looked up
+through CDS Sesame and marked "Sesame". An empty box shows recent picks, the challenge targets and Random.
+
+The Random button picks an object from the index (weighted by category and how well studied it is) or,
+one time in four, a uniformly random patch of sky; its menu chooses a patch of sky or a kind of object.
+The loading screen names what was drawn.
+
 ## Keyboard
 
 Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
 Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
 
 ## Exploring
 
