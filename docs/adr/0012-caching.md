@@ -17,6 +17,7 @@ All caches live under `SPHEREX_CACHE_DIR` (on the dev server `/workspace/cache`)
 | Native cutouts | `cutouts/<aa>/<sha1>.npz` | SHA-1 of file URL, RA, Dec, half-size; also stores "off the frame" results | permanent |
 | Wavelength maps | `wave/D<n>.npz` | detector | permanent |
 | Catalogue cones | `catalogs/<catalog>_<key>.json` | catalogue, RA, Dec, radius | 7 days |
+| Name lookups | `resolve/<sha1[:16]>.json` | SHA-1 of the compact name (lower case, no spaces or punctuation); names Sesame did not know are kept in memory for 10 minutes ([ADR-0021](0021-local-object-index-for-search.md)) | 30 days |
 | Sequence results | `sequences/<id>/` | first 20 hex digits of the SHA-1 of the normalised request (RA/Dec to 6 decimals, proper motion to 0.1 mas/yr, reference epoch, field, epoch parameters, collections, `ALGO_VERSION`) | permanent |
 
 Sequence results are written to `<id>.tmp/` and renamed when complete, so readers never see half-written results. The target's display name is not part of the key.
