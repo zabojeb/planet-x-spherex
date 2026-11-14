@@ -1,0 +1,29 @@
+[project]
+name = "spherex-backend"
+version = "0.1.0"
+description = "Planet X x SPHEREx: data access, processing and API for blinking SPHEREx images over time"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "astropy>=6.1",
+  "photutils>=1.12",
+  "aiohttp>=3.9",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["spherex_core", "spherex_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["network: needs internet access to IRSA / S3"]
