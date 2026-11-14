@@ -135,7 +135,7 @@ export interface SequenceRequest {
 }
 
 /** stage "busy" = rate-limited by the server; retryIn says when the client tries again (seconds). */
-export type Progress = { stage: string; done: number; total: number; elapsed: number; retryIn?: number };
+export type Progress = { stage: string; done: number; total: number; elapsed: number; retryIn?: number; ahead?: number | null };
 
 // ------------------------------------------------------------------ helpers
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -339,7 +339,7 @@ export async function loadSequence(
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
     if (!finished) {
-      onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed });
+      onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
       for (;;) {
         const res = await withBackoff(() => poll(id, signal), onProgress, signal);
         if (res.state === "done") break;
@@ -347,8 +347,8 @@ export async function loadSequence(
           // Cancelled (e.g. everyone left while it was queued): ask again, which restarts it.
           job = await withBackoff(() => postSequence(req, signal), onProgress, signal);
           if (job.status === "done") break;
-          onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed });
-        } else onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed });
+          onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
+        } else onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed, ahead: res.job.position });
         await heartbeat(signal);
       }
     }

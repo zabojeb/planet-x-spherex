@@ -1,6 +1,6 @@
 /** Floating top-left cluster: serif wordmark, the search pill, the field of view and Random. Plus the share panel. */
 import { Check, ChevronDown, Code2, Dices, Download, Link2 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { ExportKind } from "../api";
 import { useDismiss } from "../hooks";
 import { FACETS, type Facet, type Pick, type Recent, type SkyObject } from "../search";
@@ -27,6 +27,8 @@ export function TopLeft(p: {
   onRandom: (what: Facet | "field" | null) => void;
   onWarm: () => void;
   onFov: (fov: number) => void;
+  /** The editable field-centre coordinates, under the search row. */
+  coords?: ReactNode;
 }) {
   const fovs = FOVS.includes(p.fov) ? FOVS : [...FOVS, p.fov].sort((a, b) => a - b);
   return (
@@ -46,6 +48,7 @@ export function TopLeft(p: {
         </label>
         <RandomButton compact={p.compact} onRandom={p.onRandom} onWarm={p.onWarm} />
       </div>
+      {p.coords}
     </div>
   );
 }

@@ -57,9 +57,9 @@ All settings are environment variables:
 | `SPHEREX_MAX_FRAMES_IN_FLIGHT` | 64 | exposures read concurrently |
 | `SPHEREX_CPU_WORKERS` | 24 | processes for per-exposure work |
 | `SPHEREX_TAP_CACHE_HOURS` | 12 | lifetime of cached archive queries |
-| `SPHEREX_MAX_JOBS` | 3 | sequence builds running at once; the rest queue |
-| `SPHEREX_JOB_TIMEOUT` | 900 | seconds before a build is stopped with an error (0: never) |
-| `SPHEREX_JOB_IDLE` | 120 | seconds without a poll before a build is cancelled (0: never) |
+| `SPHEREX_JOBS_PER_WORKER` (alias `SPHEREX_MAX_JOBS`) | 2 | builds running at once per worker; the rest queue |
+| `SPHEREX_MAX_RUNTIME` (alias `SPHEREX_JOB_TIMEOUT`) | 900 | seconds before a build is stopped with an error |
+| `SPHEREX_INTEREST_TIMEOUT` (alias `SPHEREX_JOB_IDLE`) | 30 | seconds without a poll before an unpinned build is cancelled |
 | `SPHEREX_JOB_DETACH_GRACE` | 5 | seconds after the last client detached before a build is cancelled |
 | `SPHEREX_LOG_LEVEL` | INFO | `DEBUG` adds a line per exposure, retry and progress poll |
 | `SPHEREX_LOG_FORMAT` | text | `json` for one JSON object per line |

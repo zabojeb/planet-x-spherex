@@ -41,3 +41,9 @@ The λ cube has no clean example in the sequences built so far. Barnard's Star h
 - **Plotly or another chart library's 3D surface:** heavy, styled as a chart rather than as the sky, and cannot do a stack of transparent layers.
 - **Volume ray-marching of the cubes:** prettier, but much more shader work. With only 4–30 epochs or 6 detectors, discrete layers read more clearly.
 - **3D as a sixth mode:** it would hide Difference and RGB in 3D, which give the most telling reliefs.
+
+## Amendment (2026-11-14): open on the time cube, draw the catalogues in 3D
+
+- The full viewer now opens on the time cube (`view3d` defaults to `time`; a link to the flat sky carries `v3d=off`). It shows at a glance what the site is for: still stars are columns, a mover leans. An embed has no 3D controls, so it stays on the flat sky unless its link asks for a 3D view.
+- So the three.js chunk is now loaded on a first visit to the full viewer, not only by people who open 3D, and the first frame waits for every epoch's planes of the current detector (under 1 MB at the default field).
+- The catalogue layers are drawn in all three views, with the flat sky's shapes and colours, as camera-facing point sprites: on the current layer in the cubes, on the surface in the relief, with the most-cited SIMBAD names. In the time cube a fast mover (> 0.1″/yr) also gets its path through the layers. Hovering a source names it; clicking it opens its card on the flat sky, where the card and the fly-to live.

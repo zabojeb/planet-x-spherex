@@ -77,11 +77,44 @@ interface Props {
   frame?: { top: number; bottom: number };
 }
 
-const HIGH_PM = 100; // mas/yr
+export const HIGH_PM = 100; // mas/yr
 const MAX_MARKERS = 160;
 const MAX_LABELS = 28;
 
-type Marker = { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number };
+export type Marker = { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number };
+
+/** Catalogue sources of the shown overlays that fall on the grid, at the shown date (grid pixels). Fast movers
+ *  also get where they were at the start and end of the sequence (`span`, Julian years). Shared by the 3D views. */
+export function catalogMarkers(grid: Grid, catalogs: Record<string, CatalogSource[]>, overlays: Set<Overlay>, year: number, span: [number, number] | null): Marker[] {
+  const n = grid.n;
+  const out: Marker[] = [];
+  for (const cat of CATALOG_IDS) {
+    if (!overlays.has(cat)) continue;
+    let kept = 0;
+    for (const src of catalogs[cat] ?? []) {
+      const [ra, dec] = propagate(src, year);
+      const [x, y] = worldToPixel(grid, ra, dec);
+      if (x < -2 || y < -2 || x > n + 1 || y > n + 1) continue;
+      const pm = totalPm(src);
+      // SIMBAD rows are few and come most-studied first: keep them all; cap the dense catalogues
+      if (cat !== "simbad" && pm <= HIGH_PM && kept >= MAX_MARKERS) continue;
+      kept++;
+      const m: Marker = { cat, src, x, y, pm };
+      if (pm > HIGH_PM && span) {
+        m.from = worldToPixel(grid, ...propagate(src, span[0]));
+        m.to = worldToPixel(grid, ...propagate(src, span[1]));
+      }
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+/** Hover text for a source: its name, then its object type (SIMBAD) or catalogue, and a magnitude. */
+export function markerTip(cat: string, src: CatalogSource): { name: string; sub: string } {
+  const kind = cat === "simbad" ? (src.type as string | null) ?? "SIMBAD" : CATALOG_STYLE[cat].label;
+  return { name: String(src.id), sub: `${kind}${src.mag != null ? ` · ${src.mag_band} ${src.mag.toFixed(1)}` : ""}` };
+}
 
 export function loaderText(p: Progress): { text: string; pct: number | null } {
   const pct = p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
@@ -100,7 +133,7 @@ export function loaderText(p: Progress): { text: string; pct: number | null } {
     case "done":
       return { text: "Downloading results", pct };
     default:
-      return { text: "Waiting for a free worker", pct: null };
+      return { text: p.ahead ? `Waiting for a free worker · ${p.ahead} ahead` : "Waiting for a free worker", pct: null };
   }
 }
 
@@ -179,30 +212,10 @@ export function SkyView(p: Props) {
   };
   const fromScreen = (sx: number, sy: number): [number, number] => [(sx - tx) / s - 0.5, n - (sy - ty) / s - 0.5];
 
-  const markers = useMemo(() => {
-    if (!p.grid) return [];
-    const out: Marker[] = [];
-    for (const cat of CATALOG_IDS) {
-      if (!p.overlays.has(cat)) continue;
-      let kept = 0;
-      for (const src of p.catalogs[cat] ?? []) {
-        const [ra, dec] = propagate(src, p.year);
-        const [x, y] = worldToPixel(p.grid, ra, dec);
-        if (x < -2 || y < -2 || x > n + 1 || y > n + 1) continue;
-        const pm = totalPm(src);
-        // SIMBAD rows are few and come most-studied first: keep them all; cap the dense catalogues
-        if (cat !== "simbad" && pm <= HIGH_PM && kept >= MAX_MARKERS) continue;
-        kept++;
-        const m: Marker = { cat, src, x, y, pm };
-        if (pm > HIGH_PM && p.span) {
-          m.from = worldToPixel(p.grid, ...propagate(src, p.span[0]));
-          m.to = worldToPixel(p.grid, ...propagate(src, p.span[1]));
-        }
-        out.push(m);
-      }
-    }
-    return out;
-  }, [p.grid, p.catalogs, p.overlays, p.year, p.span, n]);
+  const markers = useMemo(
+    () => (p.grid ? catalogMarkers(p.grid, p.catalogs, p.overlays, p.year, p.span) : []),
+    [p.grid, p.catalogs, p.overlays, p.year, p.span],
+  );
 
   // ---------------------------------------------------------------- fly-to
   const anim = useRef<number>();
@@ -600,11 +613,11 @@ export function SkyView(p: Props) {
           ))}
           {hover && !p.selection && (() => {
             const [sx, sy] = toScreen(hover.x, hover.y);
-            const sub = hover.cat === "simbad" ? (hover.src.type as string | null) ?? "SIMBAD" : CATALOG_STYLE[hover.cat].label;
+            const tip = markerTip(hover.cat, hover.src);
             return (
               <g className="hover-tip" transform={`translate(${Math.min(sx + 12, W - 220)} ${Math.max(sy + 22, 20)})`}>
-                <text className="hover-name">{String(hover.src.id)}</text>
-                <text className="hover-sub" y={13}>{sub}{hover.src.mag != null ? ` · ${hover.src.mag_band} ${hover.src.mag.toFixed(1)}` : ""}</text>
+                <text className="hover-name">{tip.name}</text>
+                <text className="hover-sub" y={13}>{tip.sub}</text>
               </g>
             );
           })()}

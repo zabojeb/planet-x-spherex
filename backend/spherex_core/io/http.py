@@ -64,8 +64,9 @@ class RangeClient:
                                 self.retries, name, start, length, reason, time.perf_counter() - t0)
                     raise
             self.retries_done += 1
+            wait = delay * (1.0 + random.random())
             log.debug("range read retry %d/%d in %.1f s: %s bytes=%d+%d (%s after %.1f s)", attempt + 1,
-                      self.retries, delay, name, start, length, reason, time.perf_counter() - t0)
-            await asyncio.sleep(delay * (1.0 + random.random()))
+                      self.retries, wait, name, start, length, reason, time.perf_counter() - t0)
+            await asyncio.sleep(wait)
             delay *= 2
         raise RuntimeError(f"range read failed after {self.retries} attempts: {url}")

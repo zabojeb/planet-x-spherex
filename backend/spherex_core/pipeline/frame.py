@@ -21,7 +21,7 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
 
     psf_os: the detector-zone ePSF for this cutout (EPSFTable.nearest), or None to skip the PSF fit.
     Must stay a module-level function: it is pickled by reference for the process pool.
-    `t_process` in the result is the CPU time spent here, in seconds (for the build's timing log).
+    `t_process` in the result is the wall time spent here, in seconds (for the build's timing log).
     """
     t0 = time.perf_counter()
     h = cut.header
@@ -47,6 +47,7 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
     ring = radial_profile(cut.image, cut.variance, cut.flags, xt - cut.x0, yt - cut.y0, RING_BAD, RING_CORE,
                           bkg if np.isfinite(bkg) else 0.0)
     return {
+        "t_process": time.perf_counter() - t0,
         "band": frame.band, "mjd": mjd, "wl": float(wl), "dwl": float(dwl), "bkg": bkg, "rms": rms,
         "weight": 1.0 / rms ** 2 if np.isfinite(rms) and rms > 0 else 0.0, "psf_fwhm": fwhm,
         "aligned": aligned, "aligned_raw": aligned_raw, "flags": aligned_flags, "phot": phot,
