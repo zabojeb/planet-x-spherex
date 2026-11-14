@@ -1,8 +1,9 @@
-/** Floating top-left cluster: serif wordmark, the search pill and the field of view. Plus the share panel. */
-import { Check, Code2, Download, Link2 } from "lucide-react";
-import { useState } from "react";
-import type { Target } from "../types";
+/** Floating top-left cluster: serif wordmark, the search pill, the field of view and Random. Plus the share panel. */
+import { Check, ChevronDown, Code2, Dices, Download, Link2 } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import type { ExportKind } from "../api";
+import { useDismiss } from "../hooks";
+import { FACETS, type Facet, type Pick, type Recent, type SkyObject } from "../search";
 import { CommandSearch } from "./CommandSearch";
 
 const FOVS = [2, 3, 4, 6, 8, 10, 12, 16, 20, 30];
@@ -16,14 +17,15 @@ export function Wordmark() {
 }
 
 export function TopLeft(p: {
-  presets: Target[];
-  activeId: string | null;
-  busy: boolean;
-  searchError: string | null;
+  space: SkyObject[];
+  indexReady: boolean;
+  current: string | null;
+  recents: Recent[];
   fov: number;
   compact: boolean;
-  onSearch: (q: string) => void;
-  onPreset: (id: string) => void;
+  onPick: (pick: Pick, recent: Recent) => void;
+  onRandom: (what: Facet | "field" | null) => void;
+  onWarm: () => void;
   onFov: (fov: number) => void;
 }) {
   const fovs = FOVS.includes(p.fov) ? FOVS : [...FOVS, p.fov].sort((a, b) => a - b);
@@ -31,7 +33,7 @@ export function TopLeft(p: {
     <div className="topleft">
       <Wordmark />
       <div className="search-row">
-        <CommandSearch presets={p.presets} activeId={p.activeId} busy={p.busy} error={p.searchError} onSearch={p.onSearch} onPreset={p.onPreset} compact={false} />
+        <CommandSearch space={p.space} indexReady={p.indexReady} current={p.current} recents={p.recents} onPick={p.onPick} onRandom={p.onRandom} onWarm={p.onWarm} />
         <label className="fov glass" title="Field of view. Larger fields show faster movers but load more data.">
           <span className="micro">FOV</span>
           <select value={p.fov} onChange={(e) => p.onFov(Number(e.target.value))} aria-label="Field of view in arcminutes">
@@ -42,7 +44,61 @@ export function TopLeft(p: {
             ))}
           </select>
         </label>
+        <RandomButton compact={p.compact} onRandom={p.onRandom} onWarm={p.onWarm} />
       </div>
+    </div>
+  );
+}
+
+// What the Random menu offers besides "anything" and "a patch of sky".
+const RANDOM_FACETS = ["brown-dwarf", "high-pm", "variable", "young", "galaxy", "nebula", "cluster"]
+  .map((id) => FACETS.find((f) => f.id === id))
+  .filter((f): f is Facet => !!f);
+
+/** Split button: Random picks an object or a patch of sky; the caret picks what kind. */
+export function RandomButton({ compact, onRandom, onWarm }: { compact: boolean; onRandom: (what: Facet | "field" | null) => void; onWarm: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, close);
+  const go = (what: Facet | "field" | null) => {
+    setOpen(false);
+    onRandom(what);
+  };
+  return (
+    <div className="random glass" ref={ref} onPointerEnter={onWarm}>
+      <button className="random-main" onClick={() => go(null)} title="Explore something at random: an object from the index or a patch of sky">
+        <Dices size={16} aria-hidden />
+        {!compact && <span>Random</span>}
+        {compact && <span className="sr-only">Random</span>}
+      </button>
+      <button className="random-more" aria-label="Choose what to pick at random" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <ChevronDown size={14} aria-hidden />
+      </button>
+      {open && (
+        <div className="popover left random-menu" role="menu" aria-label="Random">
+          <button role="menuitem" className="menu-item" onClick={() => go(null)}>
+            <span>
+              Anything
+              <span className="menu-hint">An object from the index, sometimes a patch of sky</span>
+            </span>
+          </button>
+          <button role="menuitem" className="menu-item" onClick={() => go("field")}>
+            <span>
+              Patch of sky
+              <span className="menu-hint">A uniformly random position</span>
+            </span>
+          </button>
+          <div className="micro menu-title">Random object of a kind</div>
+          <div className="random-kinds">
+            {RANDOM_FACETS.map((f) => (
+              <button key={f.id} role="menuitem" className="chip" onClick={() => go(f)}>
+                {f.one}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

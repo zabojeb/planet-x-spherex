@@ -22,15 +22,29 @@ async def create_sequence(req: SequenceRequest) -> dict:
     return await services.submit_sequence(req.params(), force=req.force)
 
 
+JOB_STATUS_CODES = {"queued": 202, "running": 202, "error": 500, "cancelled": 410}
+
+
 @router.get("/sequences/{seq_id}")
-def get_sequence(seq_id: str) -> Response:
-    """200 with meta.json when done, 202 with the job while running, 500 with the job if it failed."""
+async def get_sequence(seq_id: str) -> Response:
+    """200 with meta.json when done; the job dict with 202 while queued or running, 500 if it failed and
+    410 if it was cancelled because nobody was waiting (POST again to restart it)."""
     status, job = services.sequence_status(seq_id)
     if status == "done":
         return Response(services.sequence_meta_bytes(seq_id), media_type="application/json")
     if job is None:
         raise HTTPException(404, "unknown sequence")
-    return Response(json.dumps(job), media_type="application/json", status_code=500 if status == "error" else 202)
+    return Response(json.dumps(job), media_type="application/json", status_code=JOB_STATUS_CODES.get(status, 500))
+
+
+@router.delete("/sequences/{seq_id}", status_code=204)
+async def detach_sequence(seq_id: str) -> Response:
+    """The client stopped waiting; the build is cancelled once no client waits for it. A finished result stays."""
+    try:
+        await services.detach_sequence(seq_id)
+    except NotFound as e:
+        raise HTTPException(404, str(e)) from None
+    return Response(status_code=204)
 
 
 @router.get("/sequences/{seq_id}/exposures.bin")

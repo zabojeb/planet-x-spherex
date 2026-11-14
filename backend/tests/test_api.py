@@ -83,4 +83,4 @@ def test_running_job_reports_202_and_failed_job_500(client):
 def test_list_catalogs(client):
     c, _, _ = client
     assert c.get("/api/catalogs").json() == {"gaia": "Gaia DR3 (ESA)", "catwise": "CatWISE2020 (IRSA)",
-                                             "2mass": "2MASS point sources (IRSA)"}
+                                             "2mass": "2MASS point sources (IRSA)", "simbad": "SIMBAD (CDS)"}

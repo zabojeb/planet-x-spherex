@@ -8,6 +8,7 @@ caches warmed on the server.
     wave/D<n>.npz                      per-detector wavelength lookup tables
     epsf/D<n>.npz                      per-detector effective PSF tables (441 zones)
     catalogs/<name>_<sha1[:16]>.json   catalog cone searches
+    resolve/<sha1[:16]>.json           name lookups answered by CDS Sesame
     sequences/<id>/                    built sequences, format in pipeline.results
 """
 
@@ -46,6 +47,9 @@ class CacheLayout:
     def catalog(self, catalog: str, ra: float, dec: float, radius_deg: float) -> Path:
         key = _sha1(f"{catalog}|{ra:.5f}|{dec:.5f}|{radius_deg:.4f}")[:16]
         return self.root / "catalogs" / f"{catalog}_{key}.json"
+
+    def resolve(self, key: str) -> Path:
+        return self.root / "resolve" / f"{_sha1(key)[:16]}.json"
 
     @property
     def sequences(self) -> Path:

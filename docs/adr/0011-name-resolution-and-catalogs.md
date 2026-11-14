@@ -1,6 +1,6 @@
 # ADR-0011: Name resolution and reference catalogs
 
-- **Status:** Accepted
+- **Status:** Accepted; extended by [ADR-0021](0021-local-object-index-for-search.md) (local object index, cached and raced Sesame lookups)
 - **Date:** 2026-11-14
 
 ## Context

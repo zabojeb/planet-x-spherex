@@ -11,7 +11,15 @@ export const MODES: { id: Mode; label: string; short?: string; key: string; hint
   { id: "exp", label: "Exposures", short: "Expo", key: "e", hint: "Single exposures of one epoch: asteroids jump between frames" },
 ];
 
-export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "flags", "compass"] as const;
+/** 3D views, orthogonal to the mode: the relief shows whatever the mode shows; the cubes stack its frames. */
+export type View3D = "off" | "relief" | "time" | "bands";
+export const VIEWS_3D: { id: Exclude<View3D, "off">; label: string; hint: string }[] = [
+  { id: "relief", label: "Relief", hint: "Brightness as height: stars become peaks; in Difference a mover is a peak beside a pit" },
+  { id: "time", label: "Time cube", hint: "Epochs stacked by date: still stars are vertical columns, a mover leans along its track" },
+  { id: "bands", label: "λ cube", hint: "Detectors stacked by wavelength: a source lights up at the wavelengths where it is bright" },
+];
+
+export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "simbad", "flags", "grid", "compass"] as const;
 export type Overlay = (typeof OVERLAYS)[number];
 
 export interface ViewState {
@@ -32,6 +40,8 @@ export interface ViewState {
   partial: boolean; // include partial visits in playback
   ylog: boolean; // spectrum y axis
   stack: number[] | null; // null = all epochs
+  view3d: View3D;
+  height3d: number; // vertical exaggeration of the 3D views, 1 = default
 }
 
 export const DEFAULT_VIEW: ViewState = {
@@ -52,6 +62,8 @@ export const DEFAULT_VIEW: ViewState = {
   partial: false,
   ylog: true,
   stack: null,
+  view3d: "off",
+  height3d: 1,
 };
 
 export type TargetSpec =
@@ -117,6 +129,10 @@ export function parseUrl(search = window.location.search): UrlState {
   if (q.has("ov")) view.overlays = (q.get("ov") || "").split(",").filter((o): o is Overlay => (OVERLAYS as readonly string[]).includes(o));
   if (q.has("flags")) view.flagBits = (q.get("flags") || "").split(",").map(Number).filter((b) => Number.isInteger(b) && b >= 0 && b < 32);
   if (q.has("stack")) view.stack = (q.get("stack") || "").split(",").map(Number).filter((e) => Number.isInteger(e) && e >= 0);
+  const v3d = q.get("v3d");
+  if (v3d && VIEWS_3D.some((x) => x.id === v3d)) view.view3d = v3d as View3D;
+  const h3d = num(q.get("h3d"));
+  if (h3d !== undefined && h3d > 0) view.height3d = Math.min(4, h3d);
   return { target, fov: num(q.get("fov")) ?? null, view, embed: q.get("embed") === "1", hasParams: [...q.keys()].length > 0 };
 }
 
@@ -155,6 +171,8 @@ export function buildQuery(spec: TargetSpec | null, fov: number, view: ViewState
   if (view.overlays.join(",") !== d.overlays.join(",")) q.set("ov", view.overlays.join(","));
   if (view.flagBits) q.set("flags", view.flagBits.join(","));
   if (view.stack) q.set("stack", view.stack.join(","));
+  if (view.view3d !== d.view3d) q.set("v3d", view.view3d);
+  if (view.view3d !== "off" && view.height3d !== d.height3d) q.set("h3d", fmt(view.height3d, 2));
   if (embed) q.set("embed", "1");
   return q.toString();
 }

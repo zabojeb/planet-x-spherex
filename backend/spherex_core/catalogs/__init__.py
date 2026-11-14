@@ -7,13 +7,16 @@ of each SPHEREx epoch. Results are cached on disk (cache.CacheLayout.catalog), w
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 
 from .. import cache
 from ..errors import UpstreamError
-from . import catwise, gaia, twomass
+from . import catwise, gaia, simbad, twomass
 
-_SOURCES = {"gaia": gaia, "catwise": catwise, "2mass": twomass}
+log = logging.getLogger(__name__)
+_SOURCES = {"gaia": gaia, "catwise": catwise, "2mass": twomass, "simbad": simbad}
 CATALOGS = {name: mod.LABEL for name, mod in _SOURCES.items()}
 
 
@@ -29,12 +32,18 @@ def cone(catalog: str, ra: float, dec: float, radius_deg: float, max_age_hours: 
     path = cache.layout().catalog(catalog, ra, dec, radius_deg)
     if cache.is_fresh(path, max_age_hours):
         try:
-            return json.loads(path.read_text())
+            rows = json.loads(path.read_text())
+            log.info("catalog %s from cache rows=%d radius_deg=%.3f", catalog, len(rows), radius_deg)
+            return rows
         except (OSError, ValueError):
             pass  # partially written or corrupted: fetch again
+    t0 = time.perf_counter()
     try:
         rows = _SOURCES[catalog].query(ra, dec, radius_deg)
+        log.info("catalog %s done s=%.2f rows=%d radius_deg=%.3f", catalog, time.perf_counter() - t0, len(rows),
+                 radius_deg)
     except Exception as e:  # noqa: BLE001 - every upstream failure becomes one user-facing error
+        log.warning("catalog %s failed s=%.2f error=%s", catalog, time.perf_counter() - t0, e)
         reason = str(e).splitlines()[0][:200] if str(e) else e.__class__.__name__
         raise UpstreamError(f"{CATALOGS[catalog]} did not answer usefully ({reason}). Try again shortly.") from e
     path.parent.mkdir(parents=True, exist_ok=True)

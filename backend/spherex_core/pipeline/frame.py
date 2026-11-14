@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from ..archive import Frame
@@ -19,7 +21,9 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
 
     psf_os: the detector-zone ePSF for this cutout (EPSFTable.nearest), or None to skip the PSF fit.
     Must stay a module-level function: it is pickled by reference for the process pool.
+    `t_process` in the result is the CPU time spent here, in seconds (for the build's timing log).
     """
+    t0 = time.perf_counter()
     h = cut.header
     masked = (cut.flags & MASK_DEFAULT) != 0
     raw = cut.image.astype(np.float32)
@@ -49,4 +53,5 @@ def process_frame(cut: Cutout, frame: Frame, grid: Grid, target: Target, wave: W
         "ring": ring, "omega": omega,
         "flag_counts": count_bits(aligned_flags),
         "obs_id": frame.obs_id, "collection": frame.collection, "file": frame.file_name,
+        "t_process": time.perf_counter() - t0,
     }

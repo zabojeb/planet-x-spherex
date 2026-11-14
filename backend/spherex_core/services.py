@@ -20,11 +20,11 @@ from .errors import NotFound, UpstreamError
 from .pipeline import results
 from .pipeline.jobs import JobManager
 from .pipeline.params import SequenceParams
-from .targets import PRESETS, resolve
+from .targets import PRESETS, objects, resolve
 
 __all__ = ["NotFound", "SequenceParams", "UpstreamError", "array_file", "catalog_cone", "configure", "health",
-           "jobs", "list_catalogs", "list_presets", "load_sequence", "read_array", "read_exposures",
-           "resolve_target", "sequence_meta_bytes", "sequence_status", "submit_sequence"]
+           "jobs", "list_catalogs", "list_presets", "load_sequence", "object_index", "read_array", "read_exposures",
+           "resolve_target", "detach_sequence", "sequence_meta_bytes", "sequence_status", "submit_sequence"]
 
 _jobs: JobManager | None = None
 
@@ -53,14 +53,29 @@ def list_presets() -> list[dict]:
 
 
 def resolve_target(query: str) -> dict:
-    """Coordinates, preset id/name or object name -> target dict. Raises LookupError."""
+    """Coordinates, preset id/name, a name in the local object index or any name Sesame knows -> target
+    dict. Raises LookupError."""
     return resolve(query).to_dict()
+
+
+def object_index() -> tuple[bytes, str]:
+    """The local object index as served to clients (JSON bytes) and its ETag."""
+    idx = objects.index()
+    return idx.raw, idx.etag
 
 
 # ---------------------------------------------------------------- sequences
 async def submit_sequence(params: SequenceParams, force: bool = False) -> dict:
-    """Start (or reuse) a build; returns the job dict. Must be awaited on the event loop."""
-    return jobs().submit(params, force=force).to_dict()
+    """Start (or reuse) a build and wait for it as one more client; returns the job dict.
+    Must be awaited on the event loop. Call detach_sequence when the result is no longer wanted."""
+    m = jobs()
+    return m.describe(m.submit(params, force=force))
+
+
+async def detach_sequence(seq_id: str) -> None:
+    """This client no longer waits for the build; nobody waiting cancels it. Raises NotFound."""
+    if jobs().detach(seq_id) is None:
+        raise NotFound("unknown sequence")
 
 
 def _result_dir(seq_id: str) -> Path | None:
@@ -75,15 +90,16 @@ def _ready_dir(seq_id: str) -> Path:
 
 
 def sequence_status(seq_id: str) -> tuple[str, dict | None]:
-    """('done', None) when the result exists, (job status, job dict) while queued/running/failed,
-    ('unknown', None) when nothing is known about the id."""
+    """('done', None) when the result exists, (job status, job dict) while queued/running or after it
+    failed or was cancelled, ('unknown', None) when nothing is known about the id. Asking keeps a build alive."""
     d = _result_dir(seq_id)
     if d is not None and results.is_complete(d):
         return "done", None
-    job = jobs().get(seq_id)
+    m = jobs()
+    job = m.poll(seq_id)
     if job is None:
         return "unknown", None
-    return job.status, job.to_dict()
+    return job.status, m.describe(job)
 
 
 def sequence_meta_bytes(seq_id: str) -> bytes:

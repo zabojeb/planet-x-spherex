@@ -22,7 +22,8 @@ A public web tool for watching the infrared sky change. Enter an object name or 
 | Image discovery for any position (IRSA TAP; DR1 + QR3, wide + deep; releases configurable) | Done |
 | Cutouts straight from S3 with range requests, identical to astropy's reads | Done |
 | Proper-motion-aware targets; the five challenge targets as presets; coordinate input | Done |
-| Name search (CDS Sesame) | Implemented |
+| Search with suggestions as you type: ~4,500 SIMBAD objects with aliases, typo tolerance, object types, coordinates with nearby objects; other names through CDS Sesame | Done |
+| Random button: a random object (or kind of object) or a random patch of sky | Done |
 | Alignment on a common grid, epoch grouping, per-detector co-adds with outlier rejection | Done |
 | Forced photometry with per-pixel wavelengths (data for spectra and light curves) | Done |
 | Contamination flags per epoch and detector, definitions read from the files | Done |
