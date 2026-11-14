@@ -26,12 +26,15 @@ export interface ChartLine {
   key: string;
   points: [number, number][];
   color: string;
+  /** Dashed, for references and models (continuum, fitted curves). */
+  dash?: boolean;
+  width?: number;
 }
 
 export interface LegendItem {
   label: string;
   color: string;
-  kind?: "dot" | "line" | "hollow" | "hollow-square";
+  kind?: "dot" | "line" | "dash" | "hollow" | "hollow-square";
 }
 
 export interface Tick {
@@ -227,7 +230,8 @@ export function ChartFrame(p: Props) {
               d={l.points.map(([x, y], i) => `${i ? "L" : "M"}${s.x(x).toFixed(1)},${s.y(y).toFixed(1)}`).join("")}
               fill="none"
               stroke={l.color}
-              strokeWidth={2}
+              strokeWidth={l.width ?? 2}
+              strokeDasharray={l.dash ? "5 4" : undefined}
               strokeLinejoin="round"
             />
           ))}

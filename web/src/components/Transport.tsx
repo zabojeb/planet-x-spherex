@@ -31,7 +31,7 @@ interface Props {
 }
 
 /** Compact floating dock: previous / play / next, the epoch scrubber and the date; `children` holds the mode control. */
-export function Dock(p: Props & { date: string; children?: React.ReactNode }) {
+export function Dock(p: Props & { date: string; children?: React.ReactNode; archival?: React.ReactNode }) {
   return (
     <div className="dock glass">
       {p.exposures && p.exposures.count > 0 && (
@@ -59,7 +59,8 @@ export function Dock(p: Props & { date: string; children?: React.ReactNode }) {
             <ChevronRight size={16} />
           </button>
         </div>
-        <div className="dock-scrub">
+        <div className={`dock-scrub${p.archival ? " with-arch" : ""}`}>
+          {p.archival}
           <Scrubber {...p} />
         </div>
         <div className="dock-date num">{p.date}</div>

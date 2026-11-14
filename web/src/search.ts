@@ -492,3 +492,35 @@ export function saveRecent(r: Recent): Recent[] {
   }
   return next;
 }
+
+// ------------------------------------------------------------------ solar-system objects
+/** Comet and asteroid designations that cannot be stars: 3I, 1P/Halley, C/2025 N1, 2024 YR4, (433) Eros. */
+const SMALL_BODY = [
+  /^\d+\s?[IP](\/.*)?$/i, // interstellar / periodic comet numbers: 3I, 1P, 2I/Borisov
+  /^[CPDXI]\/\s?\d{4}\s?[A-Z]{1,2}\d*/i, // comet designations: C/2025 N1
+  /^\d{4}\s?[A-Z]{2}\d{0,3}$/, // provisional asteroid designations: 2024 YR4
+  /^\(\d+\)\s*\S*/, // (433) Eros
+  /^\d{1,6}\s+[A-Z][a-z]{2,}$/, // 433 Eros, 16 Psyche
+];
+const SOLAR_TERMS = ["solar system", "asteroid", "asteroids", "comet", "comets", "minor planet", "minor planets", "interstellar"];
+
+/** "strong": the text is a small-body designation; "term": it asks for the solar system in general. */
+export function solarSystemQuery(text: string): "strong" | "term" | null {
+  const q = text.trim();
+  if (!q) return null;
+  if (SMALL_BODY.some((re) => re.test(q))) return "strong";
+  const n = normalize(q);
+  if (n.length >= 4 && SOLAR_TERMS.some((t) => t.startsWith(n) || n === t)) return "term";
+  return null;
+}
+
+/** Name for the moving-object search: "(433) Eros" -> "Eros"-style names are passed as typed, minus prefixes. */
+export function smallBodyName(text: string): string {
+  return text.trim().replace(/^(asteroid|comet)\s+/i, "").replace(/^\((\d+)\)\s*/, "$1 ");
+}
+
+export const SOLAR_EXAMPLES = [
+  { name: "3I", label: "3I/ATLAS", sub: "Interstellar comet, 2025" },
+  { name: "Eros", label: "433 Eros", sub: "Near-Earth asteroid" },
+  { name: "Psyche", label: "16 Psyche", sub: "Metal-rich main-belt asteroid" },
+];

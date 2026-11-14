@@ -1,6 +1,6 @@
 /** The card next to a selected object, the target or a dropped pin: where it is in every frame we use, how
  *  far from the target, what catalogues say about it, and what to do next (measure, centre, follow, look up). */
-import { ArrowUpRight, Check, Copy, Footprints, Loader2, LocateFixed, X } from "lucide-react";
+import { ArrowUpRight, Check, Copy, Footprints, Loader2, LocateFixed, ScanEye, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { compassPoint, formatAngle, formatDec, formatDeg, formatDistance, formatPm, formatRA, positionAngle, separation, toEcliptic, toGalactic, totalPm } from "../astro";
 import { CATALOG_STYLE } from "../colors";
@@ -88,6 +88,10 @@ interface Props {
   onDetails: () => void;
   /** Forced photometry here; resolves when its curves are in the drawer. */
   onMeasure?: () => Promise<void>;
+  /** Full automatic analysis of this position (opens the Analysis tab). */
+  onAnalyze?: () => void;
+  /** Per-exposure PSF fits and cutouts here (opens the verification strip). */
+  onVerify?: () => void;
   /** A new field centred on this position. */
   onCentre?: () => void;
   /** A new field that follows this source's proper motion. */
@@ -178,6 +182,11 @@ export function PickCard(p: Props) {
       )}
 
       <div className="pick-actions">
+        {p.onAnalyze && (
+          <button className="btn pick-cta primary-cta" onClick={p.onAnalyze} title="Identification, photometry, spectrum, classification, variability, motion and nearby tracklets, with a verdict">
+            <Sparkles size={13} /> Analyze
+          </button>
+        )}
         {p.sel.kind === "target" ? (
           <button className="btn pick-cta" onClick={p.onDetails}>Spectrum &amp; light curve</button>
         ) : (
@@ -191,6 +200,11 @@ export function PickCard(p: Props) {
           {p.onCentre && (
             <button className="btn ghost small-btn" onClick={p.onCentre} title="Build a new field centred here">
               <LocateFixed size={13} /> Centre field here
+            </button>
+          )}
+          {p.onVerify && (
+            <button className="btn ghost small-btn" onClick={p.onVerify} title="PSF fit and cutout in every exposure: is it real?">
+              <ScanEye size={13} /> Verify
             </button>
           )}
           {p.onFollow && (
