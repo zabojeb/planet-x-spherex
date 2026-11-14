@@ -767,3 +767,17 @@ canvas.smooth { image-rendering: auto; }
 @media (max-width: 760px) {
   .nav-pad { display: none; }
 }
+
+/* phones: rail panels open to the left of the rail, level with its top, one gutter away from it and from the
+   left edge. (They used to be position: fixed, but the rail's backdrop-filter makes it the containing block
+   for fixed children, so the panel was squeezed into the 46 px rail and pushed off-screen.) The button
+   wrappers go static so the panel is placed against the rail itself. */
+@media (max-width: 760px) {
+  .rail .popover-wrap { position: static; }
+  .popover.side {
+    /* offsets count from inside the rail's 1 px border */
+    position: absolute; top: -1px; bottom: auto; left: auto; right: calc(100% + var(--gutter) + 1px);
+    width: calc(100vw - 3 * var(--gutter) - var(--rail-w)) !important; max-width: none;
+    max-height: calc(100dvh - var(--row2) - var(--gutter)); overflow: auto;
+  }
+}
