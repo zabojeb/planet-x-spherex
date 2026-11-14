@@ -171,11 +171,13 @@ def ir_excess(wl, f, e, short_fit: dict | None) -> dict | None:
 # Features that need a background light source behind molecular clouds or a disc; in cool-dwarf
 # atmospheres the same windows are eaten by H2O/CH4/CO bands, so they are not reported as detections there.
 CONTEXT_FEATURES = {"ice", "pah"}
+POOR_TEMPLATE_CHI2 = 20.0  # best template chi2/dof above this: not a normal stellar photosphere
 
 
 def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, excess: dict | None,
               idx: dict, features: list[dict]) -> dict:
-    """One label, a family and short notes. Families: star, late_m_dwarf, brown_dwarf, composite, yso_candidate."""
+    """One label, a family and short notes. Families: star, late_m_dwarf, brown_dwarf, composite, yso,
+    yso_candidate (star with an IR excess), nonstellar (featureless red power law)."""
     notes: list[str] = []
     label, family = "unclassified", None
     ch4 = (idx.get("ch4_3.3") or {}).get("value")
@@ -183,6 +185,10 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
     ch4_16 = (idx.get("ch4_1.6") or {}).get("value")
     methane = ch4 is not None and ch4 < 0.6 and (peak is None or peak > 0.6)
     best = templates["best"] if templates else None
+    by_id = {f["id"]: f for f in features}
+    ice = by_id.get("h2o_ice_3.05") or {}
+    ice_depth = float(ice["depth"]) if ice.get("detected") and ice.get("depth") is not None else 0.0
+    poor_fit = bool(best and best["chi2_red"] > POOR_TEMPLATE_CHI2)
     best_letter = clean_type(best["sptype"])[:1] if best else ""
     e45 = (excess or {}).get("3.8_5um") or {}
     big_excess = bool(e45.get("ratio") and e45["ratio"] > 1.5 and (e45.get("significance") or 0) > 5)
@@ -198,6 +204,16 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
                      "excess: most likely a cold brown dwarf blended with a neighbouring star.")
     elif methane:
         label, family = "T dwarf (methane at 3.3 µm)", "brown_dwarf"
+    elif ice_depth > 0.2 and alpha and alpha["alpha"] > -0.3:
+        label = f"embedded YSO ({alpha['lada_class']}) with H₂O ice"
+        family = "yso"
+        notes.append(f"H₂O ice at 3.05 µm, depth {ice_depth:.2f}, on a rising infrared continuum: a young star "
+                     "still embedded in its envelope (or a source behind a dense cloud).")
+    elif poor_fit and alpha and alpha["alpha"] > -1.0:
+        label, family = "red power law (AGN/QSO or YSO)", "nonstellar"
+        notes.append(f"No stellar template fits (best χ²/dof {best['chi2_red']:.0f}) and the 2-5 µm continuum "
+                     f"rises (α = {alpha['alpha']:.2f}): hot dust around an AGN/QSO or a young star. "
+                     "No QSO templates yet; check the position (high Galactic latitude favours a QSO).")
     elif best_letter in "LT":
         family = "brown_dwarf"
     elif best_letter == "M" and best and best["family"] == "dwarf_standard":
@@ -216,7 +232,14 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
     if alpha and alpha["alpha"] > -1.6 and family in ("star", "yso_candidate"):
         notes.append(f"IR spectral index α = {alpha['alpha']:.2f} ({alpha['lada_class']}).")
     cool = family in ("brown_dwarf", "late_m_dwarf", "composite")
-    det = [f["name"] for f in features if f["detected"] and not (cool and f["phase"] in CONTEXT_FEATURES)]
+
+    def suppressed(f: dict) -> bool:
+        if cool and f["phase"] in CONTEXT_FEATURES:
+            return True
+        # the PAH side windows sit inside a deep 3 µm ice band, which fakes PAH "emission"
+        return f["id"] == "pah_3.3" and ice_depth > 0.3
+
+    det = [f["name"] for f in features if f["detected"] and not suppressed(f)]
     if det:
         notes.append("Detected features: " + ", ".join(det) + ".")
     if bb and bb["teff_range_k"][1] / max(bb["teff_range_k"][0], 1) < 1.5:
@@ -226,8 +249,7 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
         notes.append("Temperature is not constrained by a blackbody over 0.75-5 µm (Rayleigh-Jeans regime); "
                      "use the template type.")
     return {"label": label, "family": family, "notes": notes,
-            "context_suppressed": sorted(f["id"] for f in features
-                                         if f["detected"] and cool and f["phase"] in CONTEXT_FEATURES)}
+            "context_suppressed": sorted(f["id"] for f in features if f["detected"] and suppressed(f))}
 
 
 def classify(bins: list[dict]) -> dict:

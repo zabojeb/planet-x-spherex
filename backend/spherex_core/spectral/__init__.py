@@ -13,14 +13,18 @@ variability (epoch ratio spectra).
 
 from __future__ import annotations
 
+import logging
 import math
 
+from ..logs import timed
 from .assemble import bin_spectrum, by_epoch, epochs_of
-from .classify import classify
+from .classify import classify as classify_spectrum
 from .features import FEATURES, continuum, detect_features, indices, measure_features
 from .grid import GRID
 from .synphot import compare_with_catalogs, synthetic
-from .variability import variability
+from .variability import variability as epoch_ratios
+
+log = logging.getLogger(__name__)
 
 __all__ = ["spectrum_report", "classify_report", "variability_report", "analyze", "GRID", "FEATURES"]
 
@@ -99,7 +103,7 @@ def classify_report(records: list[dict], target=None, catalogs: bool = False) ->
     """Classification of the overall calibrated spectrum, synthetic photometry and (optionally) a
     comparison with 2MASS and CatWISE magnitudes of the matched catalogue source."""
     overall = bin_spectrum(records)
-    out = classify(overall)
+    out = classify_spectrum(overall)
     synth = synthetic(overall) if overall else {}
     out["synthetic_photometry"] = synth
     out["catalog_comparison"] = None
@@ -111,7 +115,10 @@ def classify_report(records: list[dict], target=None, catalogs: bool = False) ->
         for name in ("2mass", "catwise"):
             try:
                 ra0, dec0 = target.position_at(year_to_mjd_safe(2010.0))
-                matches[name] = match_catalog(cat.cone(name, float(ra0), float(dec0), 1.5 / 60), target.position_at)
+                with timed(log, "spectral catalog match", catalog=name) as info:
+                    matches[name] = match_catalog(cat.cone(name, float(ra0), float(dec0), 1.5 / 60),
+                                                  target.position_at)
+                    info["matched"] = matches[name] is not None
             except Exception as exc:  # noqa: BLE001 - catalogue outages must not break classification
                 matches[name], errors[name] = None, str(exc)
         out["catalog_comparison"] = {"bands": compare_with_catalogs(synth, matches),
@@ -127,7 +134,7 @@ def year_to_mjd_safe(year: float) -> float:
 
 
 def variability_report(records: list[dict], reference: int | None = None, include_flagged: bool = False) -> dict:
-    return variability(records, reference=reference, include_flagged=include_flagged)
+    return epoch_ratios(records, reference=reference, include_flagged=include_flagged)
 
 
 def analyze(records: list[dict], target=None, catalogs: bool = False, reference: int | None = None) -> dict:

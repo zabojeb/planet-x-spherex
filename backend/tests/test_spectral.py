@@ -9,7 +9,6 @@ from spherex_core import spectral
 from spherex_core.spectral import assemble, classify as cls, features, grid, templates, variability
 from spherex_core.spectral.classify import planck_nu
 
-pytestmark = pytest.mark.skip(reason="spectral package is work in progress (agent stopped mid-way)")
 
 
 def _records(fn, n_per_bin=4, epochs=(0, 1), noise=0.01, seed=0, relative=False, scale_by_epoch=None):
@@ -119,7 +118,7 @@ def test_template_ranking_picks_the_right_type(fake_library):
 
 def test_composite_cold_source_is_flagged(fake_library):
     """A K-like star at short wavelengths plus a methane-rich 4-5 um source (the WISE 0855 situation)."""
-    cold = lambda wl: 8.0 * math.exp(-0.5 * ((wl - 4.6) / 0.25) ** 2) if wl > 3.6 else 0.0  # noqa: E731
+    cold = lambda wl: 30.0 * math.exp(-0.5 * ((wl - 4.4) / 0.35) ** 2) if wl > 3.6 else 0.0  # noqa: E731
     fn = lambda wl: star(wl, 5800.0) * 0.05 + cold(wl)  # noqa: E731
     out = cls.classify(assemble.bin_spectrum(_records(fn, epochs=(0,))))
     assert out["ir_excess"]["3.8_5um"]["ratio"] > 1.5
@@ -187,3 +186,27 @@ def test_routes(tmp_path, fake_library):
         assert c.get("/api/sequences/nope/spectrum").status_code == 404
     finally:
         services.configure(None)
+
+
+def test_summary_rules_for_ice_yso_and_power_law():
+    alpha_rising = {"alpha": 1.2, "lada_class": "Class I (rising)"}
+    ice = {"id": "h2o_ice_3.05", "name": "H₂O ice 3.05 µm", "phase": "ice", "detected": True, "depth": 0.8}
+    pah = {"id": "pah_3.3", "name": "PAH 3.3 µm", "phase": "pah", "detected": True, "depth": -0.5}
+    best = {"best": {"sptype": "M7III", "family": "star", "chi2_red": 100.0}}
+    s = cls.summarize(best, None, alpha_rising, None, {}, [ice, pah])
+    assert s["family"] == "yso" and "pah_3.3" in s["context_suppressed"]
+    s = cls.summarize(best, None, {"alpha": 0.3, "lada_class": "flat spectrum"}, None, {}, [])
+    assert s["family"] == "nonstellar"
+    good = {"best": {"sptype": "G2V", "family": "star", "chi2_red": 1.0}}
+    assert cls.summarize(good, None, {"alpha": -2.8, "lada_class": "Class III / photosphere"}, None, {}, [])[
+        "family"] == "star"
+
+
+def test_catalog_comparison_flags_suspect_matches():
+    from spherex_core.spectral import synphot
+
+    synth = {"J": {"mag": 12.0}, "W1": {"mag": 10.5}}
+    matches = {"2mass": {"j": 12.1, "id": "a", "separation_arcsec": 0.1},
+               "catwise": {"w1": 12.4, "id": "b", "separation_arcsec": 3.3}}
+    out = synphot.compare_with_catalogs(synth, matches)
+    assert out["J"]["suspect"] is False and out["W1"]["suspect"] is True

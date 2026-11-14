@@ -16,6 +16,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..bands import BANDS
+from .common import FieldData, local_peaks, region_mask, saturated_regions, snr_image
 
 LONG = ("D5", "D6")
 SHORT = ("D1", "D2", "D3")
@@ -25,6 +26,8 @@ SHORT_SNR_ABSENT = 3.0
 ANOMALY_SNR = 10.0
 ANOMALY_THRESHOLD = 0.62
 RATIO_NAMES = [f"{BANDS[i + 1]}/{BANDS[i]}" for i in range(len(BANDS) - 1)]
+MAP_SNR = 5.0  # red-excess map threshold
+MERGE_PX = 2.0
 
 
 def _sum(s: dict, bands: tuple[str, ...]) -> tuple[float, float, int]:
@@ -139,3 +142,51 @@ def anomalies(sources: list[dict]) -> tuple[list[dict], dict]:
         c["id"] = f"A{i + 1:03d}"
     info["threshold"] = ANOMALY_THRESHOLD
     return out[:30], info
+
+
+def red_excess_map(fd: FieldData, deep: dict[int, np.ndarray], sources: list[dict]) -> list[dict]:
+    """Red candidates from a pixel map, so a cold dwarf blended with a bluer star is not lost: the S/N of the
+    long-wavelength mean (D5+D6) minus the scaled S/N of the short-wavelength mean (D1-D3), where the scale k
+    is the field's robust long/short S/N ratio of stars (ordinary stars cancel). Peaks above MAP_SNR."""
+    li = [BANDS.index(b) for b in LONG if BANDS.index(b) in deep]
+    si = [BANDS.index(b) for b in SHORT if BANDS.index(b) in deep]
+    if not li or not si:
+        return []
+    with np.errstate(all="ignore"):
+        long_s = snr_image(np.nanmean([deep[b] for b in li], axis=0))
+        short_s = snr_image(np.nanmean([deep[b] for b in si], axis=0))
+    stars = np.isfinite(long_s) & np.isfinite(short_s) & (short_s > 10)
+    if stars.sum() < 10:
+        return []
+    k = float(np.median(long_s[stars] / short_s[stars]))
+    resid = long_s - k * np.clip(short_s, 0, None)
+    resid[region_mask(fd.n, saturated_regions(fd), scale=1.5, extra=2.0)] = np.nan
+    out = []
+    for y, x in zip(*local_peaks(resid, MAP_SNR, size=5, edge=2)):
+        ra, dec = fd.sky(x, y)
+        near = min(sources, key=lambda s: np.hypot(s["x"] - x, s["y"] - y), default=None)
+        dist = np.hypot(near["x"] - x, near["y"] - y) if near else np.inf
+        out.append({"id": "", "source": near["id"] if dist <= MERGE_PX else None, "x": float(x), "y": float(y),
+                    "ra": float(ra), "dec": float(dec), "ratio_long_short": None,
+                    "snr_long": float(long_s[y, x]), "snr_short": float(short_s[y, x]),
+                    "excess_snr": float(resid[y, x]), "star_scale": k,
+                    "short_absent": bool(short_s[y, x] < SHORT_SNR_ABSENT),
+                    "blended_with": near["id"] if near is not None and dist <= 3.0 else None,
+                    "no_gaia": not ((near or {}).get("matches") or {}).get("gaia") if dist <= MERGE_PX else True,
+                    "method": "map", "score": float(resid[y, x] / 5.0 * 1.5)})
+    return out
+
+
+def merge_red(by_source: list[dict], by_map: list[dict]) -> list[dict]:
+    out = [dict(c, method="source") for c in by_source]
+    for m in by_map:
+        twin = next((c for c in out if np.hypot(c["x"] - m["x"], c["y"] - m["y"]) <= MERGE_PX), None)
+        if twin is not None:
+            twin["excess_snr"] = m["excess_snr"]
+            twin["score"] = max(twin["score"], m["score"])
+        else:
+            out.append(m)
+    out.sort(key=lambda c: -c["score"])
+    for i, c in enumerate(out):
+        c["id"] = f"R{i + 1:03d}"
+    return out[:50]

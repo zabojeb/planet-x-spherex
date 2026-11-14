@@ -51,3 +51,16 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0034](0034-immutable-http-caching-and-light-endpoints.md) | Immutable HTTP caching, precompressed metadata and lightweight result endpoints | Accepted | 2026-11-14 |
 | [0035](0035-packaging-docker-and-railway-config.md) | One multi-stage image, docker compose for local runs, Railway config as code | Accepted | 2026-11-14 |
 | [0036](0036-cpu-quota-sizing.md) | Size pools and server workers from the cgroup CPU quota | Accepted | 2026-11-14 |
+| [0040](0040-spectral-bin-grid.md) | Build spectra on one fixed grid of 17 geometric bins per detector | Accepted | 2026-11-14 |
+| [0041](0041-spectral-features-and-indices.md) | Measure curated features against power-law side windows, plus automatic detections | Accepted | 2026-11-14 |
+| [0042](0042-template-classification.md) | Classify with Pickles and SpeX standards on the bin grid, below 2.45 µm | Accepted | 2026-11-14 |
+| [0043](0043-composite-and-excess-detection.md) | Flag infrared excess and composite spectra from a short-wavelength fit | Accepted | 2026-11-14 |
+| [0044](0044-spectral-variability-ratios.md) | Spectral variability as ratio spectra between epochs, ring points included | Accepted | 2026-11-14 |
+| [0045](0045-field-analysis-jobs.md) | Analyze a whole field as one cancellable job stored next to the sequence | Accepted | 2026-11-14 |
+| [0046](0046-field-source-detection.md) | Detect field sources on the co-adds and fold bright-star halos into their star | Accepted | 2026-11-14 |
+| [0047](0047-field-motion-search.md) | Search movers with blind per-source motion fits that several detectors agree on, plus shift-and-stack | Accepted | 2026-11-14 |
+| [0048](0048-moving-object-detection.md) | Detect moving objects in exposure-minus-co-add images, check the simultaneous detector, link tracklets per visit | Accepted | 2026-11-14 |
+| [0049](0049-known-objects-from-spherex.md) | Compute known-object positions from SPHEREx's own position and identify tracklets with Astrometrica's criteria | Accepted | 2026-11-14 |
+| [0050](0050-track-and-stack.md) | Track & Stack within one visit, and require two of three sub-stacks in the synthetic-tracking search | Accepted | 2026-11-14 |
+| [0051](0051-real-bogus-boosted-stumps.md) | Rank difference-image detections with NumPy boosted stumps trained on injections, validated leaving one field out | Accepted | 2026-11-14 |
+| [0052](0052-verification-and-ades.md) | Verify candidates with free-position ePSF fits and export ADES for station 288 as follow-up data | Accepted | 2026-11-14 |

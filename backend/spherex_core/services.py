@@ -402,7 +402,7 @@ def sequence_spectrum(seq_id: str, include_flagged: bool = False) -> dict:
 
     meta = load_sequence(seq_id)
     return _spectral_memo(("spectrum", seq_id, include_flagged, SPECTRAL_VERSION),
-                          lambda: {"sequence": seq_id, "target": meta["target"].get("name"),
+                          lambda: {"sequence": seq_id, "target": (meta.get("target") or {}).get("name"),
                                    "version": SPECTRAL_VERSION,
                                    **spectral.spectrum_report(meta["photometry"], include_flagged)})
 
@@ -414,7 +414,7 @@ def sequence_classification(seq_id: str, catalogs: bool = False) -> dict:
 
     meta = load_sequence(seq_id)
     return _spectral_memo(("classify", seq_id, catalogs, SPECTRAL_VERSION),
-                          lambda: {"sequence": seq_id, "target": meta["target"].get("name"),
+                          lambda: {"sequence": seq_id, "target": (meta.get("target") or {}).get("name"),
                                    "version": SPECTRAL_VERSION,
                                    **spectral.classify_report(meta["photometry"],
                                                               _sequence_target(meta) if catalogs else None,
@@ -449,3 +449,128 @@ def spectral_reference() -> dict:
     from . import spectral
 
     return spectral.reference()
+
+
+# ---------------------------------------------------------------- field analysis, moving objects, track & stack
+def _field_data(seq_id: str):
+    from .analysis.common import load_context
+    from .field.common import load_field
+
+    ctx = load_context(seq_id)
+    return ctx, load_field(ctx)
+
+
+async def field_submit(seq_id: str, options: dict | None = None, client: str | None = None,
+                       force: bool = False) -> dict:
+    """Start or join 'Analyze this field' (all searches); poll with field_status. Raises NotFound."""
+    from .field import FieldOptions, field_jobs
+
+    return await field_jobs().submit(seq_id, FieldOptions(**(options or {})), client, force)
+
+
+async def known_objects_submit(seq_id: str, times: str = "epochs", epoch: int | None = None, vmag_lim: float = 21.0,
+                               client: str | None = None) -> dict:
+    """Known minor planets/comets seen from SPHEREx at every epoch mid-time (or every exposure of one epoch)."""
+    from .field import jobs as fj
+    from .field import known
+    from .field.common import load_field
+
+    if times not in ("epochs", "exposures"):
+        raise ValueError("times must be 'epochs' or 'exposures'")
+    jid = fj.make_id(seq_id, "k", {"times": times, "epoch": epoch, "vmag": vmag_lim})
+
+    def work(ctx, progress, check):
+        fd = load_field(ctx)
+        if times == "epochs":
+            mjds = [e["mjd_mean"] for e in ctx.meta["epochs"] if epoch is None or e["index"] == epoch]
+        else:
+            mjds = sorted({round(x["mjd"], 5) for x in ctx.meta["exposures"] if epoch is None or x["epoch"] == epoch})
+        progress("known objects", 0, len(mjds))
+        out = {"sequence": seq_id, "times_mode": times, "epoch": epoch, **known.overlay(fd, [], vmag_lim)}
+        for i, m in enumerate(mjds):
+            check()
+            out["times"].append({"mjd": m, "objects": [o for o in known.field_objects(fd, m, vmag_lim) if o["inside"]]})
+            progress("known objects", i + 1, len(mjds))
+        return out
+
+    return await fj.field_jobs().submit_work(seq_id, jid, work, client)
+
+
+async def trackstack_search_submit(seq_id: str, epoch: int, rate_min: float = 0.3, rate_max: float = 10.0,
+                                   window_hours: float = 48.0, bands: list[str] | None = None, snr_min: float = 6.0,
+                                   client: str | None = None) -> dict:
+    """Synthetic-tracking search of one visit over trial motions (a job)."""
+    from .field import jobs as fj
+    from .field import trackstack
+    from .field.common import load_field
+
+    params = {"epoch": epoch, "rmin": rate_min, "rmax": rate_max, "win": window_hours, "bands": bands, "snr": snr_min}
+    jid = fj.make_id(seq_id, "s", params)
+
+    def work(ctx, progress, check):
+        progress("track & stack search", 0, 1)
+        return {"sequence": seq_id, **trackstack.search(load_field(ctx), epoch, rate_min=rate_min, rate_max=rate_max,
+                                                         window_hours=window_hours, bands=bands, snr_min=snr_min,
+                                                         check=check)}
+
+    return await fj.field_jobs().submit_work(seq_id, jid, work, client)
+
+
+async def field_status(job_id: str, client: str | None = None) -> tuple[str, dict | None]:
+    """('done', None) | (queued|running|error|cancelled, job) | ('unknown', None). ValueError for a bad id."""
+    from .field import field_jobs
+    from .field.jobs import split_id
+
+    split_id(job_id)
+    return await field_jobs().status(job_id, client)
+
+
+async def field_withdraw(job_id: str, client: str | None = None) -> dict | None:
+    from .field import field_jobs
+
+    return await field_jobs().withdraw(job_id, client)
+
+
+def field_result_path(job_id: str) -> Path:
+    from .field.jobs import result_path
+
+    p = result_path(job_id)
+    if not p.exists():
+        raise NotFound("field result not ready")
+    return p
+
+
+def field_ades(job_id: str, include_low: bool = False) -> str:
+    """ADES PSV of a field / moving-object result's high-quality tracklets (all with include_low).
+    Raises UpstreamError if Horizons fails."""
+    import json
+
+    from .field.ades import ades_psv
+
+    res = json.loads(field_result_path(job_id).read_text())
+    tracklets = res.get("candidates", {}).get("tracklets", [])
+    try:
+        return ades_psv(tracklets, res.get("sequence", ""), include_low)
+    except RuntimeError as e:
+        raise UpstreamError(f"JPL Horizons did not answer: {e}") from e
+
+
+def trackstack_image(seq_id: str, epoch: int, rate: float, pa: float, bands: list[str] | None = None,
+                     combine: str = "mean", subtract_static: bool = False, parts: int = 1) -> dict:
+    """Track & Stack of one visit at a given motion: {'t_ref', 'frames', 'parts': [{'image': float32 [n,n]}]}."""
+    from .field import trackstack
+
+    _, fd = _field_data(seq_id)
+    return trackstack.stack(fd, epoch, rate, pa, bands=bands, combine=combine, subtract_static=subtract_static,
+                            parts=parts)
+
+
+async def verify_candidate(seq_id: str, ra: float, dec: float, mjd_ref: float | None = None, rate: float = 0.0,
+                           pa: float = 0.0, epoch: int | None = None, max_exposures: int = 40) -> dict:
+    """Per-exposure ePSF fits (free position) and cutout strips for a candidate. Raises NotFound/ValueError."""
+    import asyncio
+
+    from .field.verify import verify
+
+    ctx, fd = await asyncio.to_thread(_field_data, seq_id)
+    return await verify(ctx, fd, ra, dec, mjd_ref, rate, pa, epoch, max_exposures)

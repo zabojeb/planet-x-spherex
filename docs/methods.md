@@ -165,3 +165,69 @@ runs the normal epoch grouping, co-adds and photometry, so co-adds stack the obj
 Command-line tools: `scripts/build_archival.py <sequence id> [--fov 12]` builds (or warms) archival epochs and
 prints the target's centroid offset in every frame; `scripts/build_moving.py <name> [--begin --end --type]`
 runs the MOST search and builds the co-moving sequence.
+
+## Spectral analysis
+
+Code: `spherex_core/spectral/` (ADRs 0040–0044); endpoints in [api](api.md#spectral-analysis).
+
+1. **Binning.** Per-exposure photometry is combined on a fixed grid of 102 bins (17 geometric bins per
+   detector, width ≈ λ/R). Inverse-variance mean after a 4σ robust cut; error = max(formal, scatter/√n).
+   Absolute spectra use calibrated, unflagged points; ring points of saturated stars are binned as
+   relative spectra. Built overall and per epoch.
+2. **Features.** 16 curated features (H₂O 1.4/1.9/2.7, CH₄ 1.65/2.2/3.3, CO 2.3/4.6, CO₂ 4.26, H₂O ice 3.05,
+   CO₂ ice 4.27, CO ice 4.67, PAH 3.3, Paα, Brγ, Brα) measured against power-law side windows (one-sided ones
+   carried with the local continuum slope), 2 % systematic per window; depth, EW, significance for each.
+   Flux-ratio indices (methane 1.6/2.2/3.3 µm, water 1.4/1.9 µm, CO, 4 µm peak/J, K/4.5 µm). Automatic
+   detection against a log-log spline pseudo-continuum with asymmetric clipping, flagged unreliable when
+   more than a quarter of the bins sit > 3σ below it (cool dwarfs).
+3. **Classification.** Template χ² (Pickles 131 stars + SpeX standards M0–T9, integrated onto the grid, fitted
+   below 2.45 µm with a 3 % floor; relative probabilities after inflating errors to χ²/dof = 1), blackbody +
+   extinction grid (Indebetouw 2005), IR index α over 2–5 µm, IR excess at 3–3.8 and 3.8–5 µm against the
+   ≤ 2.45 µm blackbody, methane index; combined into a label and a family (star, late M dwarf, brown dwarf,
+   composite, YSO candidate).
+4. **Synthetic photometry.** 2MASS J/H/Ks and WISE W1/W2 from the spectrum with SVO response curves and Vega
+   zero points (W2 extended past 5 µm with a power law), compared with matched 2MASS/CatWISE magnitudes.
+5. **Variability.** Ratio spectra of each epoch against a reference epoch with a 3 % systematic per bin,
+   S/N ≥ 3 in both, per-detector weighted ratios and significance; usable for ring photometry.
+
+Validation on real sequences (ALGO 3 photometry):
+
+| Source | Result | Expected |
+|---|---|---|
+| ε Indi B (T1+T6 binary) | T3 standard, p = 1.0; CH₄(3.3)/4 µm = 0.19; H₂O, CH₄, CO bands at 17–160σ | T dwarf, combined type ~T2 |
+| G=13.9 comparison star | G2V (p = 0.66, G class 1.0); no false feature detections; synthetic − catalogue J −0.003, H −0.021, Ks +0.005, W1 −0.011, W2 +0.007 mag | normal star, calibration to a few % |
+| LP 944-20 (M9) | L0 standard, p = 1.0; H₂O 1.4/1.9/2.7 µm; synthetic − 2MASS J +0.04, H +0.02, Ks −0.00 | late M |
+| 2MASS J0746+20 (L0+L1.5) | L1 standard, p = 0.985 | early L |
+| WISE 0855 (blended with a G=16.3 star) | "composite: star + cold methane-rich source"; 3.8–5 µm excess 7.9× (30σ); CH₄(3.3)/4 µm = 0.23 | Y dwarf + neighbour |
+| IRAS 04016+2610 (Class I protostar) | "embedded YSO (Class I) with H₂O ice"; ice depth 0.94; α = 1.30 | Class I with deep 3 µm ice |
+| 3C 273 (QSO) | "red power law (AGN/QSO or YSO)"; best stellar χ²/dof 45, α = 0.29 | QSO (no QSO templates yet) |
+| RW Aur (saturated, ring photometry) | no absolute spectrum; ratio spectra D5 1.23 (9.9σ) then 0.64 (−24σ), D6 1.46 then 0.74 | variable at 4–5 µm |
+| ε Indi B / comparison star epochs | per-detector ratios within 1–3 % of 1, all < 3σ except one 2σ-scale case | constant |
+
+Synthetic − CatWISE W1/W2 is −1.8/−1.7 mag for ε Indi B: CatWISE's entry for this 4.7″/yr mover has a wrong
+motion (0.4″/yr) and fainter photometry; the comparison flags it `suspect`.
+
+Limitations: templates stop at 2.5 µm; no QSO/galaxy templates; narrow lines are diluted at R 35–130; blends
+(WISE 0855) are recognised as composite but not decomposed.
+
+## Automated field analysis
+
+`spherex_core.field` searches every source of a built sequence (ADR-0045 to ADR-0052).
+
+1. **Sources** (ADR-0046): peaks above S/N 5 in the all-epoch mean and S/N 6 per epoch, per detector, merged
+   within 2 px; peaks in the halo or saturated footprint of a bright star are folded into it; fluxes per detector
+   from the all-epoch mean (r = 2 px, nominal 1/0.80 aperture correction; approximate).
+2. **Cross-match**: Gaia DR3, CatWISE2020, 2MASS moved to the sequence's mean epoch, nearest within 1.5 px.
+3. **Movers** (ADR-0047): blind ADR-0026 motion fits for unblended sources with S/N ≥ 8; ≥ 4σ, ≥ 500 mas/yr,
+   < 15″/yr and at least two agreeing detectors; compared with Gaia/CatWISE. Shift-and-stack over 1–15″/yr on
+   static-subtracted epoch maps for faint movers.
+4. **Moving Object Detection** (ADR-0048): exposure-minus-co-add S/N maps, simultaneous-pair check, real/bogus
+   (ADR-0051), tracklets of ≥ 3 detections per visit, identification against known objects seen from SPHEREx
+   (ADR-0049); Track & Stack and synthetic tracking within a visit (ADR-0050); verification with free-position
+   ePSF fits and ADES export for station 288 (ADR-0052).
+5. **Variability**: aperture (or ring outside a saturated core) photometry of every source in every aligned
+   exposure, normalised per wavelength bin; reduced χ² with a 3 % floor, Stetson J, amplitude between epoch
+   medians; candidates need ≥ 20 points, amplitude ≥ 10 % (≥ 20 % for rings) and χ² ≥ 4; periodograms for the
+   top five when there are ≥ 5 epochs.
+6. **Colours**: red excess (D5 + D6 vs D1–D3) per source and as a pixel map where stars cancel (catches a cold
+   dwarf blended with a bluer star), plus an isolation-forest anomaly score on adjacent-detector flux ratios.

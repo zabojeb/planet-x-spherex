@@ -20,7 +20,8 @@ from spherex_core.runtime import setup_logging
 from .routes import catalogs, sequences, targets
 from .routes import analysis, exports, releases
 from .routes import archival, moving
-# from .routes import spectral  # spectral analysis is still in progress; registered once its tests pass
+from .routes import spectral
+from .routes import field
 
 log = logging.getLogger("spherex_api.http")
 _SEQ_PATH = re.compile(r"^/api/sequences/([A-Za-z0-9]+)")
@@ -89,13 +90,14 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
 
     app.include_router(targets.router)
     app.include_router(archival.router)  # before sequences: its /{array}.bin catch-all would take archival.bin
+    app.include_router(field.router)  # before sequences for the same reason (trackstack.bin)
     app.include_router(sequences.router)
     app.include_router(moving.router)
     app.include_router(catalogs.router)
     app.include_router(analysis.router)
     app.include_router(exports.router)
     app.include_router(releases.router)
-    # app.include_router(spectral.router)
+    app.include_router(spectral.router)
     if web_dist is not None and web_dist.exists():
         app.mount("/", WebFiles(directory=web_dist, html=True), name="web")
     return app
