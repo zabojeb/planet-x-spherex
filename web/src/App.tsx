@@ -486,18 +486,19 @@ export default function App() {
   const cur3d = track3d.find((t) => t.current);
   const currentTrack3d: [number, number] | null = cur3d ? [cur3d.x, cur3d.y] : null;
   const sliceMode = MODES.find((m) => m.id === slices[0]?.view.mode)?.label ?? "";
+  // Short lines: they sit left of the dock (the rail shows the detector, the dock the epoch).
   const label3d = (() => {
     const first = slices[0];
     const last = slices[slices.length - 1];
     if (expCube && layers.length)
-      return { date: `Time cube · ${layers.length} exposures · ${layers[0].label} → ${layers[layers.length - 1].label} UTC`, sub: `Exposures · ${bandLabel(view.band, meta?.bands ?? [])} · ${hud?.epoch ?? ""}` };
+      return { date: `Time cube · ${layers.length} exposures`, sub: `${layers[0].label.slice(0, 5)} → ${layers[layers.length - 1].label.slice(0, 5)} · ${view.band}` };
     if (expCube) return { date: "Loading exposures…", sub: undefined };
     if (view.view3d === "time" && first)
-      return { date: `Time cube · ${slices.length} epochs · ${first.label} → ${last.label}`, sub: `${sliceMode} · ${view.mode === "rgb" ? "false colour" : bandLabel(view.band, meta?.bands ?? [])} · ${dateLabel}` };
+      return { date: `Time cube · ${slices.length} epochs`, sub: `${first.label} → ${last.label} · ${sliceMode}` };
     if (view.view3d === "bands" && first && meta) {
       const wl = (id: string) => meta.bands.find((b) => b.id === id)!;
       const range = `${wl(first.view.band).wl_min.toFixed(2)}–${wl(last.view.band).wl_max.toFixed(2)} µm`;
-      return { date: `λ cube · ${slices.length} detectors · ${range}`, sub: `${sliceMode} · ${view.mode === "stack" ? hud?.dates ?? "" : dateLabel}` };
+      return { date: `λ cube · ${slices.length} detectors`, sub: `${range} · ${sliceMode}` };
     }
     return { date: dateLabel, sub: hud?.spectral };
   })();

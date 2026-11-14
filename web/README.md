@@ -105,13 +105,20 @@ independent of the mode and use the same stretch, colour map and percentile limi
   peak (now) beside a blue pit (then).
 - **Time cube**: every epoch as a glowing layer at its date, with the sky transparent. A still star is a vertical
   column, and a mover leans along the predicted track (orange) that threads the epochs. In Exposures mode with one
-  detector, the layers are that visit's single exposures at their times, so an asteroid becomes a diagonal.
+  detector, the layers are that visit's single exposures at their times, so a source that moves during the visit,
+  such as an asteroid, traces a straight diagonal.
 - **λ cube**: every detector of the current epoch, short to long wavelength. A source lights up only in the layers
-  where it is bright: WISE 0855 appears only at the top (D5–D6).
+  where it is bright.
 
 Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset. Click a layer's label to show that epoch
 or detector. The bar at the top right switches the view, sets the height, spins the scene and goes back to 2D.
 North is the far side and east is left. three.js loads only when a 3D view opens.
+
+| Relief, Difference, seen from the side | Time cube, Blink, D2 |
+|---|---|
+| ![Barnard's Star in Difference: a peak where it is now, a pit where it was a year earlier](../docs/images/3d/relief-difference.jpg) | ![Barnard's Star as a column through three epochs, threaded by the predicted track](../docs/images/3d/time-cube.jpg) |
+| **Time cube, Exposures**: 18 single exposures of one visit | **λ cube**: the six detectors of one epoch (WISE 0855 field) |
+| ![Single D2 exposures stacked at their times](../docs/images/3d/time-cube-exposures.jpg) | ![Six detector layers from 0.75 to 5 µm](../docs/images/3d/lambda-cube.jpg) |
 
 ## URL parameters
 

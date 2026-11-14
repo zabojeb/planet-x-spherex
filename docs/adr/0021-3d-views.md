@@ -12,8 +12,10 @@ Each 3D picture answers a different question, so we offer three:
 | View | What it is | Answers | Best example |
 |---|---|---|---|
 | Relief | The frame on screen as a height field, using the same stretch and colours as the flat sky | How bright and how compact is a source; in Difference, which way it moved (peak now, pit then) | Barnard's Star, Difference |
-| Time cube | Every epoch as a layer at its date (in Exposures mode: every exposure of the visit at its time); the sky is transparent, sources glow | Moves: a still star is a vertical column, a mover leans along its predicted track | Barnard's Star; asteroids in Exposures mode |
-| λ cube | Every detector of the epoch as a layer, short to long wavelength | Colour: a source lights up only where it is bright | WISE 0855 (only D5–D6) |
+| Time cube | Every epoch as a layer at its date (in Exposures mode: every exposure of the visit at its time); the sky is transparent, sources glow | Moves: a still star is a vertical column, a mover leans along its predicted track | Barnard's Star (a lean of about 2 pixels over a year, with the track threading it) |
+| λ cube | Every detector of the epoch as a layer, short to long wavelength | Colour: a source lights up only where it is bright | None yet, see below |
+
+The λ cube has no clean example in the sequences built so far. Barnard's Star has data in only D2, D5 and D6, and it is bright in all three. WISE 0855 has all six detectors, but in two of its three epochs it sits on a background star that is brightest in D1–D2 (`analysis/validation/wise0855_blend.png`). A good showcase needs a very red source without a blend.
 
 ## Decision
 

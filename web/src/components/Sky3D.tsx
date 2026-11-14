@@ -199,7 +199,7 @@ class Stage {
     const r = 0.5 * Math.hypot(n * Math.SQRT2, top);
     const fov = (this.camera.fov * Math.PI) / 180;
     const fit = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * Math.min(1, this.camera.aspect)));
-    const dist = (r / Math.sin(fit / 2)) * (cube ? 1.12 : 0.9);
+    const dist = (r / Math.sin(fit / 2)) * (cube ? 1.22 : 0.9);
     const el = ((cube ? 24 : 40) * Math.PI) / 180;
     const az = ((cube ? -32 : -18) * Math.PI) / 180;
     const pos = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(dist).add(target);
@@ -399,7 +399,9 @@ class Stage {
     const at = (x: number, y: number, z: number) => new THREE.Vector3(x - c, z, -(y - c));
     const overlay = { transparent: true, depthTest: false, depthWrite: false };
     if (p.showTrack && p.track.length > 1) {
-      const pts = p.track.map((t) => at(t.x, t.y, t.z == null ? 0 : t.z * p.top));
+      // points without a time lie on the ground in the relief and on the current layer in the λ cube, with the crosshair
+      const flat = p.kind === "relief" ? 0 : p.targetZ;
+      const pts = p.track.map((t) => at(t.x, t.y, t.z == null ? flat : t.z * p.top));
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: TRACK, opacity: 0.85, ...overlay }));
       line.renderOrder = 10;
       this.marks.add(line);
