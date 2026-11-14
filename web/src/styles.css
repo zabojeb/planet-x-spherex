@@ -656,17 +656,10 @@ canvas.smooth { image-rendering: auto; }
 @media (max-width: 760px) {
   .pick { left: 10px !important; right: 10px; top: auto !important; bottom: 150px; width: auto; max-height: 52vh; }
 }
-/* the dock is centred and up to 760px wide: below ~1260px it would cover the HUD, so lift the HUD above it */
-@media (min-width: 761px) and (max-width: 1260px) {
-  .hud-min { bottom: 84px; }
-}
 /* with the drawer open the HUD sits above it, reduced to the date and α δ */
 @media (min-width: 761px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 28px); }
   .drawer-open .nav-pad, .drawer-open .hud-compass { display: none; }
-}
-@media (min-width: 761px) and (max-width: 1260px) {
-  .app.earth.drawer-open .hud-min { bottom: calc(46vh + 92px); }
 }
 
 /* ---- 3D views (Sky3D): the canvas fills the sky; the bar floats top-right */
@@ -810,12 +803,12 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
   .dock .segmented button { font-size: 14px; }
 }
 
-/* ---- mid widths (tablets, small windows): the dock and the HUD no longer fit side by side.
-   The dock takes the width, the HUD sits above it, and the date goes when even the dock is tight. */
-@media (min-width: 761px) and (max-width: 1400px) {
+/* ---- wider than a phone: the dock is centred and up to 760 px wide. When the HUD (bottom left) would reach it,
+   App sets .hud-lifted (measured, see hudLifted) and the HUD sits above the dock, aligned with its left edge. */
+@media (min-width: 761px) {
   .floating-bottom { width: min(760px, calc(100vw - 40px)); }
-  /* left edge of the HUD = left edge of the centred dock */
-  .hud-min { bottom: 90px; left: max(20px, calc(50% - 380px)); }
+  .app.hud-lifted .hud-min { bottom: 90px; left: max(20px, calc(50% - 380px)); }
+  .app.earth.drawer-open.hud-lifted .hud-min { bottom: calc(46vh + 92px); }
 }
 @media (min-width: 761px) and (max-width: 900px) {
   .dock-date { display: none; }

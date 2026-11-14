@@ -89,12 +89,14 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
 const MOBILE_FRAME = { top: 108, bottom: 234 };
 const MID_FRAME = { top: 160, bottom: 188 }; // top: below the coordinate box
+/** The HUD's left edge and the clearance it keeps from the dock before it moves above it. */
+const HUD_LEFT = 20;
+const HUD_DOCK_GAP = 16;
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
   const mobile = useMediaQuery("(max-width: 760px)");
-  const mid = useMediaQuery("(min-width: 761px) and (max-width: 1400px)");
   const [presets, setPresets] = useState<Target[]>([]);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
@@ -106,24 +108,43 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
-  // The landing index sits above the HUD (epoch, target, coordinates), whose height depends on the width
-  // and the mode: track the HUD's top and expose the clearance as --hud-clear for the .hero rule.
+  // Two things follow the HUD (compass, scale, date) in the bottom-left corner, measured rather than guessed
+  // from breakpoints because its width and height change with the mode and the date label:
+  // - hudLifted: on screens wider than a phone the HUD moves above the dock only when it would actually
+  //   reach it (its right edge within HUD_DOCK_GAP of the dock's left edge);
+  // - hudClear: the landing index stays above the HUD (--hud-clear for the .hero rule).
+  const [hudLifted, setHudLifted] = useState(false);
+  const downWidth = useRef(0); // the HUD's width when last measured in its unlifted place
   const [hudClear, setHudClear] = useState(0);
   useEffect(() => {
-    if (!hero) return;
     let hud: Element | null = null;
-    const measure = () => {
-      const el = document.querySelector(".hud-min");
-      if (el !== hud) {
-        if (hud) ro.unobserve(hud);
-        hud = el;
-        if (hud) ro.observe(hud);
+    let dock: Element | null = null;
+    const watch = (prev: Element | null, sel: string) => {
+      const el = document.querySelector(sel);
+      if (el !== prev) {
+        if (prev) ro.unobserve(prev);
+        if (el) ro.observe(el);
       }
-      const r = hud?.getBoundingClientRect();
-      setHudClear(r && r.height ? Math.ceil(window.innerHeight - r.top) : 0);
+      return el;
+    };
+    const measure = () => {
+      hud = watch(hud, ".hud-min");
+      dock = watch(dock, ".dock");
+      const h = hud?.getBoundingClientRect();
+      const d = dock?.getBoundingClientRect();
+      // The HUD's unlifted left edge is the gutter. Lifting shrinks the image frame, which can change the scale
+      // bar's length and so the HUD's width; to drop back down it must fit with the width it last had down there
+      // (or its current width, if larger), so it does not flip between the two places at the threshold.
+      setHudLifted((was) => {
+        if (mobile || !h || !d || !h.width) return false;
+        if (!was) downWidth.current = h.width;
+        const width = was ? Math.max(h.width, downWidth.current) : h.width;
+        return HUD_LEFT + width + HUD_DOCK_GAP > d.left;
+      });
+      setHudClear(hero && h && h.height ? Math.ceil(window.innerHeight - h.top) : 0);
     };
     const ro = new ResizeObserver(measure);
-    const mo = new MutationObserver(measure); // the HUD mounts once the first sequence is in
+    const mo = new MutationObserver(measure); // the HUD and the dock mount once the first sequence is in
     mo.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", measure);
     measure();
@@ -132,7 +153,7 @@ export default function App() {
       mo.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [hero]);
+  }, [hero, mobile]);
   const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
   const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
@@ -972,7 +993,7 @@ export default function App() {
       focus={focus}
       onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
-      frame={drawer ? undefined : mobile ? MOBILE_FRAME : mid ? MID_FRAME : undefined}
+      frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
     />
   );
 
@@ -1035,7 +1056,7 @@ export default function App() {
 
   return (
     <div
-      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}`}
       style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
