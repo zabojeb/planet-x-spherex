@@ -90,7 +90,7 @@ export function SpectrumChart({ meta, epoch, ylog }: Props) {
 
   return (
     <ChartFrame
-      subtitle={`${quality.saturated > 0.5 ? "Saturated source. " : ""}Forced photometry at the target in every exposure; each frame samples one narrow band.`}
+      subtitle={`${quality.saturated > 0.5 ? "Saturated source. " : ""}Forced photometry at this position in every exposure; each frame samples one narrow band.`}
       xDomain={[0.7, 5.05]}
       yDomain={yDomain}
       yLog={ylog}

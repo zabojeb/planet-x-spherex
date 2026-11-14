@@ -1,16 +1,18 @@
-/** Collapsible drawer (closed by default): Spectrum · Light curve · Details. Its code loads only when opened. */
+/** Collapsible drawer (closed by default): Spectrum · Light curve · Periodogram · Data. Its code loads only
+ *  when opened; the per-exposure tables it needs are fetched by the app when it opens (tablesReady). */
 import { X } from "lucide-react";
 import { lazy, Suspense } from "react";
 import type { BandSel } from "../render";
 import type { Mode } from "../state";
-import type { Meta, Target } from "../types";
+import type { Meta, Photometry, Target } from "../types";
 import { Segmented } from "./ui/primitives";
 
 const SpectrumChart = lazy(() => import("./chart/SpectrumChart").then((m) => ({ default: m.SpectrumChart })));
 const LightCurveChart = lazy(() => import("./chart/LightCurveChart").then((m) => ({ default: m.LightCurveChart })));
+const PeriodogramChart = lazy(() => import("./chart/PeriodogramChart").then((m) => ({ default: m.PeriodogramChart })));
 const SidePanel = lazy(() => import("./SidePanel").then((m) => ({ default: m.SidePanel })));
 
-export type DrawerTab = "spectrum" | "lightcurve" | "details";
+export type DrawerTab = "spectrum" | "lightcurve" | "periodogram" | "details";
 
 interface Props {
   tab: DrawerTab;
@@ -27,6 +29,11 @@ interface Props {
   onFlagBits: (bits: number[]) => void;
   flagsOn: boolean;
   onFlagsOn: (on: boolean) => void;
+  tablesReady: boolean;
+  tablesError?: string | null;
+  /** A measured catalogue source shown instead of the target. */
+  source?: { key: string; label: string; photometry: Photometry[] } | null;
+  onClearSource?: () => void;
 }
 
 export function Drawer(p: Props) {
@@ -41,6 +48,7 @@ export function Drawer(p: Props) {
           options={[
             { value: "spectrum", label: "Spectrum" },
             { value: "lightcurve", label: "Light curve" },
+            { value: "periodogram", label: "Period" },
             { value: "details", label: "Data" },
           ]}
         />
@@ -56,16 +64,29 @@ export function Drawer(p: Props) {
             ]}
           />
         )}
-        <span className="drawer-title">{p.target?.name || p.meta.target.name}</span>
+        {p.source ? (
+          <span className="drawer-title source-chip">
+            <span className="mono">{p.source.label}</span>
+            <button className="btn ghost icon xs" onClick={p.onClearSource} aria-label="Back to the target" title="Back to the target">
+              <X size={12} />
+            </button>
+          </span>
+        ) : (
+          <span className="drawer-title">{p.target?.name || p.meta.target.name}</span>
+        )}
         <button className="btn ghost icon" onClick={p.onClose} aria-label="Close drawer" title="Close (Esc)">
           <X size={16} />
         </button>
       </header>
       <div className="drawer-body">
         <Suspense fallback={<div className="skeleton" style={{ height: 260 }} />}>
-          {p.tab === "spectrum" && <SpectrumChart meta={p.meta} epoch={p.epoch} ylog={p.ylog} />}
-          {p.tab === "lightcurve" && <LightCurveChart meta={p.meta} epoch={p.epoch} />}
-          {p.tab === "details" && (
+          {p.tab === "periodogram" && <PeriodogramChart id={p.meta.id} source={p.source} />}
+          {p.tab !== "periodogram" && !p.tablesReady && (p.tablesError
+            ? <p className="chart-empty static">{p.tablesError}</p>
+            : <div className="skeleton" style={{ height: 260 }} aria-label="Loading measurements" />)}
+          {!p.tablesReady ? null : p.tab === "spectrum" && <SpectrumChart meta={p.meta} epoch={p.epoch} ylog={p.ylog} />}
+          {p.tablesReady && p.tab === "lightcurve" && <LightCurveChart meta={p.meta} epoch={p.epoch} />}
+          {p.tablesReady && p.tab === "details" && (
             <SidePanel
               meta={p.meta}
               target={p.target}

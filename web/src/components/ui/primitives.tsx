@@ -1,5 +1,5 @@
 /** Small design-system primitives: popover, segmented control, tabs, switch, icon button. */
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useDismiss } from "../../hooks";
 
 export function Popover(props: {
@@ -14,6 +14,15 @@ export function Popover(props: {
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(ref, open, close);
+  // Side popovers open next to their button; slide one up when it would run off the bottom of the window.
+  const pop = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = pop.current;
+    if (!open || !el || props.align !== "side" || getComputedStyle(el).position === "fixed") return;
+    el.style.top = "";
+    const over = el.getBoundingClientRect().bottom - (window.innerHeight - 12);
+    if (over > 0) el.style.top = `${-4 - over}px`;
+  }, [open, props.align]);
   return (
     <div className={`popover-wrap ${props.className ?? ""}`} ref={ref}>
       <button
@@ -26,7 +35,7 @@ export function Popover(props: {
         {props.label}
       </button>
       {open && (
-        <div className={`popover ${props.align ?? "right"}`} role="dialog" aria-label={props.title} style={{ width: props.width }}>
+        <div ref={pop} className={`popover ${props.align ?? "right"}`} role="dialog" aria-label={props.title} style={{ width: props.width }}>
           {typeof props.children === "function" ? props.children(close) : props.children}
         </div>
       )}

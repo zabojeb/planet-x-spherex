@@ -52,7 +52,7 @@ src/
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
     Progress.tsx       top progress bar and the landing index over the sky
     ui/primitives.tsx  popover, segmented control, tabs, switch, micro label
-    chart/             ChartFrame (reusable SVG chart), SpectrumChart, LightCurveChart
+    chart/             ChartFrame (reusable SVG chart), SpectrumChart, LightCurveChart, PeriodogramChart
 ```
 
 Nothing about the instrument is hard-coded: detector ids, order and wavelength ranges come from
@@ -62,14 +62,28 @@ the detectors split into three wavelength groups (longest = red). Targets may ca
 
 ## Loading and caching
 
+Everything goes through `src/api.ts`; each newer endpoint falls back to the older API when it is missing.
+
+- Every request sends `X-Client-Id` (one random id per tab), so the server counts interest per tab.
 - One AbortController per load: changing target or FOV cancels polls and downloads; an unfinished job is
   withdrawn with `DELETE /api/sequences/{id}` (also on `pagehide`, via `fetch(..., {keepalive: true})`).
-- Polling doubles as a heartbeat: every 1 s while visible, 10 s while the tab is hidden.
+- Polling `GET /api/sequences/{id}` is the heartbeat: every 1 s while visible, 10 s while hidden. `202`
+  shows the stage (incl. "publish"), `410` re-POSTs to restart, `500` is an error. When it turns `200` the
+  big body is cancelled and the small `/lite` metadata is fetched instead (full meta if there is no `/lite`).
 - `429` + `Retry-After` shows a "many users right now" countdown and retries.
-- Decoded sequences sit in an 8-entry in-memory LRU keyed by sequence id (plus request→id), so mode, band
-  and target revisits make no requests; arrays are immutable and HTTP-cacheable.
-- Catalogs load only when their layer is on (and are aborted on a new sequence); chart and data-panel code
-  loads only when the drawer opens. The only prefetch is a preset on hover in the landing index.
+- Images are fetched one `[n, n]` plane at a time (`{coadds|coverage|flags}.bin?epoch=&band=`), only for
+  what is on screen: the current epoch/detector(s), the reference in Difference, coverage only for Stack,
+  flags only with the flag layer on. Neighbouring epochs are fetched next; while playing, every playable
+  epoch. When more than half of a cube is missing and wanted (e.g. playing All/RGB), the whole cube comes in
+  one request. Decoded planes live in a 320 MB LRU keyed by sequence + array + epoch + band. The previous
+  frame stays on screen while the next one downloads; stretch limits use the epochs already in memory.
+- The exposure and photometry tables arrive as columns (`/columns/{table}`) only when needed: photometry
+  when the drawer opens, exposures in Exposures mode or the Data tab.
+- Catalogs load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
+  the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
+- Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
+  "Measure spectrum & light curve" on a catalogue source calls `POST .../photometry` and shows that source
+  in the drawer; Share → Download links the `export/*` files.
 
 ## Design
 

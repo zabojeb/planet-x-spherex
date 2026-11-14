@@ -380,12 +380,12 @@ canvas.smooth { image-rendering: auto; }
 .fov { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 4px 0 12px; border-radius: 19px; }
 .fov select { border: 0; height: 30px; }
 
-.rail { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 14px; }
+.rail { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); z-index: 32; display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 14px; }
 .rail-btn { width: 40px !important; height: 40px; border-radius: 10px; color: var(--text-2); flex-direction: column; gap: 1px; }
 .rail-btn.active { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 .rail-tag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em; line-height: 1; }
 .drawer-open .rail { top: 27vh; }
-.popover.side { right: calc(100% + 12px); top: -4px; max-height: 80vh; overflow: auto; border-radius: 12px; }
+.popover.side { right: calc(100% + 12px); top: -4px; max-height: calc(100vh - 24px); overflow: auto; border-radius: 12px; }
 .panel-stack { display: flex; flex-direction: column; gap: 16px; }
 .playback { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid var(--hair); }
 .speed { display: inline-flex; align-items: center; gap: 6px; }
@@ -462,7 +462,8 @@ canvas.smooth { image-rendering: auto; }
   .search-row .cmdk { width: auto; flex: 1; max-width: none; }
   .rail { right: 10px; top: 112px; transform: none; }
   .rail-btn { width: 36px !important; height: 36px; }
-  .drawer-open .rail { top: 27vh; }
+  .drawer-open .rail { display: none; } /* the drawer is a focused mode on phones; close it to get the controls back */
+  .drawer-open .hud-min { display: none; }
 .popover.side { position: fixed; left: 10px; right: 10px; top: auto; bottom: 150px; width: auto !important; max-height: 55vh; }
   .floating-bottom { width: calc(100vw - 20px); bottom: 10px; }
   .dock-row { flex-wrap: wrap; row-gap: 2px; }
@@ -478,3 +479,16 @@ canvas.smooth { image-rendering: auto; }
   .hud-min { left: 12px; bottom: 130px; }
   .hero ~ .floating-bottom, .drawer-head .segmented { }
 }
+
+/* ---- infra-era additions: periodogram, measured source, exports */
+.chart-empty.static { position: static; padding: 48px 0; text-align: center; }
+.drawer-title.source-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--text-2); border: 1px solid var(--hair-2); padding: 2px 4px 2px 8px; border-radius: var(--r-sm); }
+.app.is-mobile .drawer-title.source-chip { display: inline-flex; margin-left: auto; }
+.btn.icon.xs { width: 20px; height: 20px; min-height: 20px; padding: 0; }
+.periodogram { display: flex; flex-direction: column; gap: 8px; }
+.period-best { margin: 0 0 2px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.period-best .num { font-size: 18px; color: var(--text-1); }
+.period-best .muted.num { font-size: 12px; color: var(--text-3); }
+.exports { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.exports a { justify-content: flex-start; font-size: 12px; text-decoration: none; }
+.exports a small { color: var(--text-3); margin-left: auto; font-family: var(--mono); font-size: 10px; }

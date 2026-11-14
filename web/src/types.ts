@@ -141,6 +141,8 @@ export interface Meta {
   exposures: Exposure[];
   photometry: Photometry[];
   flag_bits: FlagBit[];
+  /** Present on lite meta: the per-exposure tables are fetched separately, as columns. */
+  tables?: Record<"exposures" | "photometry", { rows: number; url: string }>;
   stats: {
     frames_found: number;
     frames_used: number;
@@ -175,11 +177,50 @@ export interface CatalogSource {
   [extra: string]: unknown;
 }
 
+export type ArrayName = "coadds" | "coverage" | "flags";
+export type PlaneArray = Float32Array | Uint16Array | Uint32Array;
+
+/** Read access to the [n, n] planes of a sequence that have been downloaded so far. */
+export interface PlaneSource {
+  plane(array: "coadds", e: number, b: BandId): Float32Array | undefined;
+  plane(array: "coverage", e: number, b: BandId): Uint16Array | undefined;
+  plane(array: "flags", e: number, b: BandId): Uint32Array | undefined;
+  plane(array: ArrayName, e: number, b: BandId): PlaneArray | undefined;
+}
+
+export interface PlaneKey {
+  array: ArrayName;
+  e: number;
+  b: BandId;
+}
+
+/** meta may be "lite": then exposures/photometry are empty until loaded with fetchTable. */
 export interface SequenceData {
   meta: Meta;
-  coadds: Float32Array;
-  coverage: Uint16Array;
-  flags: Uint32Array;
+  lite: boolean;
+  planes: PlaneSource;
+}
+
+export interface PeriodogramResult {
+  method: string;
+  band: string | null;
+  n_points: number;
+  baseline_days: number;
+  min_period_days: number;
+  max_period_days: number;
+  best: { period_days: number; frequency_per_day: number; power: number; false_alarm_probability: number | null };
+  peaks: { period_days: number; power: number }[];
+  periodogram: { period_days: number[]; power: number[] };
+  t0_mjd: number;
+  folded: { index: number; mjd: number; phase: number; rel: number; rel_err: number | null; band: BandId; wl: number; flagged: boolean; relative?: boolean }[];
+  model: { phase: number[]; rel?: number[]; rel_by_band?: Record<string, number[]> };
+}
+
+export interface SourcePhotometry {
+  sequence: string;
+  target: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number; name?: string | null };
+  photometry: Photometry[];
+  stats?: Record<string, number>;
 }
 
 export interface ExposureStack {

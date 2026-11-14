@@ -1,4 +1,4 @@
-import type { BandId, SequenceData } from "./types";
+import type { ArrayName, BandId, PlaneKey, SequenceData } from "./types";
 
 export type Stretch = "asinh" | "linear" | "log";
 export type Cmap = "gray" | "ice";
@@ -119,13 +119,35 @@ export class Derived {
     this.rgbGroups = [byWl.slice(2 * third), byWl.slice(third, 2 * third), byWl.slice(0, third)];
   }
 
+  /** Results that read a plane which is not downloaded yet are returned but not cached. */
   private memo<T>(key: string, make: () => T): T {
-    if (!this.cache.has(key)) this.cache.set(key, make());
-    return this.cache.get(key) as T;
+    if (this.cache.has(key)) return this.cache.get(key) as T;
+    const outer = this.missed;
+    this.missed = false;
+    const v = make();
+    if (!this.missed) this.cache.set(key, v);
+    this.missed ||= outer;
+    return v;
   }
 
-  private offset(e: number, b: BandId): number {
-    return (e * this.bands.length + this.bands.indexOf(b)) * this.size;
+  private missed = false;
+  private blank?: Float32Array;
+
+  private plane<A extends ArrayName>(array: A, e: number, b: BandId) {
+    const p = this.seq.planes.plane(array as ArrayName, e, b);
+    if (!p) this.missed = true;
+    return p;
+  }
+
+  /** Planes needed to show image(e, sel) (only detectors with data in that epoch). */
+  planesFor(e: number, sel: BandSel | "rgb", array: ArrayName = "coadds"): PlaneKey[] {
+    const bands = sel === "all" || sel === "rgb" ? this.bands : [sel];
+    return bands.filter((b) => this.hasBand(e, b)).map((b) => ({ array, e, b }));
+  }
+
+  /** True when every plane of image(e, sel) is in memory. */
+  ready(e: number, sel: BandSel | "rgb", array: ArrayName = "coadds"): boolean {
+    return this.planesFor(e, sel, array).every((k) => !!this.seq.planes.plane(k.array, k.e, k.b));
   }
 
   hasBand(e: number, b: BandId): boolean {
@@ -147,14 +169,15 @@ export class Derived {
     return out;
   }
 
+  /** One co-add; all-NaN while it is still downloading. */
   coadd(e: number, b: BandId): Float32Array {
-    const off = this.offset(e, b);
-    return this.seq.coadds.subarray(off, off + this.size);
+    const p = this.plane("coadds", e, b) as Float32Array | undefined;
+    if (p) return p;
+    return (this.blank ??= new Float32Array(this.size).fill(NaN));
   }
 
-  coverage(e: number, b: BandId): Uint16Array {
-    const off = this.offset(e, b);
-    return this.seq.coverage.subarray(off, off + this.size);
+  coverage(e: number, b: BandId): Uint16Array | null {
+    return (this.plane("coverage", e, b) as Uint16Array | undefined) ?? null;
   }
 
   sigma(e: number, b: BandId): number {
@@ -272,8 +295,8 @@ export class Derived {
       const bands = sel === "all" || sel === "rgb" ? this.bands : [sel];
       for (const b of bands) {
         if (!this.hasBand(e, b)) continue;
-        const off = this.offset(e, b);
-        const f = this.seq.flags.subarray(off, off + this.size);
+        const f = this.plane("flags", e, b) as Uint32Array | undefined;
+        if (!f) continue;
         for (let i = 0; i < this.size; i++) out[i] |= f[i];
       }
       return out;

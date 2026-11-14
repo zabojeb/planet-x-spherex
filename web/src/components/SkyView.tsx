@@ -37,6 +37,8 @@ interface Props {
   onZoom: (zoom: number) => void;
   onInteract: () => void;
   onOpenDetails: () => void;
+  /** Forced photometry of a clicked catalogue source; resolves when its curves are in the drawer. */
+  onMeasure?: (cat: string, src: CatalogSource) => Promise<void>;
   shiftX?: number; // horizontal offset of the view centre (room for the landing index)
 }
 
@@ -56,9 +58,11 @@ function loaderText(p: Progress): { text: string; pct: number | null } {
       return { text: `Fetching ${p.total || ""} exposures from S3`, pct };
     case "stack":
       return { text: "Aligning and co-adding epochs", pct: null };
+    case "publish":
+      return { text: "Publishing results", pct: null };
     case "download":
     case "done":
-      return { text: "Downloading results", pct: null };
+      return { text: "Downloading results", pct };
     default:
       return { text: "Waiting for a free worker", pct: null };
   }
@@ -88,6 +92,8 @@ export function SkyView(p: Props) {
   const [center, setCenter] = useState<[number, number] | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
+  const [measure, setMeasure] = useState<{ state: "idle" | "busy" } | { state: "error"; message: string }>({ state: "idle" });
+  useEffect(() => setMeasure({ state: "idle" }), [sel]);
   const s = scale || (p.view.zoom ? p.view.zoom : fit);
   const c = center ?? [n / 2, n / 2];
   const tx = W / 2 + (p.shiftX ?? 0) - c[0] * s;
@@ -409,6 +415,25 @@ export function SkyView(p: Props) {
                 {totalPm(sel.src) > 0 && ` · μ ${totalPm(sel.src).toFixed(0)} mas/yr`}
               </div>
               <div className="muted small">Shown for {p.year.toFixed(2)}; catalogue epoch {sel.src.epoch.toFixed(1)}</div>
+              {p.onMeasure && (
+                <button
+                  className="btn pick-cta"
+                  disabled={measure.state === "busy"}
+                  onClick={() => {
+                    const src = sel.src;
+                    setMeasure({ state: "busy" });
+                    p.onMeasure!(sel.cat, src)
+                      .then(() => {
+                        setMeasure({ state: "idle" });
+                        setSel(null);
+                      })
+                      .catch((e) => setMeasure({ state: "error", message: String(e?.message || e) }));
+                  }}
+                >
+                  {measure.state === "busy" ? "Measuring every exposure…" : "Measure spectrum & light curve"}
+                </button>
+              )}
+              {measure.state === "error" && <div className="small" style={{ color: "var(--err)" }}>{measure.message}</div>}
             </>
           )}
         </div>

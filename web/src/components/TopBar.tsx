@@ -1,7 +1,8 @@
 /** Floating top-left cluster: serif wordmark, the search pill and the field of view. Plus the share panel. */
-import { Check, Code2, Link2 } from "lucide-react";
+import { Check, Code2, Download, Link2 } from "lucide-react";
 import { useState } from "react";
 import type { Target } from "../types";
+import type { ExportKind } from "../api";
 import { CommandSearch } from "./CommandSearch";
 
 const FOVS = [2, 3, 4, 6, 8, 10, 12, 16, 20, 30];
@@ -46,7 +47,14 @@ export function TopLeft(p: {
   );
 }
 
-export function SharePanel({ link, embedLink }: { link: () => string; embedLink: () => string }) {
+const EXPORTS: { kind: ExportKind; label: string; hint: string }[] = [
+  { kind: "coadds.fits", label: "Co-adds", hint: "FITS" },
+  { kind: "photometry.csv", label: "Photometry", hint: "CSV" },
+  { kind: "photometry.vot", label: "Photometry", hint: "VOT" },
+  { kind: "download.sh", label: "Raw files", hint: "curl" },
+];
+
+export function SharePanel({ link, embedLink, exportUrl }: { link: () => string; embedLink: () => string; exportUrl?: (k: ExportKind) => string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (text: string, what: string) => {
     try {
@@ -77,6 +85,19 @@ export function SharePanel({ link, embedLink }: { link: () => string; embedLink:
       </button>
       <textarea className="snippet" readOnly rows={3} value={snippet} onFocus={(e) => e.currentTarget.select()} aria-label="Embed code" />
       {copied === "blocked" && <p className="menu-hint">Clipboard blocked: select the text and copy it.</p>}
+      {exportUrl && (
+        <>
+          <div className="micro menu-title" style={{ marginTop: 10 }}>Download</div>
+          <div className="exports">
+            {EXPORTS.map((x) => (
+              <a key={x.kind} className="btn ghost" href={exportUrl(x.kind)} download>
+                <Download size={14} /> {x.label} <small>{x.hint}</small>
+              </a>
+            ))}
+          </div>
+          <p className="menu-hint">The script fetches the original Level 2 exposures (one curl per file).</p>
+        </>
+      )}
     </div>
   );
 }

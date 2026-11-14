@@ -1,7 +1,7 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCatalog, fetchExposures, getTargets, loadSequence, prefetchSequence, resolveQuery, type Progress } from "./api";
+import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, measureSource, prefetchSequence, resolveQuery, type Progress } from "./api";
 import { formatDate, formatRange, mjdToYear, propagate } from "./astro";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, type CatalogStatus } from "./components/Controls";
 import { Drawer, type DrawerTab } from "./components/Drawer";
@@ -10,11 +10,11 @@ import { SkyView } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, playableEpochs, rgbLabel, stackEpochs, type ExposureView } from "./display";
+import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, playableEpochs, rgbLabel, stackEpochs, type Display, type ExposureView } from "./display";
 import { safeStorage, useMediaQuery } from "./hooks";
 import { Derived, type BandSel } from "./render";
 import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type ViewState } from "./state";
-import type { CatalogSource, ExposureStack, Meta, SequenceData, Target } from "./types";
+import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
 
 interface StageHud {
   epoch: string;
@@ -89,6 +89,11 @@ export default function App() {
   const keepView = useRef(initial.hasParams);
   const metaId = useRef<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  const [planesTick, setPlanesTick] = useState(0);
+  const [planesBusy, setPlanesBusy] = useState(false);
+  const [tablesTick, setTablesTick] = useState(0);
+  const [tablesError, setTablesError] = useState<string | null>(null);
+  const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
 
@@ -116,11 +121,14 @@ export default function App() {
         setCatalogs({});
         setCatalogStatus({});
         setExp({ key: "", stack: null, error: null });
+        setSource(null);
+        setTablesError(null);
         const keep = keepView.current; // read now: the updater below runs later
         keepView.current = false;
         setView((v) => normalizeView(v, data, keep, target, initial.view));
         setSeq(data);
-        setProgress(null);
+        // Stays on "download" until the planes of the first frame are in (see the planes effect).
+        setProgress({ stage: "download", done: 0, total: 0, elapsed: 0 });
       })
       .catch((e) => {
         if (ctrl.signal.aborted) return;
@@ -153,12 +161,74 @@ export default function App() {
     return () => ctrl.abort();
   }, [expKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- image planes: fetch only what the view shows now, then what it will likely show next
+  const flagsOn = view.overlays.includes("flags");
+  const willPlay = playing && view.mode !== "stack" && view.mode !== "exp" && playable.length > 1;
+  const need = useMemo(
+    () => (derived ? planesNeeded(derived, view, willPlay, flagsOn) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, willPlay, flagsOn],
+  );
+  const needKey = need ? [...need.now, ...need.soon].map((k) => `${k.array}${k.e}${k.b}`).join(",") : "";
+  useEffect(() => {
+    if (!seq || !need) return;
+    const ctrl = new AbortController();
+    setPlanesBusy(true);
+    ensurePlanes(seq, need.now, ctrl.signal, (done, total) => setProgress((p) => (p?.stage === "download" ? { ...p, done, total } : p)))
+      .then(() => {
+        if (ctrl.signal.aborted) return;
+        setPlanesBusy(false);
+        setProgress((p) => (p?.stage === "download" ? null : p));
+        setPlanesTick((t) => t + 1);
+        // Look-ahead is best effort: a failure here only means the next frame downloads when shown.
+        ensurePlanes(seq, need.soon, ctrl.signal).then(() => !ctrl.signal.aborted && setPlanesTick((t) => t + 1), () => undefined);
+      })
+      .catch((e) => {
+        if (ctrl.signal.aborted || e?.name === "AbortError") return;
+        setPlanesBusy(false);
+        setProgress(null);
+        setError(`Could not download the images: ${e?.message || e}`);
+      });
+    return () => {
+      ctrl.abort();
+      setPlanesBusy(false);
+    };
+  }, [seq, needKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const expStack = exp.key === expKey ? exp.stack : null;
   const expView: ExposureView = { key: expKey, stack: expStack, index: expIndex, error: exp.key === expKey ? exp.error : null };
-  const display = useMemo(
+  const computed = useMemo(
     () => (derived ? computeDisplay(derived, view, expView) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [derived, view.mode, view.band, view.epoch, view.ref, view.lo, view.hi, view.stack, expStack, expIndex, expView.error],
+    [derived, view.mode, view.band, view.epoch, view.ref, view.lo, view.hi, view.stack, expStack, expIndex, expView.error, planesTick],
+  );
+  // While the next frame downloads, keep showing the last one of the same sequence.
+  const lastDisplay = useRef<{ id: string; d: Display } | null>(null);
+  if (computed && meta) lastDisplay.current = { id: meta.id, d: computed };
+  const display = computed ?? (lastDisplay.current && lastDisplay.current.id === meta?.id ? lastDisplay.current.d : null);
+
+  // ---- per-exposure tables (columns), only when something on screen needs them
+  const wantExposures = !!seq && (view.mode === "exp" || drawer === "details");
+  const wantPhotometry = !!seq && !!drawer && drawer !== "periodogram";
+  const exposures = meta ? cachedTable(meta.id, "exposures") : undefined;
+  const photometry = meta ? cachedTable(meta.id, "photometry") : undefined;
+  useEffect(() => {
+    if (!seq) return;
+    const ctrl = new AbortController();
+    const jobs: Promise<unknown>[] = [];
+    if (wantExposures && !cachedTable(seq.meta.id, "exposures")) jobs.push(fetchTable(seq, "exposures", ctrl.signal));
+    if (wantPhotometry && !cachedTable(seq.meta.id, "photometry")) jobs.push(fetchTable(seq, "photometry", ctrl.signal));
+    if (!jobs.length) return;
+    setTablesError(null);
+    Promise.all(jobs)
+      .then(() => !ctrl.signal.aborted && setTablesTick((t) => t + 1))
+      .catch((e) => !ctrl.signal.aborted && setTablesError(`Could not load the measurements: ${e?.message || e}`));
+    return () => ctrl.abort();
+  }, [seq, wantExposures, wantPhotometry]);
+  const fullMeta = useMemo(
+    () => (meta ? { ...meta, exposures: exposures ?? meta.exposures, photometry: photometry ?? meta.photometry } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [meta, exposures, photometry, tablesTick],
   );
 
   // ---- catalogs for overlays
@@ -284,6 +354,23 @@ export default function App() {
     const t = presets.find((p) => p.id === id);
     if (t) prefetchSequence({ ra: t.ra, dec: t.dec, pmra: t.pmra, pmdec: t.pmdec, ref_epoch: t.ref_epoch, name: t.name ?? null, fov_arcmin: t.fov_arcmin ?? 6 });
   };
+  /** Forced photometry of a clicked catalogue source; its curves replace the target's in the drawer. */
+  const measure = async (cat: string, src: CatalogSource) => {
+    if (!meta) return;
+    const res = await measureSource(meta.id, {
+      ra: src.ra,
+      dec: src.dec,
+      pmra: src.pmra ?? 0,
+      pmdec: src.pmdec ?? 0,
+      ref_epoch: src.epoch,
+      name: src.id,
+    }).catch((e) => {
+      throw e instanceof ApiError && (e.status === 404 || e.status === 405) ? new Error("Source photometry is not available on this server yet.") : e;
+    });
+    setSource({ key: `${cat}:${src.id}`, label: src.id, photometry: res.photometry });
+    setHero(false);
+    setDrawer((d) => (d && d !== "details" ? d : "spectrum"));
+  };
   const dismissHero = () => {
     setHero(false);
     safeStorage(INTRO_KEY, "1");
@@ -291,9 +378,10 @@ export default function App() {
 
   // ---- presentation
   const epochInfo = meta?.epochs[view.epoch];
+  const exposureRows = fullMeta?.exposures ?? [];
   const year = (() => {
     if (meta && view.mode === "exp" && expStack?.indices.length) {
-      const ex = meta.exposures[expStack.indices[Math.min(expIndex, expStack.indices.length - 1)]];
+      const ex = exposureRows[expStack.indices[Math.min(expIndex, expStack.indices.length - 1)]];
       if (ex) return mjdToYear(ex.mjd);
     }
     return epochInfo ? mjdToYear(epochInfo.mjd_mean) : 2026;
@@ -314,9 +402,9 @@ export default function App() {
       const eps = stackEpochs(derived, view);
       const frames = eps.reduce((sum, e) => sum + (view.band === "all" ? meta.epochs[e].n : meta.epochs[e].bands[view.band]?.n ?? 0), 0);
       hud = { epoch: "Stack", dates: `${eps.length} epoch${eps.length === 1 ? "" : "s"}`, spectral: bl, frames: `${frames} frames`, target: trackPoint ? [trackPoint.ra, trackPoint.dec] : null };
-    } else if (view.mode === "exp" && expStack?.indices.length) {
+    } else if (view.mode === "exp" && expStack?.indices.length && exposureRows.length) {
       const i = Math.min(expIndex, expStack.indices.length - 1);
-      const ex = meta.exposures[expStack.indices[i]];
+      const ex = exposureRows[expStack.indices[i]];
       hud = { epoch: `Exposure ${pad2(i + 1)} / ${pad2(expStack.indices.length)}`, dates: `${formatDate(ex.mjd, true)} UTC`, spectral: `${ex.band} · λ ${ex.wl.toFixed(3)} µm`, frames: `Epoch ${pad2(view.epoch + 1)}`, target: at(ex.mjd) };
       targetPx = ex.target_px;
     } else {
@@ -343,7 +431,6 @@ export default function App() {
     setHero(false);
     setDrawer((d) => (d ? null : tab));
   };
-  const flagsOn = view.overlays.includes("flags");
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
 
   const sky = (
@@ -369,7 +456,11 @@ export default function App() {
       onRetry={() => setReloadKey((k) => k + 1)}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
-      onOpenDetails={() => openDetails("spectrum")}
+      onOpenDetails={() => {
+        setSource(null);
+        openDetails("spectrum");
+      }}
+      onMeasure={seq ? measure : undefined}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
     />
   );
@@ -428,7 +519,7 @@ export default function App() {
 
   return (
     <div className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}>
-      <ProgressBar progress={progress} />
+      <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
       <TopLeft
         presets={presets}
@@ -453,18 +544,22 @@ export default function App() {
             </div>
           }
           layers={<LayersPanel view={view} set={set} catalogStatus={catalogStatus} />}
-          share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} />}
+          share={<SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} />}
           detailsOpen={!!drawer}
           onDetails={() => openDetails("spectrum")}
         />
       )}
       <div className="floating-bottom">{dock}</div>
-      {drawer && meta && (
+      {drawer && fullMeta && (
         <Drawer
           tab={drawer}
           onTab={setDrawer}
           onClose={() => setDrawer(null)}
-          meta={meta}
+          meta={source ? { ...fullMeta, photometry: source.photometry } : fullMeta}
+          tablesReady={(!wantExposures || !!exposures) && (!wantPhotometry || !!photometry || !!source)}
+          tablesError={tablesError}
+          source={source}
+          onClearSource={() => setSource(null)}
           target={target}
           epoch={view.epoch}
           band={view.band}
