@@ -8,6 +8,14 @@ cached per (field, time, V limit).
 Identification follows Astrometrica's criteria: a known object matches a tracklet when it is within the
 position tolerance at the tracklet's times, its direction of motion agrees within +-15 deg and its speed
 within +-30 %; matches are ranked by a score and carry O-C residuals per detection.
+
+The rates sb_ident returns are instantaneous rates as seen from SPHEREx, so they include the spacecraft's
+~7.5 km/s orbital velocity: about +-15"/h for an object 2.4 AU away, changing sign every 98-min orbit (for
+97 Klotho the Dec rate read -11.7"/h at one moment and +14"/h half an orbit later while the object drifted
+south at 2"/h). Propagating with them over hours put the object 25-40" off and made identification fail.
+Tracklets are therefore matched against SPHEREx-centric positions queried at the tracklet's first and last
+detection times and interpolated linearly between them; speed and direction come from that displacement.
+The residual 98-min wobble (up to ~9.7"/D arcsec) stays inside the position tolerance for D > 0.5 AU.
 """
 
 from __future__ import annotations
@@ -78,7 +86,7 @@ def _num(v) -> float | None:
 
 
 def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 21.0,
-          timeout: float = 170.0) -> list[dict]:
+          timeout: float = 170.0, retries: int = 5) -> list[dict]:
     """Asteroids and comets in a box around (ra, dec) at mjd as seen from SPHEREx (cached on disk)."""
     key = hashlib.sha1(f"{ra:.4f}|{dec:.4f}|{half_deg:.3f}|{mjd:.4f}|{vmag_lim}".encode()).hexdigest()[:16]
     path = cache.layout().root / "known_objects" / f"{key}.json"
@@ -94,12 +102,12 @@ def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 
 
     def fetch(kind: str) -> tuple[str, dict]:
         url = SB_IDENT + "?" + urllib.parse.urlencode({**base, "sb-kind": kind}, safe="-_:,")
-        for attempt in range(5):
+        for attempt in range(retries):
             try:
                 with urllib.request.urlopen(url, timeout=timeout) as r:
                     return kind, json.loads(r.read())
             except urllib.error.HTTPError as e:  # JPL rate-limits (429) and sheds load (503): back off
-                if e.code not in (429, 503) or attempt == 4:
+                if e.code not in (429, 503) or attempt == retries - 1:
                     raise
                 wait = float(e.headers.get("Retry-After") or 0) or 5.0 * 2 ** attempt
                 time.sleep(min(wait, 60.0))
@@ -138,15 +146,24 @@ def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 
 
 
 def position_at(o: dict, mjd: float) -> tuple[float, float]:
-    """Linear propagation of a known object with its rates ("/h; RA rate taken as including cos dec)."""
+    """Position at mjd: interpolated between the queried SPHEREx-centric positions in `track` when present
+    (see the module notes), else linear propagation with the instantaneous rates ("/h, RA rate including
+    cos dec)."""
+    track = o.get("track")
+    if track and len(track) >= 2:
+        (t0, ra0, dec0), (t1, ra1, dec1) = track[0], track[-1]
+        if t1 > t0:
+            f = (mjd - t0) / (t1 - t0)
+            dra = ((ra1 - ra0 + 180.0) % 360.0) - 180.0
+            return (ra0 + f * dra) % 360.0, dec0 + f * (dec1 - dec0)
     dt_h = (mjd - o["mjd"]) * 24.0
     cosd = np.cos(np.radians(o["dec"]))
     return o["ra"] + o["ra_rate"] * dt_h / 3600.0 / cosd, o["dec"] + o["dec_rate"] * dt_h / 3600.0
 
 
-def field_objects(fd: FieldData, mjd: float, vmag_lim: float = 21.0) -> list[dict]:
+def field_objects(fd: FieldData, mjd: float, vmag_lim: float = 21.0, **query_kw) -> list[dict]:
     half = fd.grid.fov_arcmin / 120.0 * 1.15 + 0.02
-    objs = query(fd.grid.ra, fd.grid.dec, half, mjd, vmag_lim)
+    objs = query(fd.grid.ra, fd.grid.dec, half, mjd, vmag_lim, **query_kw)
     for o in objs:
         x, y = fd.grid.world_to_pixel(o["ra"], o["dec"])
         o["x"], o["y"] = float(x), float(y)
@@ -169,29 +186,55 @@ def _pa(vx_east: float, vy_north: float) -> float:
     return float(np.degrees(np.arctan2(vx_east, vy_north)) % 360.0)
 
 
-def identify(fd: FieldData, tracklets: list[dict], vmag_lim: float = 21.0) -> dict:
+def bracket_objects(fd: FieldData, t0: float, t1: float, vmag_lim: float = 21.0, **query_kw) -> list[dict]:
+    """Known objects with SPHEREx-centric positions at t0 and t1 (two sb_ident queries), each carrying a
+    `track` [[t0, ra, dec], [t1, ra, dec]] and speed / direction from that displacement. Objects seen at only
+    one of the two times keep their instantaneous rates."""
+    first = field_objects(fd, t0, vmag_lim, **query_kw)
+    if t1 - t0 < 1e-4:
+        return first
+    second = {o["name"]: o for o in field_objects(fd, t1, vmag_lim, **query_kw)}
+    out = []
+    for o in first:
+        o2 = second.pop(o["name"], None)
+        if o2 is not None:
+            dt_h = (t1 - t0) * 24.0
+            cosd = np.cos(np.radians(0.5 * (o["dec"] + o2["dec"])))
+            vx = (((o2["ra"] - o["ra"] + 180.0) % 360.0) - 180.0) * cosd * 3600.0 / dt_h
+            vy = (o2["dec"] - o["dec"]) * 3600.0 / dt_h
+            o = {**o, "track": [[t0, o["ra"], o["dec"]], [t1, o2["ra"], o2["dec"]]],
+                 "inside": bool(o["inside"] or o2["inside"]), "mean_ra_rate": vx, "mean_dec_rate": vy,
+                 "speed_arcsec_per_hr": float(np.hypot(vx, vy)), "pa_deg": _pa(vx, vy),
+                 "instant_speed_arcsec_per_hr": o["speed_arcsec_per_hr"], "instant_pa_deg": o["pa_deg"]}
+        out.append(o)
+    out.extend(second.values())
+    return out
+
+
+MAX_BRACKETED = 10  # tracklets per epoch that get their own pair of queries; the rest share the epoch's pair
+
+
+def identify(fd: FieldData, tracklets: list[dict], vmag_lim: float = 21.0, **query_kw) -> dict:
     """Attach `identification` to every tracklet: ranked candidates with O-C, or unknown."""
-    stats = {"queries": 0, "objects_in_field": 0, "matched": 0, "error": None, "observer": "SPHEREx"}
+    stats = {"queries": 0, "objects_in_field": 0, "matched": 0, "error": None, "observer": "SPHEREx",
+             "positions": "SPHEREx-centric, queried at each tracklet's first and last detection"}
     if not tracklets:
         return stats
-    epochs = sorted({t["epoch"] for t in tracklets})
-    mid = {e: float(np.mean([t["mjd_mid"] for t in tracklets if t["epoch"] == e])) for e in epochs}
-
-    def run(e: int):
-        try:
-            return e, field_objects(fd, mid[e], vmag_lim), None
-        except Exception as ex:  # noqa: BLE001 - JPL down or slow: tracklets stay unidentified
-            return e, [], ex
-
-    answers = [run(e) for e in epochs]  # one epoch at a time: JPL rate-limits bursts
-    for e, objs, err in answers:
-        if err is not None:
-            stats["error"] = f"{err.__class__.__name__}: {err}"[:200]
-            log.warning("known-object query failed: %r", err)
-            continue
-        stats["queries"] += 1
-        stats["objects_in_field"] += sum(o["inside"] for o in objs)
-        for t in (t for t in tracklets if t["epoch"] == e):
+    for e in sorted({t["epoch"] for t in tracklets}):
+        group = [t for t in tracklets if t["epoch"] == e]
+        times = [d["mjd"] for t in group for d in t["detections"]]
+        shared = (min(times), max(times))
+        for k, t in enumerate(group):  # one query pair at a time: JPL rate-limits bursts
+            own = [d["mjd"] for d in t["detections"]]
+            t0, t1 = (min(own), max(own)) if k < MAX_BRACKETED else shared
+            try:
+                objs = bracket_objects(fd, t0, t1, vmag_lim, **query_kw)
+            except Exception as ex:  # noqa: BLE001 - JPL down or slow: the tracklet stays unidentified
+                stats["error"] = f"{ex.__class__.__name__}: {ex}"[:200]
+                log.warning("known-object query failed: %r", ex)
+                continue
+            stats["queries"] += 1 if t1 - t0 < 1e-4 else 2
+            stats["objects_in_field"] = max(stats["objects_in_field"], sum(o["inside"] for o in objs))
             t["identification"] = _rank(t, objs)
             t["known"] = t["identification"][0] if t["identification"] else None
             stats["matched"] += t["known"] is not None

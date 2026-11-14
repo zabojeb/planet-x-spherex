@@ -64,3 +64,5 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0050](0050-track-and-stack.md) | Track & Stack within one visit, and require two of three sub-stacks in the synthetic-tracking search | Accepted | 2026-11-14 |
 | [0051](0051-real-bogus-boosted-stumps.md) | Rank difference-image detections with NumPy boosted stumps trained on injections, validated leaving one field out | Accepted | 2026-11-14 |
 | [0052](0052-verification-and-ades.md) | Verify candidates with free-position ePSF fits and export ADES for station 288 as follow-up data | Accepted | 2026-11-14 |
+| [0053](0053-point-analysis-job.md) | Analyze one clicked position as one job with independent steps and a plain-language verdict | Accepted | 2026-11-14 |
+| [0054](0054-known-objects-bracketed-positions.md) | Identify tracklets against positions queried at their first and last detection, not instantaneous rates | Accepted (extends 0049) | 2026-11-14 |

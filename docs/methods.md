@@ -231,3 +231,35 @@ Limitations: templates stop at 2.5 µm; no QSO/galaxy templates; narrow lines ar
    top five when there are ≥ 5 epochs.
 6. **Colours**: red excess (D5 + D6 vs D1–D3) per source and as a pixel map where stars cancel (catches a cold
    dwarf blended with a bluer star), plus an isolation-forest anomaly score on adjacent-detector flux ratios.
+
+Known-object identification (ADR-0054) uses SPHEREx-centric positions queried at each tracklet's first and last
+detection time and interpolated between them. sb_ident's rates are instantaneous rates seen from SPHEREx and
+swing by about ±15″/h over the 98-min orbit for an object 2.4 AU away (Klotho's Dec rate read −11.7″/h and
++14″/h half an orbit apart while it drifted south at 2″/h), so they are not used to propagate positions.
+
+## Point analysis ("click a point → Analyze")
+
+`POST /api/sequences/{id}/analyze` runs, for one position, in order (ADR-0053):
+
+1. **Identification**: Gaia DR3 / CatWISE2020 / 2MASS / SIMBAD cones (radius at each catalogue's epoch wide
+   enough for 10″/yr movers), every source moved to the sequence's mean epoch; the nearest three within 15″, the
+   counterpart if ≤ 4″, and each match's position at every epoch.
+2. **Photometry**: re-measure in every exposure (ePSF / aperture / ring, as the pipeline). With no motion given,
+   the analysis follows a Gaia (else SIMBAD) counterpart's motion, so fast movers are measured where they are.
+3. **Spectrum**: binned spectrum, features and indices, template / blackbody classification and ratio spectra
+   between epochs (the spectral module).
+4. **Motion**: blind proper-motion fit from per-epoch co-add centroids (no Gaia prior, so it can be compared).
+5. **Periodogram**: Lomb–Scargle of the point's photometry, normalised per wavelength bin.
+6. **Colours**: weighted mean flux density at 3.8–5 µm against 0.75–2.4 µm; red excess when the long-wavelength
+   S/N ≥ 5 and the ratio ≥ 0.8 or the short-wavelength S/N < 3.
+7. **Known objects**: sb_ident from SPHEREx at each epoch's mid-time (≤ 8 epochs); objects within 30″.
+8. **Tracklets**: candidates within 20″ from a finished field analysis of the sequence (none are searched here);
+   unidentified ones are re-identified against known objects with bracketed positions. A mover at the point
+   suppresses the proper-motion claim (its centroid shift is not a proper motion); without Gaia a motion needs
+   ≥ 5σ to be called a candidate.
+9. **Verdict**: explicit rules turn the slots into findings with a confidence and a novelty contribution;
+   novelty = 0.1 + Σ contributions, clipped to [0, 1]. Unexplained motion (+0.55), an unidentified high-quality
+   intra-visit mover (+0.5), red excess without Gaia (+0.35) and brown-dwarf or composite spectra raise it;
+   SIMBAD (−0.3), Gaia (−0.15) or a known asteroid (−0.1) lower it.
+
+Each step is independent: a failing upstream service leaves `{"error"}` in its slot and the rest still runs.
