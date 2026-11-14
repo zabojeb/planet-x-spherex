@@ -357,6 +357,9 @@ canvas.smooth { image-rendering: auto; }
 .compass text, .scalebar text { fill: var(--text-2); font-family: var(--mono); font-size: 10px; }
 .hud-loader { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-1); text-shadow: 0 1px 4px #000; pointer-events: none; animation: fade 200ms var(--ease); }
 .hud-loader-text span { color: var(--accent); }
+.hud-loader-target { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 6px; max-width: min(420px, 86vw); text-align: center; text-transform: none; letter-spacing: 0; }
+.hud-loader-name { font-family: var(--display); font-size: 28px; line-height: 1.1; color: var(--text-1); }
+.hud-loader-note { font-family: var(--ui); font-size: 12.5px; line-height: 1.4; color: var(--text-2); }
 .hud-loader-bar { width: 220px; height: 1px; background: var(--hair-3); overflow: hidden; }
 .hud-loader-bar span { display: block; height: 100%; background: var(--accent); transition: width 300ms var(--ease); }
 .hud-loader-bar.indeterminate span { width: 30%; animation: indet 1.2s var(--ease) infinite; }
@@ -379,6 +382,38 @@ canvas.smooth { image-rendering: auto; }
 .search-row .cmdk-list { border-radius: 12px; }
 .fov { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 4px 0 12px; border-radius: 19px; }
 .fov select { border: 0; height: 30px; }
+
+/* search suggestions: inline completion, matches, tags, a contextual hint line */
+.search-row .cmdk-list { width: min(480px, calc(100vw - 40px)); right: auto; max-height: min(70vh, 620px); padding: 6px 6px 0; }
+.cmdk-field { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; }
+.cmdk-field input { position: relative; z-index: 1; width: 100%; }
+.cmdk-ghost { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 0; font-size: 13px; color: var(--text-3); white-space: pre; overflow: hidden; max-width: 100%; pointer-events: none; }
+.cmdk-ghost-typed { color: transparent; }
+.cmdk-section { display: flex; justify-content: space-between; }
+.cmdk-item.disabled { cursor: default; }
+.cmdk-item.disabled .cmdk-name { color: var(--text-2); }
+.cmdk-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-label mark, .cmdk-desc mark { background: none; color: var(--accent); }
+.cmdk-row-icon { display: inline-grid; place-items: center; width: 14px; color: var(--text-3); flex: none; transform: translateY(2px); }
+.cmdk-item.active .cmdk-row-icon { color: var(--accent); }
+.cmdk-tag { flex: none; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--hair-2); border-radius: var(--r-sm); padding: 0 5px; line-height: 15px; font-weight: 400; }
+.cmdk-tag.accent { color: var(--accent); border-color: var(--accent-ring); }
+.cmdk-hint { position: sticky; bottom: 0; margin: 6px -6px 0; padding: 8px 12px; border-top: 1px solid var(--hair); background: rgba(12, 12, 12, 0.96); font-size: 11.5px; color: var(--text-3); }
+.cmdk-hint .kbd { margin: 0 2px; }
+.cmdk-hint .mono { color: var(--text-2); font-size: 11px; }
+
+/* Random: a glass split button next to the field of view */
+.random { position: relative; display: inline-flex; align-items: stretch; height: 38px; border-radius: 19px; }
+.random > button { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; color: var(--text-1); font-size: 12.5px; font-weight: 500; transition: color var(--t) var(--ease), background-color var(--t) var(--ease); }
+.random-main { padding: 0 10px 0 14px; border-radius: 19px 0 0 19px; }
+.random-more { padding: 0 10px 0 6px; border-radius: 0 19px 19px 0; color: var(--text-3) !important; border-left: 1px solid var(--hair) !important; }
+.random > button:hover { background: var(--layer-2); }
+.random-main:hover svg { color: var(--accent); }
+.random-menu { width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 12px; }
+.random-menu .menu-title { padding: 10px 8px 6px; }
+.random-kinds { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; }
+.random-kinds .chip { text-transform: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .rail { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); z-index: 32; display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 14px; }
 .rail-btn { width: 40px !important; height: 40px; border-radius: 10px; color: var(--text-2); flex-direction: column; gap: 1px; }
@@ -460,6 +495,10 @@ canvas.smooth { image-rendering: auto; }
   .topleft { top: 12px; left: 12px; right: 12px; max-width: none; }
   .wordmark { font-size: 20px; }
   .search-row .cmdk { width: auto; flex: 1; max-width: none; }
+  .search-row .cmdk-list { width: calc(100vw - 24px); }
+  .cmdk-shortcut { display: none; }
+  .random-main { padding: 0 6px 0 12px; }
+  .random-menu { left: auto; right: 0; }
   .rail { right: 10px; top: 112px; transform: none; }
   .rail-btn { width: 36px !important; height: 36px; }
   .drawer-open .rail { display: none; } /* the drawer is a focused mode on phones; close it to get the controls back */

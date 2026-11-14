@@ -20,10 +20,10 @@ from .errors import NotFound, UpstreamError
 from .pipeline import results
 from .pipeline.jobs import JobManager
 from .pipeline.params import SequenceParams
-from .targets import PRESETS, resolve
+from .targets import PRESETS, objects, resolve
 
 __all__ = ["NotFound", "SequenceParams", "UpstreamError", "array_file", "catalog_cone", "configure", "health",
-           "jobs", "list_catalogs", "list_presets", "load_sequence", "read_array", "read_exposures",
+           "jobs", "list_catalogs", "list_presets", "load_sequence", "object_index", "read_array", "read_exposures",
            "resolve_target", "detach_sequence", "sequence_meta_bytes", "sequence_status", "submit_sequence"]
 
 _jobs: JobManager | None = None
@@ -53,8 +53,15 @@ def list_presets() -> list[dict]:
 
 
 def resolve_target(query: str) -> dict:
-    """Coordinates, preset id/name or object name -> target dict. Raises LookupError."""
+    """Coordinates, preset id/name, a name in the local object index or any name Sesame knows -> target
+    dict. Raises LookupError."""
     return resolve(query).to_dict()
+
+
+def object_index() -> tuple[bytes, str]:
+    """The local object index as served to clients (JSON bytes) and its ETag."""
+    idx = objects.index()
+    return idx.raw, idx.etag
 
 
 # ---------------------------------------------------------------- sequences

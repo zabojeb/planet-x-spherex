@@ -11,6 +11,7 @@ How to run, test and deploy the project. Architecture is in [architecture.md](ar
 | `web/` | web viewer (Vite + React + TypeScript), in progress |
 | `scripts/deploy.sh` | sync to the dev server, install, restart the API |
 | `scripts/build_sequence.py` | build sequences from the command line, warm the cache, write quick-look PNGs |
+| `scripts/build_object_index.py` | rebuild the local object index (`backend/spherex_core/targets/objects.json`) from SIMBAD |
 | `docs/` | documentation and ADRs |
 
 ## Backend
@@ -104,6 +105,16 @@ python scripts/build_sequence.py "133.79 -7.245" --pmra -8118 --pmdec 677 --ref-
 ```
 
 The target is a preset id, `all`, an object name or coordinates. Options: `--fov`, `--pmra`, `--pmdec`, `--ref-epoch`, `--max-epoch-days`. Each run prints exposures, epochs, requests, megabytes and time, and writes `quicklook.png` (epochs × detectors) into the sequence directory. Results land in the same cache the API reads, so running `all` before a demo makes the presets instant, provided the API requests the same parameters.
+
+### Object index
+
+Search suggestions come from `backend/spherex_core/targets/objects.json`, a committed snapshot of about 4,500 SIMBAD objects ([ADR-0021](adr/0021-local-object-index-for-search.md)). Rebuild it when the selection changes or SIMBAD has new objects worth adding:
+
+```bash
+python scripts/build_object_index.py --tap https://simbad.harvard.edu/simbad/sim-tap/sync --cache /tmp/simbad_raw.json
+```
+
+The script needs only the standard library and the backend package (to link rows to the challenge presets). It runs 19 selections plus a cone per preset and identifier queries in chunks (the selections are listed at the top of the script), picks a display name and up to 8 search aliases per object, and prints a summary per category. `--tap` may be repeated; a service that fails is dropped for the rest of the run (CDS SIMBAD TAP was down on 2026-11-14, the Harvard mirror worked). `--cache` keeps the raw answers so that changes to naming or ranking can be re-run offline. Review the diff of `objects.json` before committing: display names come from heuristics.
 
 ## Web
 
