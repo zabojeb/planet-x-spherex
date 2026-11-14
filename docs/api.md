@@ -60,10 +60,12 @@ curl "http://<api-host>/api/resolve?q=RW%20Aur"
 The response is the job:
 
 ```json
-{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "elapsed": 9.4}
+{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "elapsed": 9.4}
 ```
 
-`status` is `queued`, `running`, `done` or `error`; `stage` is `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+`status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+
+At most `SPHEREX_MAX_JOBS` builds (default 3) run at once; the rest wait in submission order. Each POST makes the caller one of the build's clients. A queued or running build is cancelled when nobody waits for it: `SPHEREX_JOB_DETACH_GRACE` seconds (default 5) after its last client sent `DELETE`, or when no client polled it for `SPHEREX_JOB_IDLE` seconds (default 120). A build that runs longer than `SPHEREX_JOB_TIMEOUT` seconds (default 900) fails with an error. A client that submits and never polls must poll at least every `SPHEREX_JOB_IDLE` seconds, or set it to 0.
 
 ```bash
 curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/json" \
@@ -78,8 +80,13 @@ curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/jso
 |---|---|
 | `200` | the finished `meta.json` |
 | `202` | the job (still queued or running) |
-| `500` | the job, with `error` set |
+| `500` | the job, with `error` set (failed or timed out) |
+| `410` | the job, cancelled because nobody was waiting; POST again to restart it |
 | `404` | unknown id |
+
+### Stop waiting
+
+`DELETE /api/sequences/{id}` → `204`. The caller no longer waits for the build; once no client waits, it is cancelled and its slot goes to the next build in the queue. A finished result is kept. `404` for an unknown id. The web client sends it when the target or field of view changes and when the page is closed.
 
 ### `meta.json`
 
@@ -95,7 +102,7 @@ curl -X POST "http://<api-host>/api/sequences" -H "Content-Type: application/jso
 | `photometry` | one entry per measured exposure: `index, epoch, band, mjd, wl, dwl, flux_mjy, err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight, flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out`. `method` is `psf` (ePSF fit), `aperture` (fallback) or `ring` (detector where the target saturates). Ring entries have `relative: true` and `ab_mag: null`: their flux is the ring's share of the light, comparable only within one detector and wavelength (divide by the median of the wavelength bin for a light curve), so do not plot them on an absolute spectrum |
 | `processing` | pipeline constants, and `rings`: per detector that uses rings, `{saturated_share, core_radius_px, r_in, r_out, exposures}` |
 | `flag_bits` | `[{bit, name, description, masked, phot_bad}]` read from the files |
-| `stats` | `frames_found`, `frames_used`, `errors`, `requests`, `bytes`, `cache_hits`, `seconds` (`search`, `fetch_and_align`, `total`) |
+| `stats` | `frames_found`, `frames_used`, `errors`, `requests`, `bytes`, `cache_hits`, `retries`, `seconds` (`search`, `fetch_and_align`, `assemble`, `total`), `timings`: per-exposure seconds as `{n, p50, p90, max, sum}` for `slot` (waiting to start), `read` (cutout from S3), `tables` (wavelength map and ePSF), `pool_wait` (waiting for a CPU worker), `process` (align and measure) and `work` (all of it) |
 | `sources` | archive, collections and data location |
 
 Wavelengths (`wl`, `dwl`) are in µm, times in MJD, fluxes in mJy. Missing values are `null`.

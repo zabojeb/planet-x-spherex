@@ -23,7 +23,7 @@ rsync -az --delete -e "ssh -i $KEY -o IdentitiesOnly=yes -p $PORT" \
 
 if [ "${1:-}" != "--no-restart" ]; then
   "${SSH[@]}" "$DEPLOY_HOST" "tmux kill-session -t api 2>/dev/null || true; \
-    tmux new-session -d -s api 'cd $DIR && . $VENV/bin/activate && SPHEREX_CACHE_DIR=$CACHE \
-    uvicorn spherex_api.main:app --host 0.0.0.0 --port 8000 2>&1 | tee -a /workspace/api.log'"
+    tmux new-session -d -s api 'cd $DIR && . $VENV/bin/activate && SPHEREX_CACHE_DIR=$CACHE SPHEREX_LOG_LEVEL=${DEPLOY_LOG_LEVEL:-INFO} \
+    uvicorn spherex_api.main:app --host 0.0.0.0 --port 8000 --no-access-log 2>&1 | tee -a /workspace/api.log'"
   echo "API restarted on $DEPLOY_HOST (port 8000 inside the container)"
 fi

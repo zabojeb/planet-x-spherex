@@ -56,6 +56,26 @@ All settings are environment variables:
 | `SPHEREX_MAX_FRAMES_IN_FLIGHT` | 64 | exposures read concurrently |
 | `SPHEREX_CPU_WORKERS` | 24 | processes for per-exposure work |
 | `SPHEREX_TAP_CACHE_HOURS` | 12 | lifetime of cached archive queries |
+| `SPHEREX_MAX_JOBS` | 3 | sequence builds running at once; the rest queue |
+| `SPHEREX_JOB_TIMEOUT` | 900 | seconds before a build is stopped with an error (0: never) |
+| `SPHEREX_JOB_IDLE` | 120 | seconds without a poll before a build is cancelled (0: never) |
+| `SPHEREX_JOB_DETACH_GRACE` | 5 | seconds after the last client detached before a build is cancelled |
+| `SPHEREX_LOG_LEVEL` | INFO | `DEBUG` adds a line per exposure, retry and progress poll |
+| `SPHEREX_LOG_FORMAT` | text | `json` for one JSON object per line |
+| `SPHEREX_SLOW_FRAME` | 30 | seconds after which one exposure is logged as WARNING |
+| `SPHEREX_SLOW_REQUEST` | 5 | seconds after which an HTTP request is logged as WARNING |
+
+### Logs
+
+Every line reads `time level logger [sequence id] message key=value ...`, with durations in seconds (`s=`). The sequence id follows a build through the job queue, the pipeline and the HTTP requests about it, so one build reads top to bottom with:
+
+```bash
+grep 48006f61db3e73e6ae51 /workspace/api.log
+```
+
+At INFO a build logs: `job submitted` (or `job joined`, `job cached`), `job started queued_s=` (time spent waiting for a slot), `build start`, `tap query done` or `image search from cache`, `search done`, `fetch progress` every 10 % or 15 s, `fetch done`, one `fetch time <step>` line per step with p50/p90/max/sum over the exposures, `fetch slowest` (the three slowest exposures), `assemble done`, `write done`, `build done` and `job done`. Cancellations, timeouts and failures say so with the stage they reached. Every API request logs `METHOD path status= s=`; progress polls (202) and static files only at DEBUG. Reading the fetch breakdown: a large `slot` means `SPHEREX_MAX_FRAMES_IN_FLIGHT` is the limit, `read`/`tables` is S3 latency (check `retries`), `pool_wait` means the CPU workers are busy (several builds at once or too few `SPHEREX_CPU_WORKERS`), `process` is our own computation. The same numbers are stored in `meta.json` under `stats.seconds` and `stats.timings`.
+
+`scripts/deploy.sh` starts uvicorn with `--no-access-log` (the API logs requests itself) and passes `DEPLOY_LOG_LEVEL` from `.env.deploy` as `SPHEREX_LOG_LEVEL`.
 
 ### Tests
 
