@@ -22,6 +22,7 @@ from .routes import analysis, exports, releases
 from .routes import archival, moving
 from .routes import spectral
 from .routes import field
+from .routes import point
 
 log = logging.getLogger("spherex_api.http")
 _SEQ_PATH = re.compile(r"^/api/sequences/([A-Za-z0-9]+)")
@@ -98,6 +99,7 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(exports.router)
     app.include_router(releases.router)
     app.include_router(spectral.router)
+    app.include_router(point.router)
     if os.environ.get("SPHEREX_MCP", "1") != "0":  # MCP endpoint for AI agents at /mcp (docs/mcp.md)
         from spherex_mcp.http import attach
 

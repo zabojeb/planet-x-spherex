@@ -574,3 +574,20 @@ async def verify_candidate(seq_id: str, ra: float, dec: float, mjd_ref: float | 
 
     ctx, fd = await asyncio.to_thread(_field_data, seq_id)
     return await verify(ctx, fd, ra, dec, mjd_ref, rate, pa, epoch, max_exposures)
+
+
+# ---------------------------------------------------------------- point analysis ("click a point -> Analyze")
+async def point_analysis_submit(seq_id: str, ra: float, dec: float, pmra: float | None = None,
+                                pmdec: float | None = None, ref_epoch: float = 2000.0, name: str | None = None,
+                                client: str | None = None, force: bool = False) -> dict:
+    """Start or join every automatic analysis of one position (a job; poll with field_status)."""
+    from .analysis.point import PointRequest, analyze_point
+    from .field import jobs as fj
+
+    req = PointRequest(ra=ra, dec=dec, pmra=pmra, pmdec=pmdec, ref_epoch=ref_epoch, name=name)
+    jid = fj.make_id(seq_id, "p", req.key())
+
+    def work(ctx, progress, check):
+        return analyze_point(ctx, req, progress, check)
+
+    return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)

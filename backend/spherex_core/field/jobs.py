@@ -32,7 +32,7 @@ INTEREST_TIMEOUT = 60.0
 MAX_CONCURRENT = 2
 
 
-KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search"}
+KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis"}
 
 
 def options_key(opts: FieldOptions) -> str:

@@ -509,3 +509,64 @@ track[{index, pixels}]}}` (pixels: 11×11 lists, null for no data).
 The tracklets of a finished field / moving-objects job as ADES PSV for station 288 with SPHEREx's geocentric
 position per observation (`sys` ICRF_KM, `ctr` 399), `astCat` Gaia3, note Z. Follow-up data, not a submission.
 502 if Horizons fails.
+
+Tracklet identification (ADR-0054) queries known-object positions at each tracklet's first and last detection;
+each `identification[]` candidate is `{name, kind, vmag, sep_arcsec, pos_tolerance_arcsec, dpa_deg, dspeed_frac,
+motion_ok, speed_arcsec_per_hr, pa_deg, o_minus_c_arcsec[{dra, ddec}], score}` with speed and direction from the
+displacement between the two queried positions; `stats.known_objects.positions` says so.
+
+## Point analysis ("click a point → Analyze")
+
+Every automatic analysis of one position of a finished sequence in one job (ADR-0053). Same lifecycle as field
+jobs: deduplicated per sequence and position rounded to 1e-4° (motion to 1 mas/yr); send `X-Client-Id`.
+
+### `POST /api/sequences/{id}/analyze`
+
+Body `{ra, dec, pmra?: null, pmdec?: null, ref_epoch: 2000.0, name?: null, force: false}` (deg ICRS; motion in
+mas/yr with cos dec; without a motion the analysis follows a Gaia DR3 — else SIMBAD — counterpart within 4″
+that has a motion, else a static position). Returns the job `{id, status, stage, done, total, error, elapsed}` — `id` is
+`<sequence>-p<hash>`, `status` `done` straight away when the result exists. 404 unknown or unfinished sequence,
+422 bad body.
+
+### `GET /api/analyses/{job_id}` · `DELETE /api/analyses/{job_id}`
+
+GET: 200 with the result (immutable, `ETag: "<job_id>"`), 202 with the job while it runs (stages
+`identification`, `photometry`, `spectrum`, `motion`, `periodogram`, `colours`, `known_objects`, `tracklets`,
+`verdict`; every GET is a heartbeat), 500 failed, 410 cancelled (POST again), 404 unknown. DELETE withdraws this
+client (200 job / 204 unknown); a job nobody polls for 60 s is cancelled.
+
+Result (every step slot is either its object or `{"error": "<Type>: <message>"}`):
+
+```text
+{ id, sequence, version: 1,
+  request: {ra, dec, pmra, pmdec, ref_epoch, name},
+  point: {ra, dec, x, y, inside, motion_used: {pmra, pmdec, ref_epoch, source}},
+  identification: {radius_arcsec: 15, reference_year,
+                   gaia|catwise|2mass|simbad: {matches: [{id, ra, dec, epoch, pmra, pmdec, mag, mag_band,
+                                                           otype?, sptype?, parallax?, sep_arcsec, pm_total,
+                                                           track: [{epoch, ra, dec, x, y}]}],   # ≤ 3, nearest first
+                                               n_in_radius, counterpart}            # counterpart: nearest ≤ 4″
+                                    | {error}},
+  photometry: {sequence, target, photometry: [records as meta.photometry], rings, stats,
+               summary: {n, n_flagged, n_saturated, n_relative, methods: {psf|aperture|ring: n},
+                         per_band: {D1..D6: {n, n_good, median_flux_mjy}}}},
+  spectrum: {spectrum: <GET /spectrum body without sequence/version>,
+             classification: <GET /classify body without sequence/version>,
+             variability: <GET /spectral-variability body without sequence/version>},
+  motion: <GET /motion body: {start, reference_year, prior, combined, per_band, points, track}>,
+  periodogram: <POST /api/periodogram body, curve trimmed to ≤ 400 samples>,
+  colours: {long_um, short_um, long_flux_mjy, long_err_mjy, short_flux_mjy, short_err_mjy, n_long, n_short,
+            ratio, long_snr, short_snr, red_excess},
+  known_objects: {radius_arcsec: 30, observer, epochs: [{epoch, mjd, n_in_box, near: [...]}],
+                  matches: [{name, kind, vmag, sep_arcsec, ra, dec, epoch}]},
+  tracklets: {available, reason?, field_job?,
+              candidates: [{category, kind: "tracklet"|"source", id, sep_arcsec, ...}]},   # ≤ 20 within 20″
+  verdict: {novelty: 0..1, headline,
+            findings: [{kind: identity|motion|spectrum|variability|colour|solar_system|data,
+                        text, confidence: 0..1, novelty: -0.3..0.55, evidence: {...}}]} }
+```
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' \
+  -d '{"ra": 269.4462, "dec": 4.7688}' https://<host>/api/sequences/<id>/analyze
+```
