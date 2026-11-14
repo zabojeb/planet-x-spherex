@@ -19,7 +19,7 @@ export const VIEWS_3D: { id: Exclude<View3D, "off">; label: string; hint: string
   { id: "bands", label: "λ cube", hint: "Detectors stacked by wavelength: a source lights up at the wavelengths where it is bright" },
 ];
 
-export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "flags", "compass"] as const;
+export const OVERLAYS = ["target", "track", "gaia", "catwise", "2mass", "simbad", "flags", "grid", "compass"] as const;
 export type Overlay = (typeof OVERLAYS)[number];
 
 export interface ViewState {

@@ -1,18 +1,43 @@
 /**
  * Full-bleed interactive sky (the Google Earth model): drag to pan, wheel or pinch to zoom around the
- * cursor, double-click to zoom in, click a source or the target to select it. Overlays are SVG in data
- * units on the same transformed layer as the canvas. Blinking repaints only the canvas.
+ * cursor, double-click to zoom in. Click a source or the target to select it, or empty sky to drop a pin;
+ * the selection is owned by the app, which renders its card (placed here next to the object).
+ * Overlays are SVG in data units on the same transformed layer as the canvas; labels and the coordinate
+ * grid's captions live in screen space so text stays crisp at any zoom. Blinking repaints only the canvas.
  */
-import { RotateCcw, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { LocateFixed, RotateCcw } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Progress } from "../api";
-import { formatDec, formatRA, pixelToWorld, propagate, totalPm, worldToPixel } from "../astro";
-import { CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
+import { compassPoint, formatAngle, formatDec, formatDeg, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, toGalactic, totalPm, worldToPixel } from "../astro";
+import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
 import { paintDisplay, paintFlags } from "../render";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
+
+export type Selection = { kind: "target" } | { kind: "source"; cat: string; src: CatalogSource } | { kind: "point"; ra: number; dec: number };
+export type StepDir = "N" | "S" | "E" | "W";
+
+export const sourceKey = (cat: string, src: CatalogSource) => `${cat}:${src.id}`;
+
+/** Sky position of a selection at the shown date. */
+export function selectionWorld(sel: Selection, year: number, targetWorld: [number, number] | null): [number, number] | null {
+  if (sel.kind === "target") return targetWorld;
+  if (sel.kind === "source") return propagate(sel.src, year);
+  return [sel.ra, sel.dec];
+}
+
+/** The displayed pixel value at grid pixel (x, y), as text; null outside the image or for false colour. */
+export function valueAt(d: Display | null, n: number, x: number, y: number): string | null {
+  if (!d || !n) return null;
+  const ix = Math.round(x);
+  const iy = Math.round(y);
+  if (ix < 0 || iy < 0 || ix >= n || iy >= n) return null;
+  const i = iy * n + ix;
+  if (d.kind === "scalar" || d.kind === "diverging") return Number.isFinite(d.img[i]) ? `${d.img[i].toPrecision(3)} ${d.unit}` : "no data";
+  return null;
+}
 
 interface Props {
   grid: Grid | null;
@@ -25,7 +50,6 @@ interface Props {
   year: number;
   span: [number, number] | null;
   targetPx: [number, number] | null;
-  targetName: string;
   /** What is being loaded, shown with the progress (a search pick or a Random draw tells you what you got). */
   loading?: { name: string; note?: string | null } | null;
   targetWorld: [number, number] | null;
@@ -38,16 +62,24 @@ interface Props {
   onRetry: () => void;
   onZoom: (zoom: number) => void;
   onInteract: () => void;
-  onOpenDetails: () => void;
-  /** Forced photometry of a clicked catalogue source; resolves when its curves are in the drawer. */
-  onMeasure?: (cat: string, src: CatalogSource) => Promise<void>;
+  selection: Selection | null;
+  onSelect: (s: Selection | null) => void;
+  /** Card for the selection, placed next to it. */
+  card?: ReactNode;
+  /** Source highlighted from elsewhere (the objects list), as sourceKey(). */
+  highlight?: string | null;
+  /** Fly to this sky position when `key` changes (zooming in if the view is wide). */
+  focus?: { ra: number; dec: number; key: number } | null;
+  /** Move the whole field (a new build) half a field in a direction. */
+  onStep?: (dir: StepDir) => void;
   shiftX?: number; // horizontal offset of the view centre (room for the landing index)
 }
 
 const HIGH_PM = 100; // mas/yr
 const MAX_MARKERS = 160;
+const MAX_LABELS = 28;
 
-type Selection = { kind: "target" } | { kind: "source"; cat: string; src: CatalogSource };
+type Marker = { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number };
 
 export function loaderText(p: Progress): { text: string; pct: number | null } {
   const pct = p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
@@ -83,6 +115,9 @@ function scaleBar(pixscale: number, scale: number): { px: number; label: string 
   return { px: ((10 * 60) / pixscale) * scale, label: "10′" };
 }
 
+const ease = (t: number) => 1 - (1 - t) ** 3;
+const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
 export function SkyView(p: Props) {
   const [boxRef, W] = useElementWidth<HTMLDivElement>();
   const H = useViewportHeight();
@@ -93,9 +128,7 @@ export function SkyView(p: Props) {
   const [scale, setScale] = useState(0); // 0 = follow fit
   const [center, setCenter] = useState<[number, number] | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
-  const [sel, setSel] = useState<Selection | null>(null);
-  const [measure, setMeasure] = useState<{ state: "idle" | "busy" } | { state: "error"; message: string }>({ state: "idle" });
-  useEffect(() => setMeasure({ state: "idle" }), [sel]);
+  const [hover, setHover] = useState<Marker | null>(null);
   const s = scale || (p.view.zoom ? p.view.zoom : fit);
   const c = center ?? [n / 2, n / 2];
   const tx = W / 2 + (p.shiftX ?? 0) - c[0] * s;
@@ -106,7 +139,7 @@ export function SkyView(p: Props) {
   useLayoutEffect(() => {
     setCenter(null);
     setScale(0);
-    setSel(null);
+    setHover(null);
   }, [p.lockKey]);
   // external zoom changes (Display panel, URL)
   useEffect(() => setScale(0), [p.view.zoom]);
@@ -139,11 +172,12 @@ export function SkyView(p: Props) {
     const [lx, ly] = toL(x, y);
     return [tx + lx * s, ty + ly * s];
   };
+  const fromScreen = (sx: number, sy: number): [number, number] => [(sx - tx) / s - 0.5, n - (sy - ty) / s - 0.5];
 
   const markers = useMemo(() => {
     if (!p.grid) return [];
-    const out: { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number }[] = [];
-    for (const cat of ["gaia", "catwise", "2mass"] as const) {
+    const out: Marker[] = [];
+    for (const cat of CATALOG_IDS) {
       if (!p.overlays.has(cat)) continue;
       let kept = 0;
       for (const src of p.catalogs[cat] ?? []) {
@@ -151,9 +185,10 @@ export function SkyView(p: Props) {
         const [x, y] = worldToPixel(p.grid, ra, dec);
         if (x < -2 || y < -2 || x > n + 1 || y > n + 1) continue;
         const pm = totalPm(src);
-        if (pm <= HIGH_PM && kept >= MAX_MARKERS) continue;
+        // SIMBAD rows are few and come most-studied first: keep them all; cap the dense catalogues
+        if (cat !== "simbad" && pm <= HIGH_PM && kept >= MAX_MARKERS) continue;
         kept++;
-        const m: (typeof out)[number] = { cat, src, x, y, pm };
+        const m: Marker = { cat, src, x, y, pm };
         if (pm > HIGH_PM && p.span) {
           m.from = worldToPixel(p.grid, ...propagate(src, p.span[0]));
           m.to = worldToPixel(p.grid, ...propagate(src, p.span[1]));
@@ -164,6 +199,34 @@ export function SkyView(p: Props) {
     return out;
   }, [p.grid, p.catalogs, p.overlays, p.year, p.span, n]);
 
+  // ---------------------------------------------------------------- fly-to
+  const anim = useRef<number>();
+  const stopAnim = () => {
+    if (anim.current) cancelAnimationFrame(anim.current);
+  };
+  useEffect(() => {
+    const f = p.focus;
+    if (!f || !p.grid || !W) return;
+    const [x, y] = worldToPixel(p.grid, f.ra, f.dec);
+    const [lx, ly] = toL(x, y);
+    const s0 = s;
+    const s1 = s0 < fit * 1.8 ? Math.min(fit * 2.5, 48) : s0;
+    const c0 = c;
+    const c1: [number, number] = [lx, ly];
+    const t0 = performance.now();
+    stopAnim();
+    const tick = (t: number) => {
+      const k = ease(Math.min(1, (t - t0) / 520));
+      const sk = s0 + (s1 - s0) * k;
+      setScale(sk);
+      setCenter([c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k]);
+      if (k < 1) anim.current = requestAnimationFrame(tick);
+      else p.onZoom(Math.round(s1 * 10) / 10);
+    };
+    anim.current = requestAnimationFrame(tick);
+    return stopAnim;
+  }, [p.focus?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------------------------------------------------------------- interaction
   const drag = useRef<{ x: number; y: number; c: [number, number]; moved: boolean } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -172,6 +235,7 @@ export function SkyView(p: Props) {
   const clampS = (v: number) => Math.min(Math.max(v, fit * 0.6), 48);
 
   function zoomAt(newS: number, mx: number, my: number) {
+    stopAnim();
     const ns = clampS(newS);
     const px = (mx - tx) / s; // layer coords under the cursor
     const py = (my - ty) / s;
@@ -182,9 +246,39 @@ export function SkyView(p: Props) {
     p.onInteract();
   }
 
+  function resetView() {
+    stopAnim();
+    setCenter(null);
+    setScale(0);
+    p.onZoom(0);
+  }
+
   function local(e: { clientX: number; clientY: number }): [number, number] {
     const b = boxRef.current!.getBoundingClientRect();
     return [e.clientX - b.left, e.clientY - b.top];
+  }
+
+  /** The marker (or the target) nearest to a screen point, within `radius` pixels. */
+  function pickAt(mx: number, my: number, radius: number): Selection | null {
+    let best: Selection | null = null;
+    let bd = radius * radius;
+    if (p.targetPx) {
+      const [sx, sy] = toScreen(...p.targetPx);
+      const d = (sx - mx) ** 2 + (sy - my) ** 2;
+      if (d < 18 * 18) {
+        best = { kind: "target" };
+        bd = Math.min(d, bd);
+      }
+    }
+    for (const m of markers) {
+      const [sx, sy] = toScreen(m.x, m.y);
+      const d = (sx - mx) ** 2 + (sy - my) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = { kind: "source", cat: m.cat, src: m.src };
+      }
+    }
+    return best;
   }
 
   function onWheel(e: React.WheelEvent) {
@@ -195,6 +289,7 @@ export function SkyView(p: Props) {
 
   function onPointerDown(e: React.PointerEvent) {
     if (!n) return;
+    stopAnim();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const [x, y] = local(e);
     pointers.current.set(e.pointerId, { x, y });
@@ -222,11 +317,16 @@ export function SkyView(p: Props) {
       if (Math.hypot(dx, dy) > 4) dr.moved = true;
       if (dr.moved) {
         setCenter([dr.c[0] - dx / s, dr.c[1] - dy / s]);
+        setHover(null);
         p.onInteract();
       }
+    } else if (e.pointerType === "mouse") {
+      const hit = pickAt(x, y, 10);
+      setHover(hit?.kind === "source" ? markers.find((m) => m.src === hit.src) ?? null : null);
     }
     // cursor in grid coordinates
-    setCursor({ x: (x - tx) / s - 0.5, y: n - (y - ty) / s - 0.5 });
+    const [gx, gy] = fromScreen(x, y);
+    setCursor({ x: gx, y: gy });
   }
 
   function onPointerUp(e: React.PointerEvent) {
@@ -234,34 +334,128 @@ export function SkyView(p: Props) {
     if (pointers.current.size < 2) pinch.current = null;
     const dr = drag.current;
     drag.current = null;
-    if (!dr || dr.moved || !n) return;
-    // click: select the nearest marker or the target within 12 px
+    if (!dr || dr.moved || !n || !p.grid) return;
+    // click: select the nearest marker or the target; on empty sky drop a pin, or close an open card
     const [mx, my] = local(e);
-    let best: Selection | null = null;
-    let bd = 12 * 12;
-    if (p.targetPx) {
-      const [sx, sy] = toScreen(...p.targetPx);
-      const d = (sx - mx) ** 2 + (sy - my) ** 2;
-      if (d < 18 * 18) {
-        best = { kind: "target" };
-        bd = d;
-      }
-    }
-    for (const m of markers) {
-      const [sx, sy] = toScreen(m.x, m.y);
-      const d = (sx - mx) ** 2 + (sy - my) ** 2;
-      if (d < bd) {
-        bd = d;
-        best = { kind: "source", cat: m.cat, src: m.src };
-      }
-    }
-    setSel(best);
+    const hit = pickAt(mx, my, e.pointerType === "mouse" ? 12 : 22);
+    if (hit) return p.onSelect(hit);
+    if (p.selection) return p.onSelect(null);
+    const [gx, gy] = fromScreen(mx, my);
+    if (gx < -0.5 || gy < -0.5 || gx > n - 0.5 || gy > n - 0.5) return;
+    const [ra, dec] = pixelToWorld(p.grid, gx, gy);
+    p.onSelect({ kind: "point", ra, dec });
   }
 
   function onDoubleClick(e: React.MouseEvent) {
     const [mx, my] = local(e);
     zoomAt(s * 2, mx, my);
   }
+
+  // ---------------------------------------------------------------- coordinate grid
+  const gridLines = useMemo(() => {
+    const g = p.grid;
+    if (!g || !n || !W || !p.overlays.has("grid")) return null;
+    // the visible part of the image, in grid pixels
+    const x0 = Math.max(-0.5, fromScreen(0, 0)[0]);
+    const x1 = Math.min(n - 0.5, fromScreen(W, 0)[0]);
+    const y0 = Math.max(-0.5, fromScreen(0, H)[1]);
+    const y1 = Math.min(n - 0.5, fromScreen(0, 0)[1]);
+    if (x1 <= x0 || y1 <= y0) return null;
+    const ras: number[] = [];
+    const decs: number[] = [];
+    for (let i = 0; i <= 8; i++) {
+      for (const [x, y] of [[x0 + ((x1 - x0) * i) / 8, y0], [x0 + ((x1 - x0) * i) / 8, y1], [x0, y0 + ((y1 - y0) * i) / 8], [x1, y0 + ((y1 - y0) * i) / 8]]) {
+        const [ra, dec] = pixelToWorld(g, x, y);
+        ras.push(((ra - g.ra + 540) % 360) - 180);
+        decs.push(dec);
+      }
+    }
+    let raMin = Math.min(...ras);
+    let raMax = Math.max(...ras);
+    const decMin = Math.min(...decs);
+    const decMax = Math.max(...decs);
+    // a celestial pole in view: meridians fan out over all hours
+    const pole = [90, -90].some((pd) => {
+      const [px, py] = worldToPixel(g, 0, pd);
+      return px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    });
+    if (pole) [raMin, raMax] = [-180, 180];
+    const cosd = Math.max(0.05, Math.cos((g.dec * Math.PI) / 180));
+    const decStep = gridStep(decMax - decMin, "dec");
+    const raStep = gridStep((raMax - raMin) * cosd, "ra"); // seconds of time
+    const raStepDeg = raStep / 240;
+    const decStepDeg = decStep / 3600;
+    const lines: { kind: "ra" | "dec"; value: number; pts: [number, number][] }[] = [];
+    const SAMPLES = 24;
+    const pad = 0.1 * (decMax - decMin);
+    for (let k = Math.ceil(decMin / decStepDeg); k * decStepDeg <= decMax; k++) {
+      const dec = k * decStepDeg;
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= SAMPLES; i++) pts.push(worldToPixel(g, g.ra + raMin - pad + ((raMax - raMin + 2 * pad) * i) / SAMPLES, dec));
+      lines.push({ kind: "dec", value: dec, pts });
+      if (lines.length > 40) break;
+    }
+    const raAbs0 = g.ra + raMin;
+    for (let k = Math.ceil(raAbs0 / raStepDeg); k * raStepDeg <= g.ra + raMax; k++) {
+      const ra = k * raStepDeg;
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= SAMPLES; i++) pts.push(worldToPixel(g, ra, Math.max(-90, Math.min(90, decMin - pad + ((decMax - decMin + 2 * pad) * i) / SAMPLES))));
+      lines.push({ kind: "ra", value: normRa(ra), pts });
+      if (lines.length > 80) break;
+    }
+    return { lines, raStep, decStep };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.grid, p.overlays, n, W, H, tx, ty, s]);
+
+  // grid captions: where each line leaves the visible image through the left (Dec) or bottom (RA) edge
+  const gridCaptions = useMemo(() => {
+    if (!gridLines || !n) return [];
+    const left = Math.max(tx, 12);
+    const bottom = Math.min(ty + n * s, H - 132);
+    const top = Math.max(ty, 12);
+    const right = Math.min(tx + n * s, W - 80);
+    const out: { x: number; y: number; text: string; anchor: "start" | "end" }[] = [];
+    for (const line of gridLines.lines) {
+      const sp = line.pts.map(([x, y]) => toScreen(x, y));
+      for (let i = 1; i < sp.length; i++) {
+        const [ax, ay] = sp[i - 1];
+        const [bx, by] = sp[i];
+        if (line.kind === "dec" && (ax - left) * (bx - left) <= 0 && ax !== bx) {
+          const y = ay + ((left - ax) / (bx - ax)) * (by - ay);
+          if (y > top + 10 && y < bottom - 4) out.push({ x: left + 5, y: y - 4, text: gridLabel(line.value, "dec", gridLines.decStep), anchor: "start" });
+          break;
+        }
+        if (line.kind === "ra" && (ay - bottom) * (by - bottom) <= 0 && ay !== by) {
+          const x = ax + ((bottom - ay) / (by - ay)) * (bx - ax);
+          if (x > left + 70 && x < right - 4) out.push({ x: x - 4, y: bottom - 6, text: gridLabel(line.value, "ra", gridLines.raStep), anchor: "end" });
+          break;
+        }
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridLines, tx, ty, s, W, H, n]);
+
+  // SIMBAD names next to their markers: most-studied first, never overlapping
+  const labels = useMemo(() => {
+    if (!p.overlays.has("simbad") || !n) return [];
+    const boxes: [number, number, number, number][] = [];
+    const out: { x: number; y: number; text: string; key: string }[] = [];
+    const named = markers.filter((m) => m.cat === "simbad").sort((a, b) => Number(b.src.refs ?? 0) - Number(a.src.refs ?? 0));
+    for (const m of named) {
+      if (out.length >= MAX_LABELS) break;
+      const [sx, sy] = toScreen(m.x, m.y);
+      if (sx < 0 || sy < 0 || sx > W || sy > H) continue;
+      const text = String(m.src.id);
+      const w = Math.min(text.length, 28) * 6.4 + 6;
+      const box: [number, number, number, number] = [sx + 9, sy - 15, sx + 9 + w, sy - 1];
+      if (boxes.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+      boxes.push(box);
+      out.push({ x: sx + 10, y: sy - 5, text: text.length > 28 ? `${text.slice(0, 27)}…` : text, key: sourceKey(m.cat, m.src) });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers, p.overlays, tx, ty, s, W, H, n]);
 
   // ---------------------------------------------------------------- render
   const d = p.display;
@@ -270,17 +464,19 @@ export function SkyView(p: Props) {
   const bar = p.grid ? scaleBar(p.grid.pixscale_arcsec, s) : null;
   const cw = cursor && p.grid && cursor.x >= -0.5 && cursor.y >= -0.5 && cursor.x < n - 0.5 && cursor.y < n - 0.5 ? cursor : null;
   const world = cw && p.grid ? pixelToWorld(p.grid, cw.x, cw.y) : null;
-  const value = (() => {
-    if (!cw || !d) return null;
-    const i = Math.round(cw.y) * n + Math.round(cw.x);
-    if (d.kind === "scalar" || d.kind === "diverging") return Number.isFinite(d.img[i]) ? `${d.img[i].toPrecision(3)} ${d.unit}` : "no data";
-    return null;
-  })();
+  const value = cw ? valueAt(d, n, cw.x, cw.y) : null;
   const L = 14 * u; // reticle arm length in layer units
-  const selPos: [number, number] | null =
-    sel?.kind === "target" && p.targetPx ? toScreen(...p.targetPx)
-      : sel?.kind === "source" && p.grid ? toScreen(...worldToPixel(p.grid, ...propagate(sel.src, p.year)))
-        : null;
+  const selWorld = p.selection ? selectionWorld(p.selection, p.year, p.targetWorld) : null;
+  const selPx: [number, number] | null =
+    p.selection?.kind === "target" ? p.targetPx : selWorld && p.grid ? worldToPixel(p.grid, ...selWorld) : null;
+  const selPos = selPx ? toScreen(...selPx) : null;
+  const hl = p.highlight ? markers.find((m) => sourceKey(m.cat, m.src) === p.highlight) : null;
+  const readout = world ? { label: "Cursor", pos: world } : selWorld ? { label: p.selection?.kind === "point" ? "Pin" : "Selected", pos: selWorld } : p.targetWorld ? { label: "Target", pos: p.targetWorld } : null;
+  const gal = readout ? toGalactic(...readout.pos) : null;
+  const fromTarget = readout && p.targetWorld && readout.label !== "Target" ? separation(...p.targetWorld, ...readout.pos) : null;
+
+  const cardLeft = selPos ? Math.max(12, Math.min(selPos[0] + 18, W - 300)) : 0;
+  const cardTop = selPos ? Math.max(70, Math.min(selPos[1] - 24, H - 420)) : 0;
 
   return (
     <div
@@ -291,7 +487,10 @@ export function SkyView(p: Props) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onPointerLeave={() => setCursor(null)}
+      onPointerLeave={() => {
+        setCursor(null);
+        setHover(null);
+      }}
       onDoubleClick={onDoubleClick}
     >
       {n > 0 && (
@@ -303,7 +502,19 @@ export function SkyView(p: Props) {
       {n > 0 && W > 0 && (
         // Overlays live in screen space with an SVG transform so strokes stay hairline at any zoom.
         <svg className={`overlay${p.progress ? " dim" : ""}`} width={W} height={H}>
+          <defs>
+            <clipPath id="sky-clip">
+              <rect x={0} y={0} width={n} height={n} />
+            </clipPath>
+          </defs>
           <g transform={`translate(${tx} ${ty}) scale(${s})`}>
+            {gridLines && (
+              <g className="coord-grid" clipPath="url(#sky-clip)">
+                {gridLines.lines.map((l, i) => (
+                  <polyline key={i} points={l.pts.map(([x, y]) => toL(x, y).join(",")).join(" ")} vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+            )}
             <g className="reticle" key={`r${p.lockKey}`}>
               {[[0, 0, 1, 1], [n, 0, -1, 1], [0, n, 1, -1], [n, n, -1, -1]].map(([x, y, sx, sy], i) => (
                 <path key={i} d={`M${x + sx * L},${y} L${x},${y} L${x},${y + sy * L}`} vectorEffect="non-scaling-stroke" />
@@ -326,9 +537,10 @@ export function SkyView(p: Props) {
               const shape =
                 st.shape === "circle" ? <circle cx={lx} cy={ly} r={r} {...common} />
                   : st.shape === "square" ? <rect x={lx - r * 0.85} y={ly - r * 0.85} width={r * 1.7} height={r * 1.7} {...common} />
-                    : <path d={`M${lx},${ly - r} L${lx + r},${ly} L${lx},${ly + r} L${lx - r},${ly} Z`} {...common} />;
+                    : st.shape === "plus" ? <path d={`M${lx - r * 1.5},${ly} H${lx - r * 0.5} M${lx + r * 0.5},${ly} H${lx + r * 1.5} M${lx},${ly - r * 1.5} V${ly - r * 0.5} M${lx},${ly + r * 0.5} V${ly + r * 1.5}`} {...common} strokeWidth={1.6} />
+                      : <path d={`M${lx},${ly - r} L${lx + r},${ly} L${lx},${ly + r} L${lx - r},${ly} Z`} {...common} />;
               let vector = null;
-              if (m.from && m.to) {
+              if (m.from && m.to && m.cat !== "simbad") {
                 const [fx, fy] = toL(...m.from);
                 const [tX, tY] = toL(...m.to);
                 const ang = Math.atan2(tY - fy, tX - fx);
@@ -352,90 +564,113 @@ export function SkyView(p: Props) {
               const b = 16 * u;
               const lines = [[lx - b, ly, lx - a, ly], [lx + a, ly, lx + b, ly], [lx, ly - b, lx, ly - a], [lx, ly + a, lx, ly + b]];
               return (
-                <g className={`target-mark${sel?.kind === "target" ? " sel" : ""}`} key={`t${p.lockKey}`} style={{ transformOrigin: `${lx}px ${ly}px` }}>
+                <g className={`target-mark${p.selection?.kind === "target" ? " sel" : ""}`} key={`t${p.lockKey}`} style={{ transformOrigin: `${lx}px ${ly}px` }}>
                   {lines.map((l, i) => <line key={`h${i}`} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} className="halo" vectorEffect="non-scaling-stroke" />)}
                   {lines.map((l, i) => <line key={`l${i}`} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} vectorEffect="non-scaling-stroke" />)}
                 </g>
               );
             })()}
           </g>
+          {/* screen-space marks: highlight, selection, pin, labels, grid captions */}
+          {hl && (() => {
+            const [sx, sy] = toScreen(hl.x, hl.y);
+            return <circle className="mark-highlight" cx={sx} cy={sy} r={13} />;
+          })()}
+          {p.selection?.kind === "source" && selPos && <circle className="mark-selected" cx={selPos[0]} cy={selPos[1]} r={11} />}
+          {p.selection?.kind === "point" && selPos && (
+            <g className="pin" transform={`translate(${selPos[0]} ${selPos[1]})`} key={`${p.selection.ra},${p.selection.dec}`}>
+              <circle r={7} className="halo" />
+              <circle r={7} />
+              <line x1={-14} x2={-9} y1={0} y2={0} />
+              <line x1={9} x2={14} y1={0} y2={0} />
+              <line y1={-14} y2={-9} x1={0} x2={0} />
+              <line y1={9} y2={14} x1={0} x2={0} />
+            </g>
+          )}
+          {labels.map((l) => (
+            <text key={l.key} x={l.x} y={l.y} className="obj-label">{l.text}</text>
+          ))}
+          {gridCaptions.map((g, i) => (
+            <text key={i} x={g.x} y={g.y} textAnchor={g.anchor} className="grid-label">{g.text}</text>
+          ))}
+          {hover && !p.selection && (() => {
+            const [sx, sy] = toScreen(hover.x, hover.y);
+            const sub = hover.cat === "simbad" ? (hover.src.type as string | null) ?? "SIMBAD" : CATALOG_STYLE[hover.cat].label;
+            return (
+              <g className="hover-tip" transform={`translate(${Math.min(sx + 12, W - 220)} ${Math.max(sy + 22, 20)})`}>
+                <text className="hover-name">{String(hover.src.id)}</text>
+                <text className="hover-sub" y={13}>{sub}{hover.src.mag != null ? ` · ${hover.src.mag_band} ${hover.src.mag.toFixed(1)}` : ""}</text>
+              </g>
+            );
+          })()}
         </svg>
       )}
 
-      {/* minimal HUD: date + cursor coordinates, compass and scale */}
+      {/* HUD: navigation pad, compass and scale, date, coordinate readout */}
       {n > 0 && (
-        <div className="hud-min" aria-hidden>
-          {p.overlays.has("compass") && bar && (
-            <svg width={bar.px + 50} height={30} className="hud-compass">
-              <g transform="translate(18 24)" className="compass">
-                <line x1={0} y1={0} x2={0} y2={-14} />
-                <line x1={0} y1={0} x2={-14} y2={0} />
-                <text x={0} y={-17} textAnchor="middle">N</text>
-              </g>
-              <g transform="translate(36 22)" className="scalebar">
-                <line x1={0} y1={0} x2={bar.px} y2={0} />
-                <text x={bar.px / 2} y={-5} textAnchor="middle">{bar.label}</text>
-              </g>
-            </svg>
-          )}
-          <div className="hud-line">
-            <span>{p.dateLabel}</span>
-            {world ? (
-              <span className="hud-cursor">
-                {formatRA(world[0])} {formatDec(world[1])}
-                {value && <span className="muted"> · {value}</span>}
-              </span>
-            ) : (
-              p.targetWorld && <span className="muted">{formatRA(p.targetWorld[0])} {formatDec(p.targetWorld[1])}</span>
+        <div className="hud-min">
+          <div className="hud-nav">
+            {p.onStep && !p.shiftX && (
+              <div className="nav-pad" role="group" aria-label="Move the field" onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop}>
+                {(["N", "E", "W", "S"] as StepDir[]).map((dir) => (
+                  <button key={dir} className={`nav-btn nav-${dir}`} onClick={() => p.onStep!(dir)} title={`New field half a field to the ${{ N: "north", S: "south", E: "east", W: "west" }[dir]} (Shift + ${{ N: "↑", S: "↓", E: "←", W: "→" }[dir]})`} aria-label={`Move the field ${dir}`}>
+                    {dir}
+                  </button>
+                ))}
+                <button className="nav-btn nav-C" onClick={resetView} title="Fit the field in view" aria-label="Fit the field in view">
+                  <LocateFixed size={13} />
+                </button>
+              </div>
+            )}
+            {p.overlays.has("compass") && bar && (
+              <svg width={bar.px + 50} height={30} className="hud-compass" aria-hidden>
+                <g transform="translate(18 24)" className="compass">
+                  <line x1={0} y1={0} x2={0} y2={-14} />
+                  <line x1={0} y1={0} x2={-14} y2={0} />
+                  <text x={0} y={-17} textAnchor="middle">N</text>
+                  <text x={-19} y={3} textAnchor="middle">E</text>
+                </g>
+                <g transform="translate(36 22)" className="scalebar">
+                  <line x1={0} y1={0} x2={bar.px} y2={0} />
+                  <text x={bar.px / 2} y={-5} textAnchor="middle">{bar.label}</text>
+                </g>
+              </svg>
             )}
           </div>
+          <div className="hud-line" aria-hidden>
+            <span>{p.dateLabel}</span>
+          </div>
+          {readout && gal && (
+            <div className="readout" aria-live="off">
+              <div className="readout-head">
+                <span>{readout.label}</span>
+                {value && readout.label === "Cursor" && <span className="muted">{value}</span>}
+              </div>
+              <div className="readout-main">
+                <span><i>α</i>{formatRA(readout.pos[0])}</span>
+                <span><i>δ</i>{formatDec(readout.pos[1])}</span>
+              </div>
+              <div className="readout-sub">
+                <span>{formatDeg(readout.pos[0])}</span>
+                <span>{formatDeg(readout.pos[1], 5, true)}</span>
+              </div>
+              <div className="readout-sub">
+                <span><i>l</i>{formatDeg(gal[0], 4)}</span>
+                <span><i>b</i>{formatDeg(gal[1], 4, true)}</span>
+              </div>
+              {fromTarget != null && p.targetWorld && fromTarget > 1e-5 && (
+                <div className="readout-sub">
+                  <span>{formatAngle(fromTarget)} {compassPoint(positionAngle(...p.targetWorld, ...readout.pos))} of target</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {sel && selPos && (
-        <div className="pick glass" style={{ left: Math.min(selPos[0] + 16, W - 260), top: Math.max(selPos[1] - 20, 70) }} onPointerDown={(e) => e.stopPropagation()}>
-          <button className="pick-close" onClick={() => setSel(null)} aria-label="Close">
-            <X size={14} />
-          </button>
-          {sel.kind === "target" ? (
-            <>
-              <div className="micro">Target</div>
-              <div className="pick-title">{p.targetName}</div>
-              {p.targetWorld && <div className="mono small">{formatRA(p.targetWorld[0])} {formatDec(p.targetWorld[1])}</div>}
-              <button className="btn pick-cta" onClick={() => { setSel(null); p.onOpenDetails(); }}>
-                Spectrum &amp; light curve
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="micro">{CATALOG_STYLE[sel.cat].label}</div>
-              <div className="pick-title mono">{sel.src.id}</div>
-              <div className="mono small">
-                {sel.src.mag_band} {sel.src.mag != null ? sel.src.mag.toFixed(2) : "—"}
-                {totalPm(sel.src) > 0 && ` · μ ${totalPm(sel.src).toFixed(0)} mas/yr`}
-              </div>
-              <div className="muted small">Shown for {p.year.toFixed(2)}; catalogue epoch {sel.src.epoch.toFixed(1)}</div>
-              {p.onMeasure && (
-                <button
-                  className="btn pick-cta"
-                  disabled={measure.state === "busy"}
-                  onClick={() => {
-                    const src = sel.src;
-                    setMeasure({ state: "busy" });
-                    p.onMeasure!(sel.cat, src)
-                      .then(() => {
-                        setMeasure({ state: "idle" });
-                        setSel(null);
-                      })
-                      .catch((e) => setMeasure({ state: "error", message: String(e?.message || e) }));
-                  }}
-                >
-                  {measure.state === "busy" ? "Measuring every exposure…" : "Measure spectrum & light curve"}
-                </button>
-              )}
-              {measure.state === "error" && <div className="small" style={{ color: "var(--err)" }}>{measure.message}</div>}
-            </>
-          )}
+      {p.selection && selPos && p.card && (
+        <div className="pick glass" style={{ left: cardLeft, top: cardTop }} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop} onWheel={stop}>
+          {p.card}
         </div>
       )}
 
@@ -458,7 +693,7 @@ export function SkyView(p: Props) {
       )}
       {d?.kind === "empty" && !p.progress && n > 0 && <div className="sky-note glass">{d.message}</div>}
       {p.error && !p.progress && (
-        <div className="sky-note glass error" role="alert" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="sky-note glass error" role="alert" onPointerDown={stop} onPointerUp={stop}>
           <span>{p.error}</span>
           <button className="btn" onClick={p.onRetry}>
             <RotateCcw size={14} /> Try again
