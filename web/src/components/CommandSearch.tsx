@@ -7,7 +7,7 @@ import { CornerDownLeft, Crosshair, Dices, History, Loader2, Search, SearchX, X 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, lookupName } from "../api";
 import { formatDec, formatRA } from "../astro";
-import { useDismiss } from "../hooks";
+import { useDismiss, useMediaQuery } from "../hooks";
 import {
   describe, facetObjects, looksLikeCoords, matchFacet, nearby, normalize, parseCoords, pickCoords, pickFor, rankObjects,
   type Facet, type Pick, type Recent, type SkyObject,
@@ -90,6 +90,7 @@ export function CommandSearch(p: Props) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [active, setActive] = useState(0);
+  const narrow = useMediaQuery("(max-width: 760px)");
   const [remote, setRemote] = useState<Remote | null>(null);
   const [waiting, setWaiting] = useState(false); // Enter pressed on a name still being looked up
   const wrap = useRef<HTMLDivElement>(null);
@@ -326,7 +327,7 @@ export function CommandSearch(p: Props) {
               p.onWarm?.();
             }}
             onKeyDown={onKeyDown}
-            placeholder="Search a star, galaxy, nebula or RA Dec"
+            placeholder={narrow ? "Object or RA Dec" : "Search a star, galaxy, nebula or RA Dec"}
             aria-label="Search an object or coordinates"
             aria-expanded={open}
             aria-controls="cmdk-list"

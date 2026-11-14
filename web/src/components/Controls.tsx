@@ -30,7 +30,17 @@ export function ModeControl({ view, set, size }: { view: ViewState; set: Set; si
       size={size}
       value={view.mode}
       onChange={(mode) => set({ mode })}
-      options={MODES.map((m) => ({ value: m.id, label: m.label, title: `${m.hint} (${m.key})` }))}
+      options={MODES.map((m) => ({
+        value: m.id,
+        // the short name replaces the full one on phones (CSS), so screen readers still get one label
+        label: m.short ? (
+          <>
+            <span className="label-full">{m.label}</span>
+            <span className="label-short">{m.short}</span>
+          </>
+        ) : m.label,
+        title: `${m.label}: ${m.hint} (${m.key})`,
+      }))}
     />
   );
 }
