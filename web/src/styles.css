@@ -762,3 +762,8 @@ canvas.smooth { image-rendering: auto; }
   .bar3d-height input { flex: 1; width: auto; min-width: 0; }
   .bar3d > .btn.icon { grid-column: 3; grid-row: 2; justify-self: end; width: 32px; height: 32px; } /* turntable */
 }
+
+/* phones pan by dragging, so the N/E/S/W pad only takes room from the image */
+@media (max-width: 760px) {
+  .nav-pad { display: none; }
+}

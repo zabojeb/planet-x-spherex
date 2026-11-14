@@ -75,7 +75,7 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
 
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
-const MOBILE_FRAME = { top: 108, bottom: 330 };
+const MOBILE_FRAME = { top: 108, bottom: 290 };
 const MID_FRAME = { top: 108, bottom: 264 };
 
 export default function App() {
