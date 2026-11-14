@@ -558,12 +558,6 @@ canvas.smooth { image-rendering: auto; }
 .nav-btn { display: grid; place-items: center; padding: 0; border: 1px solid var(--hair-2); border-radius: 6px; background: rgba(10, 10, 10, 0.58); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: var(--text-2); font-family: var(--mono); font-size: 10px; transition: color var(--t) var(--ease), border-color var(--t) var(--ease), background-color var(--t); }
 .nav-btn:hover { color: var(--accent); border-color: var(--accent-ring); background: rgba(20, 16, 4, 0.8); }
 .nav-N { grid-area: 1 / 2; } .nav-E { grid-area: 2 / 1; } .nav-C { grid-area: 2 / 2; } .nav-W { grid-area: 2 / 3; } .nav-S { grid-area: 3 / 2; }
-.readout { display: flex; flex-direction: column; gap: 1px; min-width: 214px; }
-.readout i { font-style: normal; color: var(--text-3); margin-right: 5px; }
-.readout-head { display: flex; justify-content: space-between; gap: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
-.readout-head .muted { text-transform: none; letter-spacing: 0.02em; }
-.readout-main { display: flex; gap: 14px; font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
-.readout-sub { display: flex; gap: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 .pick { width: 288px; padding: 12px 14px 10px; max-height: calc(100vh - 90px); overflow: auto; }
 .pick-card { display: flex; flex-direction: column; gap: 6px; }
@@ -660,18 +654,16 @@ canvas.smooth { image-rendering: auto; }
 .obj-fast { font-weight: 500; color: var(--text-1); }
 
 @media (max-width: 760px) {
-  .readout { min-width: 0; }
-  .readout-sub:nth-of-type(n + 4) { display: none; }
   .pick { left: 10px !important; right: 10px; top: auto !important; bottom: 150px; width: auto; max-height: 52vh; }
 }
-/* the dock is centred and up to 760px wide: below ~1260px it would cover the readout, so lift the HUD above it */
+/* the dock is centred and up to 760px wide: below ~1260px it would cover the HUD, so lift the HUD above it */
 @media (min-width: 761px) and (max-width: 1260px) {
   .hud-min { bottom: 84px; }
 }
 /* with the drawer open the HUD sits above it, reduced to the date and α δ */
 @media (min-width: 761px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 28px); }
-  .drawer-open .nav-pad, .drawer-open .readout-sub, .drawer-open .hud-compass { display: none; }
+  .drawer-open .nav-pad, .drawer-open .hud-compass { display: none; }
 }
 @media (min-width: 761px) and (max-width: 1260px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 92px); }
@@ -704,6 +696,9 @@ button.coordfield { cursor: text; transition: border-color var(--t) var(--ease);
 button.coordfield:hover:not(:disabled) { border-color: var(--hair-3); }
 .coordfield i { font-style: normal; color: var(--text-3); margin-right: 5px; }
 .coordfield .cf-icon { color: var(--text-3); flex: none; }
+.coordfield.cursor .cf-icon { color: var(--text-1); }
+.coordfield .cf-extra { color: var(--text-3); }
+.coordfield .cf-extra:empty { display: none; }
 .coordfield .cf-edit, .coordfield .cf-kbd { color: var(--text-3); opacity: 0; transition: opacity var(--t) var(--ease); }
 button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordfield:focus-visible .cf-edit, button.coordfield:focus-visible .cf-kbd { opacity: 1; }
 .coordfield-wrap { position: relative; align-self: flex-start; }

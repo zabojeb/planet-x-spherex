@@ -1,9 +1,10 @@
 /** The field centre as an always-visible pair of coordinates under the search box, on the flat sky and in 3D.
  *  Click it (or press C), type or paste a position in any format the Go to panel takes (h m s / ° ′ ″, colons,
  *  degrees, a J-name, Galactic l b), Enter goes there with the same field of view, Escape gives up. */
-import { ArrowRight, LocateFixed, Pencil } from "lucide-react";
+import { ArrowRight, LocateFixed, MousePointer2, Pencil } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatDec, formatDeg, formatRA, parseCoordinates, toGalactic, type CoordFrame } from "../astro";
+import { useCursorReadout } from "../cursor";
 import { useDismiss } from "../hooks";
 import type { Place } from "./GoTo";
 import { Segmented } from "./ui/primitives";
@@ -20,6 +21,9 @@ export function CoordField(p: { centre: [number, number] | null; onGo: (place: P
   const [editing, setEditing] = useState(false);
   const [frame, setFrame] = useState<CoordFrame>("icrs");
   const [text, setText] = useState("");
+  // while the mouse is over the sky the box reads out the position under it (with the pixel value and the offset
+  // from the target); otherwise it shows the field centre
+  const cursor = useCursorReadout();
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
@@ -65,14 +69,20 @@ export function CoordField(p: { centre: [number, number] | null; onGo: (place: P
   };
 
   if (!editing) {
-    const gal = p.centre ? toGalactic(...p.centre) : null;
+    const shown = cursor?.pos ?? p.centre;
+    const gal = shown ? toGalactic(...shown) : null;
     return (
-      <button className="coordfield glass" onClick={open} disabled={!p.centre} title="Field centre: click or press C to type new coordinates">
-        <LocateFixed size={14} className="cf-icon" aria-hidden />
-        {p.centre && frame === "icrs" && (
+      <button
+        className={`coordfield glass${cursor ? " cursor" : ""}`}
+        onClick={open}
+        disabled={!p.centre}
+        title={cursor ? "Position under the cursor" : "Field centre: click or press C to type new coordinates"}
+      >
+        {cursor ? <MousePointer2 size={14} className="cf-icon" aria-hidden /> : <LocateFixed size={14} className="cf-icon" aria-hidden />}
+        {shown && frame === "icrs" && (
           <>
-            <span><i>α</i>{formatRA(p.centre[0])}</span>
-            <span><i>δ</i>{formatDec(p.centre[1])}</span>
+            <span><i>α</i>{formatRA(shown[0])}</span>
+            <span><i>δ</i>{formatDec(shown[1])}</span>
           </>
         )}
         {gal && frame === "galactic" && (
@@ -81,9 +91,15 @@ export function CoordField(p: { centre: [number, number] | null; onGo: (place: P
             <span><i>b</i>{signed(gal[1], 4)}°</span>
           </>
         )}
-        {!p.centre && <span className="muted">Coordinates</span>}
-        <Pencil size={12} className="cf-edit" aria-hidden />
-        <kbd className="kbd cf-kbd">C</kbd>
+        {!shown && <span className="muted">Coordinates</span>}
+        {cursor ? (
+          <span className="cf-extra">{[cursor.value, cursor.offset].filter(Boolean).join(" · ")}</span>
+        ) : (
+          <>
+            <Pencil size={12} className="cf-edit" aria-hidden />
+            <kbd className="kbd cf-kbd">C</kbd>
+          </>
+        )}
       </button>
     );
   }

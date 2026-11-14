@@ -46,7 +46,8 @@ src/
   components/
     SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click to select a source
                        or drop a pin, fly-to, hairline overlays, RA/Dec grid with captions, SIMBAD name labels, hover
-                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader
+                       tips; HUD with the field-stepping pad, compass, scale and date; HUD loader; publishes the
+                       position under the cursor (src/cursor.ts) for the coordinate box
     PickCard.tsx       card for the selection (target, catalogue source or pin): ICRS/degrees/Galactic/ecliptic with
                        copy buttons, motion, distance, offset from the target, counterparts in the other catalogues,
                        measure / centre / follow, links to SIMBAD, Aladin Lite and WiseView
@@ -57,7 +58,8 @@ src/
     Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer;
                        catalogue markers and SIMBAD names, fast movers' paths, hover tips, click opens a source
     TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
-    CoordField.tsx     field-centre coordinates under the search: click or c to type a position, Enter goes there
+    CoordField.tsx     field-centre coordinates under the search (the cursor position while over the sky): click or c to
+                       type a position, Enter goes there
     CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
                        challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
@@ -232,8 +234,9 @@ v 3D on/off · c type coordinates · Shift + ← ↑ → ↓ new field half a fi
 
 ## Exploring
 
-- **Where am I.** The readout in the bottom-left corner follows the cursor (or the pin, selection or target): α δ in
-  sexagesimal and degrees, Galactic l b, the offset from the target and the pixel value. `g` draws an RA/Dec grid.
+- **Where am I.** The coordinate box under the search shows the field centre; while the mouse is over the sky it shows
+  the position under the cursor instead, with the pixel value and the offset from the target. A clicked source, pin or
+  the target gets the full set (sexagesimal, degrees, Galactic, ecliptic, copyable) in its card. `g` draws an RA/Dec grid.
 - **Go somewhere.** Type a name or coordinates in the search, or click the field-centre coordinates under it (or press
   `c`), type or paste a new position (sexagesimal, degrees, a J-name or Galactic `gal l b`) and press Enter; the field of
   view is kept. Go to (rail, top button) adds optional proper motion, an all-sky map to click on and recent places. The pad above the
