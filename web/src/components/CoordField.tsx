@@ -82,8 +82,11 @@ export function CoordField(p: { centre: [number, number] | null; onGo: (place: P
           </>
         )}
         {!p.centre && <span className="muted">Coordinates</span>}
-        <Pencil size={12} className="cf-edit" aria-hidden />
-        <kbd className="kbd cf-kbd">C</kbd>
+        {/* edit hint: outside the pill, to its right, shown on hover/focus; takes no room in the pill */}
+        <span className="cf-hint" aria-hidden>
+          <Pencil size={12} className="cf-edit" />
+          <kbd className="kbd cf-kbd">C</kbd>
+        </span>
       </button>
     );
   }
