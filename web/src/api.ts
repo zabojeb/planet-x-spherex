@@ -865,3 +865,47 @@ export async function verifyPosition(seqId: string, body: { ra: number; dec: num
 }
 
 export const adesUrl = (fieldId: string) => `${BASE}/api/field/${fieldId}/ades.psv`;
+
+// ---------------------------------------------------------------- sky map (ADR-0059)
+
+export interface Coverage {
+  ra: number;
+  dec: number;
+  n_exposures: number;
+  n_visits: number;
+  per_detector: Record<string, number>;
+  per_collection: Record<string, number>;
+  date_min: string | null;
+  date_max: string | null;
+  visits: { from: string; to: string; n: number }[];
+  deep: boolean;
+  source: string;
+}
+
+const coverageCache = new Map<string, Promise<Coverage>>();
+
+/** What SPHEREx has at a position (local file catalogue on the server: milliseconds). Cached per 0.01° and
+ *  shared, so it takes no abort signal: a card that closes simply ignores the answer. */
+export function fetchCoverage(ra: number, dec: number): Promise<Coverage> {
+  const key = `${ra.toFixed(2)},${dec.toFixed(2)}`;
+  let p = coverageCache.get(key);
+  if (!p) {
+    p = json<Coverage>(`/api/coverage?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}`, {}, 1);
+    coverageCache.set(key, p);
+    p.catch(() => coverageCache.delete(key));
+  }
+  return p;
+}
+
+export interface Footprints {
+  available: boolean;
+  reason?: string;
+  total?: number;
+  shown?: number;
+  footprints: { obs_id: string; band: string; mjd: number; collection: string; corners: number[] }[];
+}
+
+/** Outlines of SPHEREx exposures around a position (one detector of each dichroic pair), newest first. */
+export function fetchFootprints(ra: number, dec: number, radiusDeg: number, signal?: AbortSignal): Promise<Footprints> {
+  return json<Footprints>(`/api/footprints?ra=${ra.toFixed(3)}&dec=${dec.toFixed(3)}&radius=${radiusDeg.toFixed(2)}&limit=300`, { signal }, 0);
+}

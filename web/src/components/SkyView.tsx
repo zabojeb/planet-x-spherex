@@ -18,7 +18,7 @@ import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
 import { paintDisplay, paintFlags } from "../render";
-import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type SkyMap } from "../skymap";
+import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type MapCatalog, type MapLine, type MapPlace, type SkyMap } from "../skymap";
 import { LoadChip } from "./Progress";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
@@ -100,6 +100,25 @@ interface Props {
   label?: string | null;
   /** Draw the sky map around the field (default on). Never for co-moving grids, which follow an object. */
   map?: boolean;
+  /** Called when the view hands over between the field and the zoomed-out map (ADR-0058/0059). */
+  onMapMode?: (on: boolean) => void;
+  /** Map mode: a picked sky position; its card (mapCard) follows it on the map. */
+  mapPick?: { ra: number; dec: number } | null;
+  onMapPick?: (pos: { ra: number; dec: number } | null) => void;
+  mapCard?: ReactNode;
+  /** Map mode, throttled: the map camera, for layers that depend on the view (footprints). */
+  onMapView?: (cam: MapCamera) => void;
+  /** Overlays drawn on the map. */
+  mapLayers?: { grid: boolean; lines: MapLine[]; polygons: [number, number][][]; places: MapPlace[]; catalogs: MapCatalog[] };
+  onPlace?: (key: string) => void;
+  /** Map actions for the map's own tool rail. */
+  controller?: { current: SkyController | null };
+}
+
+export interface SkyController {
+  backToField: () => void;
+  wholeSky: () => void;
+  flyTo: (ra: number, dec: number, fovDeg: number) => void;
 }
 
 /** A mark drawn over the sky: grid pixel position, a shape per kind, optional label and motion arrow. */
@@ -125,8 +144,9 @@ const MAX_LABELS = 28;
  *  FIELD_IN × (a gap, so the hand-over does not flicker), the field takes it back. */
 const FIELD_OUT = 0.22;
 const FIELD_IN = 0.3;
-/** How dark the map stays around a field that fills the view (0 = not dimmed); it brightens on zooming out. */
-const MAP_DIM = 0.62;
+/** How dark the map stays around a field that fills the view (0 = not dimmed); it brightens on zooming out. Light
+ *  enough that the neighbouring sky reads as real sky, dark enough that the field's edge stays clear. */
+const MAP_DIM = 0.3;
 /** Width of the view, in degrees, for "zoom out to the whole sky": nearly a hemisphere. */
 const SKY_FOV = 150;
 const MAX_SCALE = 48; // screen pixels per image pixel
@@ -264,6 +284,27 @@ export function SkyView(p: Props) {
     };
   }, [wantMap, armed]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => skyMap?.setBand(p.view.band), [skyMap, p.view.band]);
+  const onMapMode = p.onMapMode;
+  useEffect(() => onMapMode?.(isMap), [isMap, onMapMode]);
+  // map overlays
+  const layers = p.mapLayers;
+  useEffect(() => skyMap?.setGrid(!!layers?.grid), [skyMap, layers?.grid]);
+  useEffect(() => skyMap?.setLines(layers?.lines ?? []), [skyMap, layers?.lines]);
+  useEffect(() => skyMap?.setPolygons(layers?.polygons ?? [], "rgba(255, 200, 69, 0.3)"), [skyMap, layers?.polygons]);
+  useEffect(() => skyMap?.setPlaces(layers?.places ?? []), [skyMap, layers?.places]);
+  const catKey = (layers?.catalogs ?? []).join(",");
+  useEffect(() => skyMap?.setCatalogs(catKey ? (catKey.split(",") as MapCatalog[]) : []), [skyMap, catKey]);
+  if (p.controller)
+    p.controller.current = {
+      backToField: () => (modeRef.current === "map" ? flyToField() : undefined),
+      wholeSky: () => zoomToSky(),
+      flyTo: (ra, dec, fov) => {
+        if (!skyMap || !p.grid) return;
+        if (modeRef.current === "field") enterMap(s, tx, ty);
+        cancelFlight();
+        flight.current = skyMap.flyTo({ ra, dec, fov }, undefined, () => (flight.current = null));
+      },
+    };
 
   // Field mode: the map follows the field's camera (here, before paint, and again every frame below so
   // nothing Aladin animates on its own can drift).
@@ -395,11 +436,35 @@ export function SkyView(p: Props) {
   }
 
   // The frame loop and the map's callbacks run with the latest render's closures.
-  const live = useRef({ frame: () => {}, wheel: (_e: WheelEvent) => {}, click: (_ra: number, _dec: number, _drag: boolean) => {}, move: (_pos: [number, number] | null) => {} });
+  const live = useRef({ frame: () => {}, wheel: (_e: WheelEvent) => {}, click: (_ra: number, _dec: number, _drag: boolean) => {}, move: (_pos: [number, number] | null) => {}, place: (_key: string) => {} });
+  const pickRef = useRef<HTMLDivElement>(null);
+  const pinRef = useRef<HTMLDivElement>(null);
+  const viewSent = useRef({ t: 0, key: "" });
   live.current.frame = () => {
     if (!skyMap || !mapOn) return;
-    if (modeRef.current === "map") placeOnMap();
-    else if (wantCam.current) skyMap.setCamera(wantCam.current);
+    if (modeRef.current === "map") {
+      placeOnMap();
+      const el = pickRef.current;
+      const pin = pinRef.current;
+      if (el && pin && p.mapPick) {
+        const at = skyMap.world2pix(p.mapPick.ra, p.mapPick.dec);
+        el.style.visibility = pin.style.visibility = at ? "" : "hidden";
+        if (at) {
+          el.style.left = `${Math.max(12, Math.min(at[0] + 18, W - 312)).toFixed(0)}px`;
+          el.style.top = `${Math.max(70, Math.min(at[1] - 24, H - 340)).toFixed(0)}px`;
+          pin.style.transform = `translate(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px)`;
+        }
+      }
+      if (p.onMapView) {
+        const cam = skyMap.camera();
+        const key = `${cam.ra.toFixed(2)}|${cam.dec.toFixed(2)}|${Math.log(cam.fov).toFixed(1)}`;
+        const now = performance.now();
+        if (key !== viewSent.current.key && now - viewSent.current.t > 400) {
+          viewSent.current = { t: now, key };
+          p.onMapView(cam);
+        }
+      }
+    } else if (wantCam.current) skyMap.setCamera(wantCam.current);
   };
   live.current.wheel = (e) => {
     const [mx, my] = local(e);
@@ -409,15 +474,26 @@ export function SkyView(p: Props) {
     if (dragging || modeRef.current !== "map" || !p.grid || !skyMap) return;
     const half = (n * p.grid.pixscale_arcsec) / 3600 / Math.SQRT2; // half the field's diagonal
     const px = skyMap.size()[0] / skyMap.camera().fov; // screen pixels per degree
-    if (separation(p.grid.ra, p.grid.dec, ra, dec) <= Math.max(half, 16 / px)) flyToField();
+    const sep = separation(p.grid.ra, p.grid.dec, ra, dec);
+    if (sep <= Math.max(half, 16 / px)) {
+      p.onMapPick?.(null);
+      flyToField();
+      // inside the image: pin the point there too, so its instant probe and Analyze are one click away
+      const [x, y] = worldToPixel(p.grid, ra, dec);
+      if (x >= -0.5 && y >= -0.5 && x < n - 0.5 && y < n - 0.5) p.onSelect({ kind: "point", ra, dec });
+      return;
+    }
+    p.onMapPick?.({ ra, dec });
   };
   live.current.move = (pos) => setMapCursor(modeRef.current === "map" ? pos : null);
+  live.current.place = (key) => p.onPlace?.(key);
   useEffect(() => {
     if (!skyMap) return;
     skyMap.on({
       wheel: (e) => live.current.wheel(e),
       click: (ra, dec, drag) => live.current.click(ra, dec, drag),
       move: (pos) => live.current.move(pos),
+      place: (key) => live.current.place(key),
     });
     let raf = 0;
     const tick = () => {
@@ -837,7 +913,7 @@ export function SkyView(p: Props) {
   const dim = !mapOn || isMap ? 0 : MAP_DIM * Math.min(1, Math.max(0, Math.log(s / (fit * FIELD_OUT)) / Math.log(0.8 / FIELD_OUT)));
   // Zoomed in past the map's resolution its HEALPix pixels show as diamonds: soften them in proportion.
   const mapPx = !p.grid ? 0 : isMap ? (mapFov ? (MAP_PIXEL_ARCSEC * W) / (mapFov * 3600) : 0) : (MAP_PIXEL_ARCSEC * s) / p.grid.pixscale_arcsec;
-  const mapBlur = Math.min(12, Math.max(0, 0.4 * (mapPx - 2.5)));
+  const mapBlur = Math.min(8, Math.max(0, 0.32 * (mapPx - 2)));
   const L = 14 * u; // reticle arm length in layer units
   const selWorld = p.selection ? selectionWorld(p.selection, p.year, p.targetWorld) : null;
   const selPx: [number, number] | null =
@@ -1096,6 +1172,15 @@ export function SkyView(p: Props) {
             </div>
           )}
         </div>
+      )}
+
+      {isMap && p.mapPick && p.mapCard && (
+        <>
+          <div ref={pinRef} className="map-pin" style={{ visibility: "hidden" }} aria-hidden />
+          <div ref={pickRef} className="pick glass map-pick" style={{ visibility: "hidden" }} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop} onWheel={stop}>
+            {p.mapCard}
+          </div>
+        </>
       )}
 
       {!isMap && p.selection && selPos && p.card && (

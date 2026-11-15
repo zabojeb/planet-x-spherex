@@ -165,6 +165,25 @@ class Mirror:
                 best[k] = (r, f)
         return sorted((f for _, f in best.values()), key=lambda f: f.mjd)
 
+    def footprints(self, ra: float, dec: float, radius_deg: float, bands: tuple[str, ...] = ("D1", "D2", "D3"),
+                   limit: int = 600) -> tuple[list[dict], int]:
+        """Footprints (corner lists) of files near (ra, dec), newest first, for drawing coverage on the map.
+        D4-D6 image the same sky as D1-D3 through the dichroic, so the default keeps one detector of each pair.
+        Returns (footprints, total matching before the limit)."""
+        c = 2.0 * np.sin(np.radians(min(radius_deg, 90.0)) / 2.0)  # chord: the box around the cone in unit vectors
+        p = unit(ra, dec)
+        q = ",".join("?" * len(bands))
+        rows = self._db().execute(
+            f"""SELECT f.obs_id, f.band, f.mjd, f.collection, f.corners
+                FROM files_rt r JOIN files f ON f.id = r.id
+                WHERE r.x0 <= ? AND r.x1 >= ? AND r.y0 <= ? AND r.y1 >= ? AND r.z0 <= ? AND r.z1 >= ?
+                  AND f.band IN ({q})
+                ORDER BY f.mjd DESC""",
+            (p[0] + c, p[0] - c, p[1] + c, p[1] - c, p[2] + c, p[2] - c, *bands)).fetchall()
+        out = [{"obs_id": obs, "band": band, "mjd": mjd, "collection": coll, "corners": json.loads(corners)}
+               for obs, band, mjd, coll, corners in rows[:limit]]
+        return out, len(rows)
+
     def known_uris(self, release: str | None = None) -> set[str]:
         q = "SELECT uri FROM files" + (" WHERE release=?" if release else "")
         return {u for (u,) in self._db().execute(q, (release,) if release else ())}

@@ -10,6 +10,7 @@ resolve_target, UpstreamError (a RuntimeError, message safe for users) when a re
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -619,3 +620,27 @@ async def point_analysis_submit(seq_id: str, ra: float, dec: float, pmra: float 
         return analyze_point(ctx, req, progress, check)
 
     return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)
+
+
+# ---------------------------------------------------------------- sky map (ADR-0059)
+
+
+async def hips_file(survey: str, path: str):
+    """Local copy of a HiPS file (tile, Allsky, properties, Moc), fetched from the source once."""
+    from . import hips
+
+    return await hips.get(survey, path)
+
+
+async def coverage_at(ra: float, dec: float) -> dict:
+    """SPHEREx exposures and visits covering a position (map pick card)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.at, ra, dec)
+
+
+async def footprints_near(ra: float, dec: float, radius_deg: float, limit: int = 600) -> dict:
+    """Outlines of SPHEREx exposures near a position (map coverage layer)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.footprints, ra, dec, radius_deg, limit)

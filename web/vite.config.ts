@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { "/api": { target: apiUrl(mode), changeOrigin: true } },
+    proxy: { "/api": { target: apiUrl(mode), changeOrigin: true }, "/hips": { target: apiUrl(mode), changeOrigin: true } },
   },
   build: { outDir: "dist", chunkSizeWarningLimit: 800 },
 }));
