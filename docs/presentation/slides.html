@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planet X × SPHEREx</title>
+<style>
+/* Fonts are the ones the web app ships (web/node_modules after `npm --prefix web ci`). */
+@font-face { font-family: "Geist"; src: url("../../web/node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../web/node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Instrument Serif"; src: url("../../web/node_modules/@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2") format("woff2"); font-style: normal; }
+@font-face { font-family: "Instrument Serif"; src: url("../../web/node_modules/@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff2") format("woff2"); font-style: italic; }
+
+/* Tokens copied from web/src/styles.css: black, warm off-white, hairlines, one amber accent. */
+:root {
+  --bg: #050505; --text-1: #ece8df; --text-2: #b8b3a7; --text-3: #858074;
+  --hair: rgba(236,232,223,.08); --hair-2: rgba(236,232,223,.12); --hair-3: rgba(236,232,223,.24);
+  --layer-1: rgba(236,232,223,.025); --layer-2: rgba(236,232,223,.05);
+  --accent: #ffc845; --accent-soft: rgba(255,200,69,.14);
+  --blue: #3987e5; --orange: #e8613c;
+  --ui: "Geist", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --display: "Instrument Serif", Georgia, serif;
+}
+@page { size: 1920px 1080px; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #000; }
+body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: antialiased; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.slide { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); page-break-after: always; break-after: page; }
+.slide:last-child { page-break-after: auto; break-after: auto; }
+
+/* Shared chrome */
+.frame i { position: absolute; width: 30px; height: 30px; border-color: var(--hair-3); border-style: solid; border-width: 0; z-index: 5; }
+.frame i:nth-child(1) { top: 44px; left: 44px; border-top-width: 1.5px; border-left-width: 1.5px; }
+.frame i:nth-child(2) { top: 44px; right: 44px; border-top-width: 1.5px; border-right-width: 1.5px; }
+.frame i:nth-child(3) { bottom: 44px; left: 44px; border-bottom-width: 1.5px; border-left-width: 1.5px; }
+.frame i:nth-child(4) { bottom: 44px; right: 44px; border-bottom-width: 1.5px; border-right-width: 1.5px; }
+.bar { position: absolute; left: 96px; right: 96px; display: flex; justify-content: space-between; align-items: center; z-index: 6;
+  font-family: var(--mono); font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); }
+.bar.top { top: 62px; } .bar.bottom { bottom: 60px; }
+.bar b { color: var(--text-1); font-weight: 500; }
+.bar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 14px; vertical-align: 1px; box-shadow: 0 0 14px rgba(255,200,69,.7); }
+.bar .sep { margin: 0 14px; color: var(--hair-3); }
+.micro { font-family: var(--mono); font-size: 16px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-3); }
+.micro .n { color: var(--accent); }
+.display { font-family: var(--display); font-weight: 400; letter-spacing: -.012em; line-height: .98; }
+.display em { font-style: italic; color: var(--accent); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.lead { font-size: 27px; line-height: 1.5; color: var(--text-2); }
+.hair-t { border-top: 1px solid var(--hair-2); }
+.content { position: absolute; left: 96px; right: 96px; top: 150px; bottom: 120px; }
+.shot { position: relative; border: 1px solid var(--hair-2); background: #000; }
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shot::before, .shot::after { content: ""; position: absolute; width: 18px; height: 18px; border: 0 solid var(--accent); z-index: 2; }
+.shot::before { top: -7px; left: -7px; border-top-width: 2px; border-left-width: 2px; }
+.shot::after { bottom: -7px; right: -7px; border-bottom-width: 2px; border-right-width: 2px; }
+.cap { font-family: var(--mono); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-top: 16px; }
+.cap b { color: var(--text-1); font-weight: 500; }
+
+/* 1 — title */
+.s1 .bg { position: absolute; inset: 0; background: url("img/sky.jpg") 60px -60px / 2600px auto no-repeat; filter: saturate(0) contrast(1.08); opacity: .95; }
+.s1 .shade { position: absolute; inset: 0; background:
+  linear-gradient(90deg, rgba(5,5,5,.97) 0%, rgba(5,5,5,.88) 34%, rgba(5,5,5,.25) 66%, rgba(5,5,5,.55) 100%),
+  linear-gradient(0deg, rgba(5,5,5,.95) 0%, rgba(5,5,5,0) 30%), radial-gradient(ellipse at 72% 50%, rgba(255,200,69,.06), transparent 55%); }
+.s1 .reticle { position: absolute; left: 1368px; top: 476px; width: 120px; height: 120px; border: 1.5px solid var(--accent); border-radius: 50%; box-shadow: 0 0 40px rgba(255,200,69,.35); }
+.s1 .reticle::after { content: ""; position: absolute; inset: 54px; border-radius: 50%; background: var(--accent); }
+.s1 .reticle-label { position: absolute; left: 1516px; top: 508px; font-family: var(--mono); font-size: 16px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-1); }
+.s1 .reticle-label span { display: block; color: var(--text-3); margin-top: 6px; }
+.s1 .title { position: absolute; left: 96px; top: 236px; width: 1240px; }
+.s1 h1 { font-size: 172px; white-space: nowrap; }
+.s1 h1 .x { color: var(--text-3); font-size: 118px; margin: 0 14px; vertical-align: 14px; }
+.s1 .tag { font-family: var(--display); font-style: italic; font-size: 80px; color: var(--accent); margin-top: 18px; line-height: 1; }
+.s1 .lead { margin-top: 36px; width: 880px; font-size: 28px; }
+.s1 .links { position: absolute; left: 96px; right: 96px; bottom: 132px; display: flex; gap: 0; border-top: 1px solid var(--hair-2); }
+.s1 .links div { flex: 1; padding: 26px 0 0; }
+.s1 .links .k { font-family: var(--mono); font-size: 15px; letter-spacing: .16em; color: var(--text-3); text-transform: uppercase; }
+.s1 .links .v { font-family: var(--mono); font-size: 27px; margin-top: 10px; color: var(--text-1); }
+.s1 .links .v.a { color: var(--accent); }
+
+/* 2 — opportunity */
+.s2 h2 { font-size: 88px; width: 1700px; margin-top: 26px; }
+.s2 .stats { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 56px; border-top: 1px solid var(--hair-2); border-bottom: 1px solid var(--hair-2); }
+.s2 .stats div { padding: 30px 36px 30px 0; }
+.s2 .stats div + div { border-left: 1px solid var(--hair-2); padding-left: 36px; }
+.s2 .big { font-family: var(--display); font-size: 112px; line-height: .9; }
+.s2 .big small { font-size: 50px; color: var(--text-2); margin-left: 6px; }
+.s2 .stats .zero .big { color: var(--accent); }
+.s2 .stats p { font-size: 22px; color: var(--text-2); margin-top: 16px; line-height: 1.4; }
+.s2 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; margin-top: 44px; }
+.s2 .row .yr { font-family: var(--mono); font-size: 18px; color: var(--accent); letter-spacing: .1em; }
+.s2 .row p { font-size: 23px; line-height: 1.5; color: var(--text-2); margin-top: 10px; }
+.s2 .row p b { color: var(--text-1); font-weight: 500; }
+
+/* 3 — the tool */
+.s3 .left { position: absolute; left: 0; top: 0; width: 600px; }
+.s3 h2 { font-size: 92px; margin-top: 26px; }
+.s3 ol { list-style: none; margin-top: 44px; counter-reset: s; }
+.s3 li { counter-increment: s; display: grid; grid-template-columns: 54px 1fr; padding: 17px 0; border-top: 1px solid var(--hair-2); font-size: 23px; line-height: 1.4; color: var(--text-2); }
+.s3 li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-size: 16px; color: var(--accent); padding-top: 5px; }
+.s3 li b { color: var(--text-1); font-weight: 500; }
+.s3 .right { position: absolute; left: 648px; right: 0; top: 10px; }
+.s3 .shot img { height: auto; }
+
+/* 4 — pipeline */
+.s4 h2 { font-size: 92px; width: 1500px; margin-top: 26px; }
+.s4 .pipe { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; margin-top: 52px; position: relative; }
+.s4 .step { position: relative; padding: 30px 28px 32px; border: 1px solid var(--hair-2); border-left-width: 0; background: var(--layer-1); min-height: 318px; }
+.s4 .step:first-child { border-left-width: 1px; }
+.s4 .step::after { content: ""; position: absolute; right: -9px; top: 46px; width: 16px; height: 16px; background: var(--bg); border-top: 1px solid var(--hair-3); border-right: 1px solid var(--hair-3); transform: rotate(45deg); z-index: 2; }
+.s4 .step:last-child::after { display: none; }
+.s4 .step .n { font-family: var(--mono); font-size: 15px; color: var(--text-3); letter-spacing: .12em; }
+.s4 .step h3 { font-family: var(--display); font-weight: 400; font-size: 50px; margin-top: 14px; }
+.s4 .step p { font-size: 19.5px; line-height: 1.45; color: var(--text-2); margin-top: 14px; }
+.s4 .step .m { position: absolute; left: 28px; bottom: 28px; font-family: var(--mono); font-size: 21px; color: var(--accent); }
+.s4 .strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 40px; }
+.s4 .strip div { padding-right: 30px; }
+.s4 .strip .v { font-family: var(--display); font-size: 70px; line-height: 1; }
+.s4 .strip .k { font-size: 20px; color: var(--text-2); margin-top: 8px; line-height: 1.4; }
+.s4 .tech { position: absolute; left: 0; right: 0; bottom: 0; font-family: var(--mono); font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
+
+/* 5 — validation */
+.s5 h2 { font-size: 92px; margin-top: 26px; }
+.s5 .tbl { position: absolute; left: 0; top: 196px; width: 820px; }
+.s5 .r { display: grid; grid-template-columns: 290px 1fr; gap: 28px; padding: 22px 0; border-top: 1px solid var(--hair-2); }
+.s5 .r:last-child { border-bottom: 1px solid var(--hair-2); }
+.s5 .r .t { font-family: var(--display); font-size: 40px; line-height: 1.05; }
+.s5 .r .t span { display: block; font-family: var(--mono); font-size: 13.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); margin-top: 8px; }
+.s5 .r p { font-size: 22px; line-height: 1.45; color: var(--text-2); }
+.s5 .r p b { color: var(--text-1); font-weight: 500; }
+.s5 .r p .y { color: var(--accent); font-weight: 500; }
+.s5 .foot { position: absolute; left: 0; bottom: 0; font-size: 20px; color: var(--text-3); width: 820px; }
+.s5 .charts { position: absolute; left: 884px; right: 0; top: 150px; }
+.s5 .charts .shot img { height: auto; }
+.s5 .charts .shot + .cap + .shot { margin-top: 48px; }
+
+/* 6 — discovery */
+.s6 h2 { font-size: 92px; margin-top: 26px; }
+.s6 .cols { display: grid; grid-template-columns: 1.08fr 1fr 1.05fr; gap: 0; margin-top: 60px; border-top: 1px solid var(--hair-2); }
+.s6 .col { padding: 34px 44px 0 0; }
+.s6 .col + .col { border-left: 1px solid var(--hair-2); padding-left: 44px; }
+.s6 .col h3 { font-family: var(--display); font-weight: 400; font-size: 52px; }
+.s6 .col > p { font-size: 22px; line-height: 1.5; color: var(--text-2); margin-top: 16px; }
+.s6 .kv { margin-top: 26px; }
+.s6 .kv div { display: grid; grid-template-columns: 196px 1fr; align-items: center; padding: 14px 0; border-top: 1px solid var(--hair); }
+.s6 .kv .v { font-family: var(--display); font-size: 56px; line-height: 1; color: var(--text-1); }
+.s6 .kv .v.a { color: var(--accent); }
+.s6 .kv .k { font-size: 19px; color: var(--text-2); line-height: 1.4; }
+.s6 .term { margin-top: 28px; border: 1px solid var(--hair-2); background: #000; padding: 22px 24px; font-family: var(--mono); font-size: 17px; line-height: 1.75; color: var(--text-2); }
+.s6 .term .c { color: var(--text-3); }
+.s6 .term .f { color: var(--blue); }
+.s6 .term .a { color: var(--accent); }
+
+/* 7 — close */
+.s7 h2 { font-size: 112px; width: 1180px; margin-top: 26px; }
+.s7 .aud { position: absolute; left: 0; top: 352px; width: 1180px; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--hair-2); }
+.s7 .aud div { padding: 28px 36px 0 0; }
+.s7 .aud div + div { border-left: 1px solid var(--hair-2); padding-left: 36px; }
+.s7 .aud h3 { font-family: var(--mono); font-weight: 500; font-size: 17px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+.s7 .aud p { font-size: 22px; line-height: 1.5; color: var(--text-2); margin-top: 14px; }
+.s7 .next { position: absolute; left: 0; bottom: 0; width: 1180px; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.s7 .next h4 { font-family: var(--mono); font-weight: 400; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-3); }
+.s7 .next p { font-size: 21px; line-height: 1.5; color: var(--text-2); margin-top: 10px; }
+.s7 .cta { position: absolute; right: 0; top: 0; bottom: 0; width: 520px; border-left: 1px solid var(--hair-2); padding-left: 64px; display: flex; flex-direction: column; justify-content: center; }
+.s7 .qr { width: 300px; height: 300px; padding: 22px; background: var(--text-1); }
+.s7 .qr img { width: 100%; height: 100%; display: block; }
+.s7 .url { font-family: var(--display); font-size: 84px; margin-top: 40px; line-height: 1; }
+.s7 .url em { font-style: italic; color: var(--accent); }
+.s7 .repo { font-family: var(--mono); font-size: 19px; color: var(--text-2); margin-top: 20px; }
+.s7 .team { font-family: var(--mono); font-size: 16px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-3); margin-top: 36px; }
+.s7 .team b { color: var(--text-1); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<!-- 1 · Title -->
+<section class="slide s1">
+  <div class="bg"></div><div class="shade"></div>
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>NASA Space Apps Challenge 2026<span class="sep">/</span>01 — 07</span></div>
+  <div class="reticle"></div>
+  <div class="reticle-label">Barnard's Star<span>10.4″ / yr · SPHEREx all-sky</span></div>
+  <div class="title">
+    <div class="micro">Challenge · <span class="n">Planet X and SPHEREx</span></div>
+    <h1 class="display" style="margin-top:34px">Planet X<span class="x">×</span>SPHEREx</h1>
+    <div class="tag">Watch the infrared sky move.</div>
+    <p class="lead">A public time machine for NASA's SPHEREx all-sky survey. Name a star or click anywhere on the sky, and watch that patch change across every visit, with spectra and measurements one click away.</p>
+  </div>
+  <div class="links">
+    <div><div class="k">Live</div><div class="v a">seekin.space</div></div>
+    <div><div class="k">Code</div><div class="v">github.com/zabojeb/planet-x-spherex</div></div>
+    <div style="flex:.55"><div class="k">Team</div><div class="v">NUPASA</div></div>
+  </div>
+  <div class="bar bottom"><span>0.75–5 <span style="text-transform:none">µm</span> · 102 bands · 2025 → 2026</span><span>seekin.space</span></div>
+</section>
+
+<!-- 2 · Opportunity -->
+<section class="slide s2">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>The opportunity<span class="sep">/</span>02 — 07</span></div>
+  <div class="content">
+    <div class="micro"><span class="n">01</span> — Why this matters</div>
+    <h2 class="display">SPHEREx photographs the entire sky every six months. Until now, nobody could <em>watch it change.</em></h2>
+    <div class="stats">
+      <div><div class="big">102</div><p>colours, 0.75–5 µm, one spectrum for every point on the sky</p></div>
+      <div><div class="big">6<small>mo</small></div><p>between all-sky visits since May 2025, so moving and changing objects pile up</p></div>
+      <div><div class="big">1.6<small>M</small></div><p>Level 2 images of 64 MB each, sitting in NASA's open cloud bucket</p></div>
+      <div class="zero"><div class="big">0</div><p>public tools that played them as a time series before this weekend</p></div>
+    </div>
+    <div class="row">
+      <div><div class="yr">1930 → 2017</div><p>Pluto was found by <b>blinking</b> two photographic plates. On WISE data, Backyard Worlds volunteers blinking images in WiseView found <b>hundreds of brown dwarfs</b>. Blinking works, if someone builds the comparator.</p></div>
+      <div><div class="yr">The obstacle</div><p>SPHEREx images are big multi-extension files, and IRSA's cutout service answered <b>503s and ~95 s per cutout</b> during the hackathon. A usable tool has to fetch, align and measure on its own, in seconds.</p></div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>Data: NASA / IRSA SPHEREx DR1 + QR3</span><span>seekin.space</span></div>
+</section>
+
+<!-- 3 · The tool -->
+<section class="slide s3">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>The tool<span class="sep">/</span>03 — 07</span></div>
+  <div class="content">
+    <div class="left">
+      <div class="micro"><span class="n">02</span> — What it does</div>
+      <h2 class="display">Any point in the sky becomes a <em>movie.</em></h2>
+      <ol>
+        <li><span><b>Search</b> 4,500 named objects, type RA/Dec, or click the all-sky map</span></li>
+        <li><span><b>Every SPHEREx visit</b>, aligned north-up and co-added per detector</span></li>
+        <li><span><b>Blink, difference, stack, RGB</b>, single exposures, a 3D time cube</span></li>
+        <li><span><b>Gaia, CatWISE, 2MASS</b> and known asteroids moved to each visit's date</span></li>
+        <li><span><b>Every view is a link</b>, shareable and embeddable</span></li>
+      </ol>
+    </div>
+    <div class="right">
+      <div class="shot"><img src="img/cube-ui.jpg" alt="Time cube of Barnard's Star in the web app"></div>
+      <div class="cap"><b>Barnard's Star · time cube</b> · Aug 2025 → Aug 2026 · the star's track climbs through three visits</div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>Live at seekin.space · no install, no account</span><span>seekin.space</span></div>
+</section>
+
+<!-- 4 · How it works -->
+<section class="slide s4">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>Under the hood<span class="sep">/</span>04 — 07</span></div>
+  <div class="content">
+    <div class="micro"><span class="n">03</span> — How it works</div>
+    <h2 class="display">Only the pixels that matter, straight from NASA's <em>open bucket.</em></h2>
+    <div class="pipe">
+      <div class="step"><div class="n">01</div><h3>Find</h3><p>Our own index of all 1.6 M DR1 + QR3 files; IRSA TAP and SIA as fallbacks</p><div class="m">~90 ms</div></div>
+      <div class="step"><div class="n">02</div><h3>Read</h3><p>HTTP range requests to the public S3 copy, bit-identical to astropy</p><div class="m">2 of 64 MB</div></div>
+      <div class="step"><div class="n">03</div><h3>Align</h3><p>Common north-up grid, visits, per-detector co-adds with outlier and flag rejection</p><div class="m">6 detectors</div></div>
+      <div class="step"><div class="n">04</div><h3>Measure</h3><p>Forced PSF photometry with each file's own PSF and per-pixel wavelengths</p><div class="m">102 bands</div></div>
+      <div class="step"><div class="n">05</div><h3>Analyse</h3><p>Spectra, classification, motion, periods, catalogues matched at the right epoch</p><div class="m">one click</div></div>
+      <div class="step"><div class="n">06</div><h3>Serve</h3><p>Web app, HTTP API, and an MCP server for AI agents</p><div class="m">30 MCP tools</div></div>
+    </div>
+    <div class="strip">
+      <div><div class="v">~5 s</div><div class="k">358 exposures of Barnard's Star, cached</div></div>
+      <div><div class="v">13 s</div><div class="k">a field nobody asked for before, 214 exposures</div></div>
+      <div><div class="v">334</div><div class="k">automated tests, backend and web</div></div>
+      <div><div class="v">63</div><div class="k">architecture decision records in the repo</div></div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>Python · astropy · photutils · FastAPI · React · TypeScript · Aladin Lite · MCP</span><span>seekin.space</span></div>
+</section>
+
+<!-- 5 · Validation -->
+<section class="slide s5">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>Science<span class="sep">/</span>05 — 07</span></div>
+  <div class="content">
+    <div class="micro"><span class="n">04</span> — Validated on all five challenge targets</div>
+    <h2 class="display">It measures what it <em>shows.</em></h2>
+    <div class="tbl">
+      <div class="r"><div class="t">Barnard's Star<span>Fastest-moving star</span></div><p>Positions match its Gaia proper motion to <span class="y">&lt; 0.6″</span>; <b>4.4′</b> of motion since 2MASS in 1999</p></div>
+      <div class="r"><div class="t">ε Indi B<span>Brown dwarf binary</span></div><p>Classified a <b>T dwarf</b> from deep 3.3 µm methane; moves <span class="y">4.4″/yr</span> vs 4.7″/yr from Gaia</p></div>
+      <div class="r"><div class="t">WISE 0855−0714<span>Coldest known brown dwarf</span></div><p>Seen <b>only at 3.8–5 µm</b>, as a ~285 K object should be, despite a star 8″ away</p></div>
+      <div class="r"><div class="t">R Draconis<span>Mira variable</span></div><p>Period <span class="y">236–247 d</span> against ~245 d in the literature</p></div>
+      <div class="r"><div class="t">RW Aurigae<span>Young T Tauri star</span></div><p>Faded about <b>2×</b> at 4–5 µm over one year</p></div>
+    </div>
+    <p class="foot">Flux scale agrees with 2MASS to 0–3 %. Saturated stars get relative photometry, and the app says so.</p>
+    <div class="charts">
+      <div class="shot"><img src="img/spectrum.jpg" alt="Spectrum of epsilon Indi B with water, methane and CO bands"></div>
+      <div class="cap"><b><span style="text-transform:none">ε</span> Indi B</b> · 102-band spectrum · H₂O, CH₄, CO features found automatically</div>
+      <div class="shot"><img src="img/lightcurve.jpg" alt="Light curve of R Draconis"></div>
+      <div class="cap"><b>R Draconis</b> · 2,452 exposures · Apr 2025 → Oct 2026</div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>Methods and full validation report in the repository</span><span>seekin.space</span></div>
+</section>
+
+<!-- 6 · Discovery -->
+<section class="slide s6">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>Discovery<span class="sep">/</span>06 — 07</span></div>
+  <div class="content">
+    <div class="micro"><span class="n">05</span> — Beyond blinking</div>
+    <h2 class="display">Built to <em>find</em> things, not just show them.</h2>
+    <div class="cols">
+      <div class="col">
+        <h3>Comets &amp; asteroids</h3>
+        <p>Sequences that move with a comet keep it centred while stars trail. Coma, tail and CO₂-band tests score how comet-like it is.</p>
+        <div class="kv">
+          <div><span class="v a">99.9</span><span class="k">3I/ATLAS, interstellar comet, CO₂ at 71σ</span></div>
+          <div><span class="v">100</span><span class="k">C/2025 A6 Lemmon, tail pointing away from the Sun</span></div>
+          <div><span class="v">≤ 1</span><span class="k">asteroids 433 Eros and 16 Psyche: no false alarm</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>Whole-field search</h3>
+        <p>Every field is scanned for movers, tracklets, variables and red, cold brown-dwarf candidates, ranked by a real/bogus classifier.</p>
+        <div class="kv">
+          <div><span class="v">26 yr</span><span class="k">baseline with 2MASS, AllWISE and NEOWISE on the same grid</span></div>
+          <div><span class="v">ADES</span><span class="k">export, the Minor Planet Center's format</span></div>
+          <div><span class="v">IRSA</span><span class="k">MOST finds every exposure of a solar-system object</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>AI agents</h3>
+        <p>An MCP server gives assistants like Claude the same 30 tools. In a test run, an agent picked out ε Indi B as the top mover in its field on its own.</p>
+        <div class="term">
+          <div><span class="c">agent →</span> <span class="f">resolve_target</span>("eps Indi B")</div>
+          <div><span class="c">agent →</span> <span class="f">build_sequence</span>(fov=16′)</div>
+          <div><span class="c">agent →</span> <span class="f">analyze_field</span>()</div>
+          <div><span class="c">result ←</span> <span class="a">top mover in the field · ε Indi B</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>Candidates, not yet confirmed discoveries</span><span>seekin.space/mcp</span></div>
+</section>
+
+<!-- 7 · Close -->
+<section class="slide s7">
+  <div class="frame"><i></i><i></i><i></i><i></i></div>
+  <div class="bar top"><span><span class="dot"></span><b>Planet X × SPHEREx</b></span><span>Try it<span class="sep">/</span>07 — 07</span></div>
+  <div class="content">
+    <div class="micro"><span class="n">06</span> — For everyone</div>
+    <h2 class="display">A WiseView for SPHEREx, open to <em>anyone</em> with a browser.</h2>
+    <div class="aud">
+      <div><h3>Explore</h3><p>Plain-language hints, a guided tour of the five targets and a find-it-yourself game for newcomers.</p></div>
+      <div><h3>Research</h3><p>Fluxes with errors, flags, χ² and wavelengths; FITS, CSV, VOTable and ADES exports.</p></div>
+      <div><h3>Agents</h3><p>An MCP server at seekin.space/mcp, so an AI assistant can run discovery loops itself.</p></div>
+    </div>
+    <div class="next">
+      <div><h4>Where it stands</h4><p>No confirmed discovery yet, only candidates. Most fields have 3–4 visits so far, and new releases appear automatically.</p></div>
+      <div><h4>Next</h4><p>Train the real/bogus model on volunteer votes, alert people when a release covers their field, and find fast comets from a single pass.</p></div>
+    </div>
+    <div class="cta">
+      <div class="qr"><img src="img/qr.svg" alt="QR code for seekin.space"></div>
+      <div class="url">seekin<em>.space</em></div>
+      <div class="repo">github.com/zabojeb/planet-x-spherex</div>
+      <div class="team">Team <b>NUPASA</b> · NASA Space Apps 2026</div>
+    </div>
+  </div>
+  <div class="bar bottom"><span>This publication makes use of data products from SPHEREx (JPL / Caltech, NASA)</span><span>seekin.space</span></div>
+</section>
+
+</body>
+</html>

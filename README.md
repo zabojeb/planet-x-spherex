@@ -2,6 +2,8 @@
 
 **NASA Space Apps Challenge 2026 — [Planet X and SPHEREx](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/)**
 
+**Live:** https://seekin.space · **Presentation:** [docs/presentation.pdf](docs/presentation.pdf)
+
 A public web tool for watching the infrared sky change. Enter an object name or a position (RA/Dec) and get a short "movie" of that patch of sky built from NASA SPHEREx images, so anyone can spot things that move (nearby stars, brown dwarfs, asteroids, comets) or change brightness (variable stars), and see their infrared spectrum.
 
 > **Status, 2026-11-14 (hackathon day 1).** The data pipeline works on our development server: for a sky position it finds every SPHEREx image, reads cutouts straight from NASA's public S3 bucket, aligns them, groups them into epochs, co-adds each detector and measures the target in every exposure. The web viewer is being built. MCP access for AI agents, ML tools and release monitoring come next.
