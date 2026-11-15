@@ -325,6 +325,96 @@ on a grid centred on the object at its own time (ADR-0024). Its `meta.json` adds
 `moving` block; `target_px` and the track sit on the central pixel. Stars trail; catalog overlays and archival
 epochs do not apply.
 
+## Comets, asteroids and unknown movers (ADR-0057)
+
+"Different background, same comet": a co-moving sequence built with `"static_sky": true` also subtracts the sky
+behind the object, using SPHEREx's own images of the same patch at the same detector and wavelength from times
+when the object was elsewhere. The analyses below are jobs with the field-analysis lifecycle (next section):
+kinds `c` (comet), `a` (asteroid), `u` (unknown movers), polled with `GET /api/field/{id}`.
+
+### Static sky: `POST /api/sequences` with `static_sky` · `POST /api/sequences/{id}/static-sky`
+
+`static_sky: true` in a sequence request (422 without `object_name` or `naif_id`) builds the clean version on the
+build queue (deduplicated, cancellable; a separate sequence id, because the key includes it).
+`POST /api/sequences/{id}/static-sky` with `{"force": false}` submits the clean twin of an existing co-moving
+sequence and answers `{"sequence": <clean id>, "source": <id>, "status", "job"}` (`status: "done"` and
+`sequence = id` when it already has clean arrays); poll `GET /api/sequences/{sequence}` as for any build. 404 for
+a fixed-position sequence; 429 when the queue is full.
+
+The clean sequence's `meta.json` adds:
+
+- `arrays.clean` (`clean.f32`, float32 `[epochs, 6, n, n]`, MJy/sr), `arrays.clean_coverage` (`clean_coverage.u16`)
+  and `arrays.clean_exposures` (`clean_exposures.f16`, `[frames, n, n]`, same order as `exposures`; `null` when
+  single exposures are not stored). NaN = masked star residual or no template.
+- per exposure: `ss_method` (`median | interp | single | nearest | none`), `ss_n` (templates combined),
+  `ss_candidates`, `ss_dl` (wavelength offsets used, in resolution elements), `ss_offset`, `ss_eps` (star
+  residual fraction), `ss_masked`, `ss_p99_before`, `ss_p99_after` (99th percentile of |pixel| / noise).
+- `static_sky`: version, method, object type, exclusion radius, tolerances, footprint clusters and search sources
+  (`tap`, `most`, `failed`), `failed_searches`, exposures with a template, counts per method, templates read,
+  medians of ε / masked fraction / p99 before and after, errors (first 20), network bytes and seconds per phase.
+
+### `GET /api/sequences/{id}/clean.bin` · `clean_coverage.bin` · `clean_exposures.bin?epoch=&band=`
+
+The clean co-adds through the generic array route (same headers and caching as `coadds.bin`), and the clean
+single exposures of one epoch and detector, float32 `[k, n, n]`, with `X-Exposure-Indices`. 404 (`this sequence
+has no static-sky subtraction`) on a sequence without them.
+
+### `GET /api/sequences/{id}/clean-summary?epoch=`
+
+What a client needs for a clean view: `{sequence, object, static_sky, arrays, epochs: [{epoch, band, noise_clean,
+noise_plain, noise_ratio, centre_clean, centre_snr}]}` (robust noise beyond 0.6 of the half-width, mean of the
+central 3 × 3 px). 404 without static sky.
+
+### `POST /api/sequences/{id}/comet`
+
+Body `{"rho_km": [1e4, 2e4, 5e4, 1e5], "use_clean": true, "force": false}` (1–8 radii, ≤ 5·10⁶ km; 422 otherwise).
+Needs a co-moving sequence with single exposures (the job fails with `NotFound` otherwise). Result:
+
+```json
+{"kind": "comet", "version": 1, "sequence": "...", "object": "ATLAS (C/2025 N1)", "options": {...},
+ "static_sky": true, "image_source": "clean_exposures (static sky subtracted)", "geometry_source": ["most"],
+ "solar_spectrum": "CALSPEC sun_mod_001", "km_per_arcsec_per_au": 725.27, "features": [...],
+ "spectrum": [{"index", "epoch", "band", "mjd", "wl", "dwl", "r_au", "delta_au", "phase_deg",
+               "ap": [{"rho_km", "theta_arcsec", "psf_limited", "flux_mjy", "err_mjy", "masked_frac"}]}],
+ "afrho_exposures": [{"index", "band", "wl", "rho_km", "afrho_cm", "err_cm", "a0frho_cm", "a0err_cm"}],
+ "afrho_summary": {"20000": {"afrho_cm": 204.0, "err_cm": 3.1, "n": 31}},
+ "epochs": [{"epoch": 0, "date_min", "date_max", "r_au": 3.22, "delta_au": 2.71, "phase_deg": 17.1,
+             "afrho": {"20000": {"D1": {"afrho_cm", "err_cm", "a0frho_cm", "a0err_cm", "n"}}},
+             "bands": {"20000": [{"id": "co2", "kind": "emission", "value": 1.1e14, "err": 2e12, "snr": 55,
+                                  "detected": true, "unit": "W m-2", "value_w_m2", "err_w_m2",
+                                  "q_proxy": 8.7e26, "q_err": 1.6e25, "q_upper_3sigma": null, "molecule": "CO2"},
+                                 {"id": "h2o_ice_3.0", "kind": "absorption", "value": 0.75, "err": 0.07, ...}]},
+             "dust_colour": {"slope_pct_per_100nm", "err", "rho_km", "n"},
+             "band_images": {"co2": {"n_window", "n_side", "profile": {"r_px", "sb", "err", "npix"}}}}],
+ "profiles": [{"epoch", "band", "source", "fwhm_px", "km_per_px", "profile", "slope": {"slope", "err"}}],
+ "activity_trend": {"rho_km", "k", "err", "points", "r_au", "a0frho_cm"}, "caveats": [...]}
+```
+
+`value` is the integrated band flux in mJy·Hz for emission bands (`value_w_m2` in W m⁻²) and the fractional
+depth for absorption bands; `q_proxy` / `q_upper_3sigma` are molecules s⁻¹. See docs/methods.md.
+
+### `POST /api/sequences/{id}/asteroid`
+
+Body `{"min_period_h": 1.5, "max_period_h": null, "use_clean": true, "force": false}`. Result: `{kind:
+"asteroid", flux_source, geometry_source, solar_spectrum, n_points, points: [{index, epoch, band, wl, t, mag, err,
+alpha}], period: {best_period_h, period_err_h, periodogram_peak_h, nterms, rotation: {rule, maxima_per_cycle,
+odd_harmonics_p, double_peak_confirmed}, aliases_h, peaks_h, epochs: [{epoch, n, used, span_days,
+best_period_h, period_err_h, amplitude_mag, chi2_red}], folded, periodogram, grid}, spectra: [{epoch, n,
+phase_deg, r_au, delta_au, wl, reflectance, err, binned, features: {thermal, slope, band_1um, band_2um,
+band_3um}, taxonomy}], taxonomy: {complex, rule, hydrated}, taxonomy_epoch, taxonomy_rules, caveats}`. `t` is the
+light-time corrected MJD and `mag` the reduced reflectance magnitude.
+
+### `POST /api/sequences/{id}/unknown-movers`
+
+Body `{"vmag_lim": 21.0, "field_job": null, "force": false}` on a fixed-position sequence (a co-moving one fails:
+its stars move). `field_job` reuses a finished `f` job of the same sequence (422 for another sequence's or kind's
+job, 404 if not finished). Result: `{kind: "unknown_movers", source, identification, counts: {tracklets, known,
+unidentified, unverified, strong}, unidentified: [{id, trk_sub, status, tier, epoch, n, mjd_first, mjd_last,
+span_hours, ra, dec, ecliptic_latitude_deg, rate_arcsec_per_hr, pa_deg, angle_from_ecliptic_deg, retrograde,
+rms_arcsec, mean_snr, mean_rb, partner_fraction, bands, population_hint, nearest_known}], others: [...],
+candidates: {tracklets}, ades, caveats}`. `GET /api/field/{id}/ades.psv` exports the strong ones
+(`?all=true`: all), station 288, "follow-up data, not a submission".
+
 ## Spectral analysis
 
 All spectral endpoints work on photometry records shaped like `meta.photometry` (`wl`, `band`, `flux_mjy`,
@@ -439,7 +529,8 @@ Jobs below share one lifecycle. `POST` starts or joins the job and returns the j
 200 with the result (immutable, `ETag "<id>"`), 202 with the job while it runs (every poll is a heartbeat),
 500 if it failed, 410 if cancelled (POST again). `DELETE /api/field/{id}` withdraws this client (200 job / 204);
 a job nobody polls for 60 s is cancelled. Send `X-Client-Id`. Job ids are `<sequence>-<kind><hash>` with kind
-`f` (field analysis), `k` (known objects), `s` (stack search). 404 for an unknown or unfinished sequence.
+`f` (field analysis), `k` (known objects), `s` (stack search), and `c` / `a` / `u` (comet, asteroid, unknown
+movers; previous section). 404 for an unknown or unfinished sequence.
 
 ### `POST /api/sequences/{id}/field`
 

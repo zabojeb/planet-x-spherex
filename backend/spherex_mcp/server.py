@@ -28,8 +28,9 @@ Typical discovery loop: pick fields (list_presets, resolve_target, or your own R
 build_sequence + poll sequence_status -> describe_sequence -> get_blink_strip / get_image(mode="difference")
 -> analyze_field + poll job_result -> verify each candidate with analyze_point, get_image, catalog_cone and
 known_objects -> report with evidence and a confidence level. Pixels are 6.2"; motions below ~1.2"/yr are not
-significant with 3-4 visits. Saturated bright stars only have relative photometry. Be economical: builds take
-20-60 s and are capped per hour; reuse sequences you already built."""
+significant with 3-4 visits. Saturated bright stars only have relative photometry. Comets and asteroids:
+moving_object_search -> build_object_sequence (static_sky) -> clean_stack / comet_analysis / asteroid_lightcurve.
+Be economical: builds take 20-60 s and are capped per hour; reuse sequences you already built."""
 
 
 def _err(fn):
@@ -156,8 +157,9 @@ def build_server() -> _Server:
     @mcp.tool()
     @_err
     async def job_result(job_id: str, limit: int = 12) -> dict:
-        """Status of an analysis job (analyze_field, known_objects, track_and_stack_search); when done, the
-        candidate lists by category (movers, faint_movers, tracklets, variables, red, anomalies) with evidence."""
+        """Status of an analysis job (analyze_field, known_objects, track_and_stack_search, comet_analysis,
+        asteroid_lightcurve, unknown_movers); when done, a compact summary: candidate lists with evidence for
+        field jobs, Afrho / gas bands / activity for comets, period / taxonomy for asteroids."""
         return await t.job_result(job_id, limit)
 
     @mcp.tool()
@@ -198,6 +200,53 @@ def build_server() -> _Server:
         """2MASS (2000), AllWISE (2010) and NEOWISE (2014-2024) images on the same grid: a 26-year baseline for
         slow movers. Starts the build on first call (1-2 min); call again until status is "done"."""
         return await t.archival_epochs(sequence_id)
+
+    # ------------------------------------------------------------ comets and asteroids (ADR-0057)
+    @mcp.tool()
+    @_err
+    async def build_object_sequence(name: str, fov_arcmin: float = 8.0, static_sky: bool = True,
+                                    date_min: str | None = None, date_max: str | None = None) -> dict:
+        """Build a co-moving sequence of a known asteroid or comet ("3I/ATLAS", "433 Eros"): every exposure is
+        centred on the object, so it stays still while stars stream past. static_sky=True also subtracts the
+        sky behind the track using other SPHEREx visits. date_min/date_max (YYYY-MM-DD) narrow the window. Poll
+        sequence_status; then comet_analysis / asteroid_lightcurve / clean_stack."""
+        return await t.build_object_sequence(name, fov_arcmin, static_sky, date_min, date_max)
+
+    @mcp.tool()
+    @_err
+    async def clean_stack(sequence_id: str, epoch: int = -1, band: str = "ALL", stretch: str = "asinh") -> list:
+        """The static-sky subtracted co-add of one epoch of a co-moving sequence: the comet or asteroid on an
+        empty background (D5 shows a comet's CO2 coma). Reports the noise and object S/N clean vs plain. On a
+        sequence without static sky it starts that build and returns the new sequence id to poll."""
+        info, png = await t.clean_stack(sequence_id, epoch, band, stretch)
+        return [json.dumps(info)] + ([Image(data=png, format="png")] if png else [])
+
+    @mcp.tool()
+    @_err
+    async def comet_analysis(sequence_id: str, rho_km: list[float] | None = None) -> dict:
+        """Start a comet analysis of a co-moving sequence: photometry in apertures of fixed size in km, coma
+        radial profile, Afrho and A(0)frho, CO2 4.26 / CO 4.67 / H2O 2.7 um gas bands with significance and
+        production-rate proxies (or 3-sigma upper limits), water-ice 1.5/2/3 um depths, dust colour, activity vs
+        heliocentric distance. Returns job_id; poll job_result."""
+        return await t.comet_analysis(sequence_id, rho_km)
+
+    @mcp.tool()
+    @_err
+    async def asteroid_lightcurve(sequence_id: str, min_period_h: float = 1.5,
+                                  max_period_h: float | None = None) -> dict:
+        """Start an asteroid analysis of a co-moving sequence: light-time and distance corrected reduced
+        magnitudes, a multi-detector Fourier periodogram (rotation period with error, double-peak test),
+        reflectance spectrum, 1/2/3 um band depths, spectral slope, thermal tail and a rough S/C/X/D/V
+        taxonomy with caveats. Returns job_id; poll job_result."""
+        return await t.asteroid_lightcurve(sequence_id, min_period_h, max_period_h)
+
+    @mcp.tool()
+    @_err
+    async def unknown_movers(sequence_id: str, vmag_lim: float = 21.0, field_job: str | None = None) -> dict:
+        """Start a search for movers no known object explains in a fixed-position sequence: tracklets with
+        rate, PA, motion vs the ecliptic, detector-pair confirmation, real/bogus score and a population hint.
+        field_job reuses a finished analyze_field job. Export with export_report(fmt="ades", job_id=...)."""
+        return await t.unknown_movers(sequence_id, vmag_lim, field_job)
 
     @mcp.tool()
     @_err

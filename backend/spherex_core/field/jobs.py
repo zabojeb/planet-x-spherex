@@ -33,7 +33,8 @@ MAX_CONCURRENT = 2
 MAX_POINT_CONCURRENT = 6
 
 
-KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis"}
+KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis",
+         "c": "comet analysis", "a": "asteroid analysis", "u": "unknown movers"}  # c/a/u: spherex_core.solar
 
 
 def options_key(opts: FieldOptions) -> str:

@@ -112,11 +112,14 @@ backend/
     photometry.py          forced aperture photometry
     catalogs/              Gaia DR3, CatWISE2020, 2MASS, SIMBAD behind one cone() function
     pipeline/              sequence parameters, per-exposure work, assembly, result format, background jobs
+    solar/                 co-moving science (ADR-0057): static-sky subtraction (build step), footprints and
+                           the MOST fixed-point search, SPHEREx-centric geometry, solar spectrum, comet,
+                           asteroid and unknown-mover analyses (field jobs), their use cases (service.py)
     services.py            facade called by every adapter (HTTP, MCP, CLI)
   spherex_api/             HTTP adapter
     app.py                 FastAPI app, middleware, static web files
     schemas.py             request and response models
-    routes/                health, targets, sequences, catalogs
+    routes/                health, targets, sequences, catalogs, solar (static sky, comet, asteroid, movers)
   tests/
 ```
 

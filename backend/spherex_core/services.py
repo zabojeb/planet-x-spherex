@@ -594,3 +594,8 @@ async def point_analysis_submit(seq_id: str, ra: float, dec: float, pmra: float 
         return analyze_point(ctx, req, progress, check)
 
     return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)
+
+
+# ---------------------------------------------------------------- solar system (ADR-0057): spherex_core.solar.service
+from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_submit,  # noqa: E402, F401
+                            static_sky_submit, unknown_movers_submit)
