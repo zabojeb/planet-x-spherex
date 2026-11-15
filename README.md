@@ -1,4 +1,4 @@
-# Planet X × SPHEREx
+# Seek In Space
 
 **NASA Space Apps Challenge 2026 — [Planet X and SPHEREx](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/)**
 

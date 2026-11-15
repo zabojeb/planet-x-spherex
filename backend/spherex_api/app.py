@@ -47,7 +47,7 @@ class WebFiles(StaticFiles):
 
 def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     setup_logging()
-    app = FastAPI(title="Planet X × SPHEREx API", version=__version__,
+    app = FastAPI(title="Seek In Space API", version=__version__,
                   description="Blink SPHEREx infrared images over time: search, aligned epoch co-adds, spectra.")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(GZipMiddleware, minimum_size=2048)

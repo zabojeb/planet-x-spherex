@@ -112,7 +112,7 @@ def _client() -> aiohttp.ClientSession:
         _session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=settings.hips_timeout_s, sock_connect=8),
             connector=aiohttp.TCPConnector(limit=64, limit_per_host=32, ttl_dns_cache=600),
-            headers={"User-Agent": "planet-x-spherex-hips-proxy"},
+            headers={"User-Agent": "seek-in-space-hips-proxy"},
         )
         _session_loop = loop
     return _session

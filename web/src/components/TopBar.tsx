@@ -10,8 +10,8 @@ const FOVS = [2, 3, 4, 6, 8, 10, 12, 16, 20, 30];
 
 export function Wordmark() {
   return (
-    <a className="wordmark" href="./" aria-label="Planet X × SPHEREx home">
-      Planet X <span className="wordmark-x">×</span> SPHEREx
+    <a className="wordmark" href="./" aria-label="Seek In Space home">
+      Seek <span className="wordmark-x">In</span> Space
     </a>
   );
 }
@@ -125,7 +125,7 @@ export function SharePanel({ link, embedLink, exportUrl }: { link: () => string;
     }
     setTimeout(() => setCopied(null), 1600);
   };
-  const snippet = `<iframe src="${embedLink()}" width="560" height="640" style="border:0" loading="lazy" title="SPHEREx viewer"></iframe>`;
+  const snippet = `<iframe src="${embedLink()}" width="560" height="640" style="border:0" loading="lazy" title="Seek In Space"></iframe>`;
   return (
     <div className="menu">
       <div className="micro menu-title">Share</div>

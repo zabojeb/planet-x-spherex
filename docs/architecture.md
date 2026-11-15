@@ -1,6 +1,6 @@
 # Architecture
 
-Planet X × SPHEREx is a modular monolith ([ADR-0004](adr/0004-modular-monolith.md)): one Python domain library that knows SPHEREx, thin adapters that expose it (HTTP today, MCP next, a CLI for operators), and a static web client. This page shows how the pieces connect and how one request flows through them.
+Seek In Space is a modular monolith ([ADR-0004](adr/0004-modular-monolith.md)): one Python domain library that knows SPHEREx, thin adapters that expose it (HTTP today, MCP next, a CLI for operators), and a static web client. This page shows how the pieces connect and how one request flows through them.
 
 ## Components and data flow
 

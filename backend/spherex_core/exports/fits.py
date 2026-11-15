@@ -20,7 +20,7 @@ ACKNOWLEDGEMENT = ("This publication makes use of data products from SPHEREx, a 
 def _provenance(h: fits.Header, meta: dict) -> None:
     t = meta["target"]
     h["TELESCOP"] = "SPHEREx"
-    h["ORIGIN"] = ("Planet X x SPHEREx", "built by spherex-backend " + __version__)
+    h["ORIGIN"] = ("Seek In Space", "built by spherex-backend " + __version__)
     h["SEQID"] = (meta["id"], "sequence id")
     h["ALGOVER"] = (meta["version"], "pipeline algorithm version")
     h["CREATED"] = meta.get("created", "")
