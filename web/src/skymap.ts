@@ -5,6 +5,13 @@
  * SkyView owns the camera while a field is on screen and pushes it here every frame; zoomed out, the map
  * owns drag and pinch. The wheel always goes to SkyView (`wheelTriggered` replaces Aladin's own zoom), so
  * one gesture can cross from the field to the map and back without changing hands mid-way.
+ *
+ * The map is always north-up, like the field drawn on it. Aladin drags by rotating the sphere from the last
+ * pointer position to the new one, which rolls the view a little with every stroke (a few drags at map scale
+ * leave north tens of degrees off "up"), and it turns the view on purpose under a two-finger twist. A rolled
+ * map put the field's neighbouring sky, and every pan after zooming back in, on a tilted axis. So drags and
+ * pinches on the map are handled here (`gesture`): the grabbed sky point stays under the pointer with north
+ * up. Aladin still sees presses and releases, for its clicks, catalogue popups and places.
  */
 
 /** Camera of the map: view centre (ICRS degrees) and the width of the view in degrees. */
@@ -25,8 +32,10 @@ export interface SkyMap {
   pix2world(x: number, y: number): [number, number] | null;
   /** Zoom by `factor` (> 1 zooms out) keeping the sky under (mx, my) where it is. */
   zoomAt(factor: number, mx: number, my: number): void;
-  /** Drag the sky by (dx, dy) screen pixels. */
-  panBy(dx: number, dy: number): void;
+  /** Drag or pinch with these pointers (screen points; none ends the gesture): the sky point grabbed under
+   *  their centroid stays under it, two pointers also zoom with their spread, north stays up. A change in the
+   *  number of pointers grabs again. */
+  gesture(pts: [number, number][]): void;
   /** Animate to a camera along a great circle, zooming out on the way when the target is off screen (the
    *  Google Earth hop); the duration follows the distance unless given. Returns a cancel function. */
   flyTo(to: MapCamera, ms?: number, done?: () => void): () => void;
@@ -35,8 +44,6 @@ export interface SkyMap {
   /** Show the HiPS cube frame closest to a detector ("D1"…"D6"; anything else: the default frame). */
   setBand(band: string): void;
   on(handlers: MapHandlers): void;
-  /** Equatorial coordinate grid on or off. */
-  setGrid(on: boolean): void;
   /** Lines drawn over the sky (galactic plane, ecliptic ...), replacing the previous set. */
   setLines(lines: MapLine[]): void;
   /** Outlines (SPHEREx exposure footprints ...), replacing the previous set. */
@@ -206,12 +213,13 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
   aladin.setFoVRange(MAP_MIN_FOV, MAP_MAX_FOV);
 
   let handlers: MapHandlers = {};
+  let moved = false; // the last press on the map turned into a drag (see gesture): its release is no click
   aladin.on("wheelTriggered", (e: WheelEvent) => handlers.wheel?.(e));
   // a click on a drawn object (a place, a catalogue source) is that object's, not a pick of the sky under it
   let objectAt = 0;
   aladin.on("click", (e: { ra: number; dec: number; isDragging: boolean }) => {
     if (performance.now() - objectAt < 400) return;
-    handlers.click?.(e.ra, e.dec, !!e.isDragging);
+    handlers.click?.(e.ra, e.dec, !!e.isDragging || moved);
   });
   aladin.on("mouseMove", (e: { ra: number | null; dec: number | null }) => handlers.move?.(e.ra == null || e.dec == null ? null : [e.ra, e.dec]));
 
@@ -242,7 +250,33 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
     const [w, h] = aladin.getSize();
     return [w || el.clientWidth || 1, h || el.clientHeight || 1];
   };
+  /** Undo any roll (see the header): the map is north-up like the field. */
+  const upright = () => {
+    try {
+      const r = ((((Number(aladin.getRotation?.()) || 0) % 360) + 540) % 360) - 180;
+      if (Math.abs(r) > 1e-6) aladin.view?.setRotation?.(0); // aladin.setRotation refuses 0 as "not valid"
+    } catch {
+      /* no rotation in this build */
+    }
+  };
+  /** Move the view (same fov, north up) so that sky point (ra, dec) lands on screen point (mx, my). */
+  const bringTo = (ra: number, dec: number, mx: number, my: number): boolean => {
+    const [w, h] = size();
+    for (let i = 0; i < 4; i++) {
+      const q = world2pix(ra, dec);
+      if (!q) return false;
+      const dx = mx - q[0];
+      const dy = my - q[1];
+      if (Math.abs(dx) < 0.02 && Math.abs(dy) < 0.02) break;
+      // centring the point now at (w/2 - dx, h/2 - dy) shifts the view by about (dx, dy); repeat for the rest
+      const c = pix2world(w / 2 - dx, h / 2 - dy);
+      if (!c) return false;
+      aladin.gotoRaDec(c[0], c[1]);
+    }
+    return true;
+  };
   const setCamera = (c: MapCamera) => {
+    upright();
     const now = camera();
     const fov = Math.min(MAP_MAX_FOV, Math.max(MAP_MIN_FOV, c.fov));
     // a thousandth of a screen pixel is "the same" (the call comes every frame)
@@ -291,7 +325,6 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
   applyFrame();
 
   // ---- overlays (all guarded: the map stays usable if Aladin's API differs)
-  let grid = false;
   const overlay = () => {
     try {
       const ov = A.graphicOverlay({ lineWidth: 1.2 });
@@ -311,6 +344,7 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
       name: "places", shape: "circle", sourceSize: 11, color: "#ffc845",
       labelColumn: "label", displayLabel: true, labelColor: "rgba(234, 232, 227, 0.92)", labelFont: "11px monospace",
       onClick: (o: { data?: { key?: string } }) => {
+        if (moved) return;
         objectAt = performance.now();
         if (o?.data?.key) {
           placeAt = objectAt;
@@ -325,7 +359,7 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cats: Partial<Record<MapCatalog, any>> = {};
   aladin.on("objectClicked", (o: { data?: { key?: string } } | null) => {
-    if (!o) return;
+    if (!o || moved) return;
     objectAt = performance.now();
     // the catalogue's own onClick may already have reported this place
     if (o.data?.key && objectAt - placeAt > 300) {
@@ -340,6 +374,112 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
     flight = null;
   };
 
+  // ---- drag and pinch, north-up (see the header)
+  let grab: { ra: number; dec: number; n: number; d: number; fov: number; at: [number, number] } | null = null;
+  const gesture = (pts: [number, number][]) => {
+    if (!pts.length) {
+      grab = null;
+      return;
+    }
+    const cx = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+    const cy = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+    const d = pts.length > 1 ? Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) : 0;
+    if (!grab || grab.n !== pts.length) {
+      cancelFlight();
+      aladin.stopAnimation?.();
+      upright();
+      const w = pix2world(cx, cy);
+      grab = w ? { ra: w[0], dec: w[1], n: pts.length, d, fov: camera().fov, at: [cx, cy] } : null;
+      return;
+    }
+    if (grab.n > 1 && grab.d > 0 && d > 0) {
+      aladin.setFoV(Math.min(MAP_MAX_FOV, Math.max(MAP_MIN_FOV, (grab.fov * grab.d) / d)));
+    }
+    if (!bringTo(grab.ra, grab.dec, cx, cy)) {
+      // the grabbed point went round the limb: move by the pointer's step and grab again where it is now
+      const [w, h] = size();
+      const c = pix2world(w / 2 - (cx - grab.at[0]), h / 2 - (cy - grab.at[1]));
+      if (c) aladin.gotoRaDec(c[0], c[1]);
+      grab = null;
+      gesture(pts);
+      return;
+    }
+    grab.at = [cx, cy];
+  };
+  // Aladin keeps its handlers on its top canvas: capturing on the host (and on the window for the mouse, which
+  // may leave the map mid-drag) takes the moves away from it. Presses and releases still reach it.
+  const DRAG_PX = 4;
+  const local = (x: number, y: number): [number, number] => {
+    const b = el.getBoundingClientRect();
+    return [x - b.left, y - b.top];
+  };
+  /** A press became a drag: from now on Aladin must treat its release as one (no click, no popup). */
+  const dragging = () => {
+    moved = true;
+    if (aladin.view?.dragging) aladin.view.realDragging = true;
+  };
+  let press: [number, number] | null = null;
+  el.addEventListener(
+    "mousedown",
+    (e) => {
+      if (e.button !== 0) return;
+      press = local(e.clientX, e.clientY);
+      moved = false;
+      gesture([press]);
+    },
+    true,
+  );
+  const mouseMove = (e: MouseEvent) => {
+    if (!press) return;
+    if (!(e.buttons & 1)) {
+      press = null;
+      gesture([]);
+      return;
+    }
+    if (el.contains(e.target as Node)) e.stopPropagation();
+    const q = local(e.clientX, e.clientY);
+    if (!moved && Math.hypot(q[0] - press[0], q[1] - press[1]) <= DRAG_PX) return;
+    dragging();
+    gesture([q]);
+  };
+  const mouseUp = () => {
+    if (!press) return;
+    press = null;
+    gesture([]);
+  };
+  window.addEventListener("mousemove", mouseMove, true);
+  window.addEventListener("mouseup", mouseUp, true);
+  const fingers = (e: TouchEvent) => Array.from(e.touches, (t) => local(t.clientX, t.clientY));
+  let touchAt: [number, number] | null = null;
+  el.addEventListener(
+    "touchstart",
+    (e) => {
+      const pts = fingers(e);
+      if (pts.length === 1) {
+        moved = false;
+        touchAt = pts[0];
+      }
+      gesture(pts);
+    },
+    { capture: true, passive: true },
+  );
+  el.addEventListener(
+    "touchmove",
+    (e) => {
+      e.stopPropagation(); // no Aladin pan, pinch or twist
+      if (e.cancelable) e.preventDefault();
+      const pts = fingers(e);
+      if (!pts.length) return;
+      if (!moved && pts.length === 1 && touchAt && Math.hypot(pts[0][0] - touchAt[0], pts[0][1] - touchAt[1]) <= DRAG_PX) return;
+      dragging();
+      gesture(pts);
+    },
+    { capture: true, passive: false },
+  );
+  const touchEnd = (e: TouchEvent) => gesture(fingers(e)); // the fingers left grab again, or the gesture ends
+  el.addEventListener("touchend", touchEnd, true);
+  el.addEventListener("touchcancel", touchEnd, true);
+
   return {
     el,
     camera,
@@ -349,22 +489,12 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
     pix2world,
     zoomAt(factor, mx, my) {
       cancelFlight();
+      upright();
       const before = pix2world(mx, my);
-      const fov = Math.min(MAP_MAX_FOV, Math.max(MAP_MIN_FOV, camera().fov * factor));
-      aladin.setFoV(fov);
-      if (!before) return;
-      const after = world2pix(...before);
-      if (!after) return;
-      const [w, h] = size();
-      const c = pix2world(w / 2 + after[0] - mx, h / 2 + after[1] - my);
-      if (c) aladin.gotoRaDec(c[0], c[1]);
+      aladin.setFoV(Math.min(MAP_MAX_FOV, Math.max(MAP_MIN_FOV, camera().fov * factor)));
+      if (before) bringTo(before[0], before[1], mx, my);
     },
-    panBy(dx, dy) {
-      cancelFlight();
-      const [w, h] = size();
-      const c = pix2world(w / 2 - dx, h / 2 - dy);
-      if (c) aladin.gotoRaDec(c[0], c[1]);
-    },
+    gesture,
     flyTo(to, ms, done) {
       cancelFlight();
       aladin.stopAnimation?.();
@@ -407,17 +537,6 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
       handlers = h;
     },
     source: base,
-    setGrid(on) {
-      if (on === grid) return;
-      grid = on;
-      try {
-        if (typeof aladin.setCooGrid === "function") aladin.setCooGrid({ enabled: on, color: "rgb(255, 255, 255)", opacity: 0.18, labelSize: 10 });
-        else if (on) aladin.showCooGrid?.();
-        else aladin.hideCooGrid?.();
-      } catch {
-        /* no grid in this Aladin build */
-      }
-    },
     setLines(lines) {
       if (!lineOv) return;
       try {
@@ -465,6 +584,8 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
     },
     destroy() {
       cancelFlight();
+      window.removeEventListener("mousemove", mouseMove, true);
+      window.removeEventListener("mouseup", mouseUp, true);
       window.clearTimeout(frameTimer);
       handlers = {};
       const gl = el.querySelector("canvas")?.getContext("webgl2");
