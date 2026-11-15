@@ -1,6 +1,6 @@
 /** Slim vertical tool rail on the right edge; each button opens a compact panel beside it. "Go to" is there
  *  even before a field has loaded; the rest need a sequence. */
-import { Box, Compass, FlaskConical, Info, Layers, ListTree, Maximize, Minimize, Navigation, Route, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
+import { Box, Compass, FlaskConical, Info, Layers, ListTree, Maximize, Minimize, Navigation, Route, ScanSearch, Share2, SlidersHorizontal, Sparkles, Telescope } from "lucide-react";
 import type { ReactNode } from "react";
 import { Popover } from "./ui/primitives";
 
@@ -14,6 +14,8 @@ export function Rail(p: {
   layers?: ReactNode;
   /** Field analysis, known objects, Track & Stack. */
   field?: ReactNode;
+  /** Comet hunt and the comets now (ADR-0063). */
+  comets?: ReactNode;
   share?: ReactNode;
   detailsOpen: boolean;
   onDetails?: () => void;
@@ -60,6 +62,11 @@ export function Rail(p: {
       {p.field && (
         <Popover label={<ScanSearch size={16} />} title="Field analysis" align="side" width={340}>
           {p.field}
+        </Popover>
+      )}
+      {p.comets && (
+        <Popover label={<Sparkles size={16} />} title="Comet hunt" align="side" width={340}>
+          {p.comets}
         </Popover>
       )}
       {p.on3d && (

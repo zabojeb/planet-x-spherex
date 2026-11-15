@@ -1,0 +1,23 @@
+/* Comet hunt panel (ADR-0063). Amber only for the score of a comet-like candidate (the active state of the hunt). */
+.comet-panel .cand-title { gap: 6px; }
+.comet-score {
+  min-width: 22px; padding: 1px 4px; border-radius: var(--r-sm); text-align: center;
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.35; border: 1px solid var(--hair); color: var(--text-3);
+}
+.comet-score.warm { color: var(--text-1); }
+.comet-score.hot { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.comet-badge {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 0 4px; border-radius: var(--r-sm); border: 1px solid var(--hair); color: var(--text-3);
+}
+.comet-badge.new { color: var(--text-1); border-color: var(--text-3); }
+.comet-badge.known.comet { color: var(--text-1); }
+.comet-detail { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 2px; border-top: 1px solid var(--hair); }
+.comet-strip { display: flex; flex-wrap: wrap; gap: 3px; align-items: flex-end; }
+.comet-stamp { image-rendering: pixelated; border-radius: 2px; background: #000; }
+.comet-spec { display: block; }
+.comet-spec-line { fill: none; stroke: var(--text-1); stroke-width: 1; }
+.comet-spec-band { stroke: var(--hair); stroke-width: 1; }
+.comet-spec-label { fill: var(--text-3); font-family: var(--mono); font-size: 8px; }
+.comet-why { margin: 0; padding-left: 14px; font-size: 11.5px; color: var(--text-2, var(--text-1)); }
+.comet-why li { margin: 1px 0; }

@@ -27,6 +27,7 @@ from .routes import solar
 from .routes import status
 from .routes import longbaseline
 from .routes import sky
+from .routes import comets
 
 log = logging.getLogger("spherex_api.http")
 _SEQ_PATH = re.compile(r"^/api/sequences/([A-Za-z0-9]+)")
@@ -97,6 +98,7 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(archival.router)  # before sequences: its /{array}.bin catch-all would take archival.bin
     app.include_router(field.router)  # before sequences for the same reason (trackstack.bin)
     app.include_router(solar.router)  # before sequences for the same reason (clean_exposures.bin)
+    app.include_router(comets.router)
     app.include_router(sequences.router)
     app.include_router(moving.router)
     app.include_router(catalogs.router)

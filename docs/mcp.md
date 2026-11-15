@@ -48,6 +48,8 @@ Disable the endpoint inside the API with `SPHEREX_MCP=0`.
 | `moving_object_search(name)` | SPHEREx exposures of a known asteroid or comet (IRSA MOST) |
 | `archival_epochs(sequence_id)` | 2MASS, AllWISE and NEOWISE frames on the same grid: a 26-year baseline |
 | `catalog_cone(catalog, ra, dec, radius_arcmin)` | Gaia DR3, CatWISE2020, 2MASS or SIMBAD sources, with high-proper-motion ones listed |
+| `comet_search(sequence_id \| ra, dec)` → `comet_candidates(job_id)` | Movers ranked by a 0-100 comet-likeness: coma extent and tail vs field stars, CO2 / CO / H2O bands, a digest2-style orbit class, known/unidentified against JPL (comets included); fast, single-pass and slow (parallax-aware, multi-day) movers. On a co-moving sequence: the same tests on its object per visit |
+| `comet_watch()` | Comets bright now (JPL SBDB) and the watched ones with their latest SPHEREx Afrho, CO2 S/N, activity slope and outburst flags |
 | `export_report(sequence_id, fmt, job_id)` | CSV / VOTable photometry, ADES astrometry of tracklets (follow-up data), FITS link |
 
 Also a resource `spherex://overview` and a prompt `discovery_report(fields, goal)` that walks an agent through

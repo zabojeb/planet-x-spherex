@@ -668,8 +668,8 @@ def long_baseline_csv(job_id: str) -> str:
 
 
 # ---------------------------------------------------------------- solar system (ADR-0060): spherex_core.solar.service
-from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_submit,  # noqa: E402, F401
-                            static_sky_submit, unknown_movers_submit)
+from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_search_submit,  # noqa: E402, F401
+                            comet_submit, comet_watch, comet_watch_refresh, static_sky_submit, unknown_movers_submit)
 
 
 # ---------------------------------------------------------------- sky map (ADR-0061)

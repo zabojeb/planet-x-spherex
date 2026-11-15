@@ -17,6 +17,7 @@ import type {
   KnownObjects, StackSearch, VerifyResult, MotionFit,
 } from "./types";
 import { parseIndex, type ObjectIndex } from "./search";
+import type { CometSearch, CometWatch } from "./comets";
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 const POLL_VISIBLE_MS = 1000;
@@ -882,6 +883,13 @@ export async function verifyPosition(seqId: string, body: { ra: number; dec: num
 }
 
 export const adesUrl = (fieldId: string) => `${BASE}/api/field/${fieldId}/ades.psv`;
+
+/** Comet search (ADR-0063): moving sources ranked by comet-likeness, or the object check of a co-moving sequence. */
+export const cometSearch = (seqId: string, onProgress?: (p: Progress) => void, signal?: AbortSignal) =>
+  fieldJob<CometSearch>(seqId, "comet-search", {}, onProgress, signal);
+/** The known-comet watch (latest SPHEREx activity) and the bright comets now; the refresh runs on the server. */
+export const cometWatch = () => json<CometWatch>("/api/comets/watch?limit=30", undefined, 1);
+export const refreshCometWatch = () => json<CometWatch["refresh"]>("/api/comets/watch/refresh", { method: "POST" }, 0);
 
 // ---------------------------------------------------------------- sky map (ADR-0061)
 
