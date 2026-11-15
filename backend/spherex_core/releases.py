@@ -44,12 +44,21 @@ def releases() -> dict:
     hit = _read_fresh(path, RELEASES_MAX_AGE_S)
     if hit:
         return hit
+    from .archive import mirror as mirror_mod
+
+    m = mirror_mod.get()
+    if m is not None and m.ready(settings.collections):  # the local catalogue answers in milliseconds
+        data = _from_mirror(m)
+        _write(path, data)
+        return data
     try:
         rows = tap_csv("""SELECT o.collection, COUNT(*) AS n, MIN(p.time_bounds_lower) AS oldest,
                                  MAX(p.time_bounds_lower) AS newest
                           FROM spherex.plane p JOIN spherex.observation o ON p.obsid = o.obsid
                           GROUP BY o.collection""", timeout=300, retries=2)
     except RuntimeError as e:
+        if m is not None and m.usable(settings.collections):
+            return _from_mirror(m)
         raise UpstreamError(f"IRSA TAP is unavailable: {e}") from e
     out = []
     for r in sorted(rows, key=lambda r: r["collection"]):
@@ -62,6 +71,20 @@ def releases() -> dict:
     data = {"checked": utc_now_iso(), "collections": out, "searched_collections": list(settings.collections)}
     _write(path, data)
     return data
+
+
+def _from_mirror(m) -> dict:
+    """The same summary from the local file catalogue (per release; wide and deep counted together unless the
+    mirror was labelled from TAP)."""
+    out = []
+    for coll, n, oldest, newest in m._db().execute(
+            "SELECT collection, COUNT(*), MIN(mjd_start), MAX(mjd_start) FROM files GROUP BY collection ORDER BY 1"):
+        out.append({"collection": coll, "images": int(n), "oldest_mjd": oldest, "newest_mjd": newest,
+                    "oldest_date": mjd_to_iso(oldest) if oldest else None,
+                    "newest_date": mjd_to_iso(newest) if newest else None,
+                    "searched": any(c.startswith(coll) for c in settings.collections)})
+    return {"checked": utc_now_iso(), "collections": out, "searched_collections": list(settings.collections),
+            "source": f"local mirror (synced {m.age_hours():.1f} h ago)" if m.age_hours() is not None else "local mirror"}
 
 
 def freshness(ctx) -> dict:

@@ -1,0 +1,26 @@
+{
+  "about": "Fields kept warm by scripts/prewarm_popular.py. 'query' is resolved like the search box (presets first, then CDS Sesame with proper motion); 'fov' in arcmin; 'kind' only groups them in reports. 'tier' marks the ones whose cached pixels are also pushed to the persistent cutout tier (R2).",
+  "objects": [
+    {"query": "barnard", "fov": 6, "kind": "challenge", "tier": true},
+    {"query": "eps-indi-b", "fov": 16, "kind": "challenge", "tier": true},
+    {"query": "wise-0855", "fov": 6, "kind": "challenge", "tier": true},
+    {"query": "rw-aur", "fov": 6, "kind": "challenge", "tier": true},
+    {"query": "r-dra", "fov": 6, "kind": "challenge", "tier": true},
+    {"query": "Proxima Centauri", "fov": 6, "kind": "nearby star", "tier": true},
+    {"query": "Wolf 359", "fov": 6, "kind": "nearby star", "tier": true},
+    {"query": "Luhman 16", "fov": 6, "kind": "brown dwarf", "tier": true},
+    {"query": "Teegarden's Star", "fov": 6, "kind": "nearby star"},
+    {"query": "GJ 229", "fov": 6, "kind": "brown dwarf companion"},
+    {"query": "61 Cyg", "fov": 8, "kind": "nearby star"},
+    {"query": "Mira", "fov": 6, "kind": "long-period variable", "tier": true},
+    {"query": "chi Cyg", "fov": 6, "kind": "long-period variable"},
+    {"query": "T Tau", "fov": 6, "kind": "young star"},
+    {"query": "FU Ori", "fov": 6, "kind": "young star"},
+    {"query": "M42", "fov": 16, "kind": "nebula"},
+    {"query": "M1", "fov": 10, "kind": "supernova remnant"},
+    {"query": "M31", "fov": 16, "kind": "galaxy"},
+    {"query": "M51", "fov": 10, "kind": "galaxy"},
+    {"query": "3I/ATLAS", "fov": 6, "kind": "comet", "moving": true},
+    {"query": "433 Eros", "fov": 6, "kind": "asteroid", "moving": true}
+  ]
+}

@@ -29,6 +29,7 @@ import aiohttp
 import numpy as np
 from astropy.io import fits
 
+from .. import endpoints, upstreams
 from ..flags import FlagDefs, read_flag_defs
 from .fitsheader import CARD, padded, slim_header
 
@@ -175,8 +176,11 @@ class IrsaCutouts:
             self.session = None
 
     def try_slot(self) -> bool:
-        """Take a request slot if one is free (do not wait: the caller reads from S3 otherwise)."""
+        """Take a request slot if one is free (do not wait: the caller reads from S3 otherwise). Also declines
+        while the service has been failing most requests lately (upstreams), so reads go straight to S3."""
         if self.session is None or self.in_flight >= self.max_in_flight:
+            return False
+        if upstreams.mostly_failing(endpoints.IRSA_CUTOUT):
             return False
         if self.gate is not None and not self.gate.acquire(False):
             return False
@@ -225,11 +229,14 @@ class IrsaCutouts:
             self.bytes_read += len(buf)
             self.served += 1
             self.seconds += time.perf_counter() - t0
+            upstreams.record(endpoints.IRSA_CUTOUT, time.perf_counter() - t0, True, breaker=False)
             return cut
-        except IrsaUnavailable:
+        except IrsaUnavailable as e:
+            upstreams.record(endpoints.IRSA_CUTOUT, time.perf_counter() - t0, False, e, breaker=False)
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as e:
             self.failed += 1
+            upstreams.record(endpoints.IRSA_CUTOUT, time.perf_counter() - t0, False, e, breaker=False)
             raise IrsaUnavailable(repr(e)[:200]) from None
         finally:
             self.release()
