@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0029 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0029-lombscargle-periodograms-on-the-clients-relative-light-curve">ADR-0029: Lomb–Scargle periodograms on the client's relative light curve</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The challenge's variable stars need periods, and IRSA Viewer's Time Series tool offers periodograms and phase folding. SPHEREx samples each source in visits ~6 months apart with dense sampling inside a visit, and each exposure is at a different wavelength.</p>
+<h2 id="decision">Decision</h2>
+<p><code>GET /api/sequences/{id}/periodogram</code> and <code>POST /api/periodogram</code> (client-supplied records) normalise fluxes exactly like the web client's light curve (102 log-spaced wavelength bins, calibrated and ring measurements separately, upper median of unflagged points; <code>analysis/lightcurve.py</code>), drop flagged points unless asked, and run astropy <code>LombScargle</code> (Baluev false-alarm probability) or <code>LombScargleMultiband</code> (one model per detector, for amplitudes that change with wavelength). Default period range 0.5 d to the baseline, 10 samples per peak. The response has the best period, top peaks, a downsampled periodogram (maxima kept), phase-folded points and the model curve.</p>
+<h2 id="consequences">Consequences</h2>
+<p>R Dra: 235.7 d (standard, power 0.46) and 246.9 d (multiband, power 0.54) vs the catalogue ~245 d, in 0.1–0.3 s. The same normalisation on server and client means the folded curve matches the plotted light curve. With three visits (RW Aur) the "best" period (131 d) is mostly the visit spacing; the false-alarm probability does not know about the window function, so short baselines need caution.</p>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li>Periodogram in the browser: possible, but astropy's multiband model and FAP are not available in JS.</li>
+<li>Raw fluxes without normalisation: the wavelength dependence of the spectrum would dominate the periodogram.</li>
+</ul></main></body></html>

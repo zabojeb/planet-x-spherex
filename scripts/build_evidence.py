@@ -29,8 +29,17 @@ img { max-width: 100%; }
 .top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
 """
 PAGES = [("methods", ROOT / "docs" / "methods.md", "Methods"),
-         ("validation", ROOT / "analysis" / "validation" / "REPORT.md", "Validation report")]
-NAV = '<div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div>'
+         ("validation", ROOT / "analysis" / "validation" / "REPORT.md", "Validation report"),
+         ("overview", ROOT / "README.md", "Overview"),
+         ("architecture", ROOT / "docs" / "architecture.md", "Architecture"),
+         ("api", ROOT / "docs" / "api.md", "HTTP API"),
+         ("mcp", ROOT / "docs" / "mcp.md", "MCP server"),
+         ("data", ROOT / "docs" / "data.md", "SPHEREx data"),
+         ("data-access-performance", ROOT / "docs" / "data-access-performance.md", "Data access and performance"),
+         ("adr", ROOT / "docs" / "adr" / "README.md", "Architecture decision records")]
+PAGES += [(f"adr-{f.stem}", f, f"ADR {f.stem[:4]}") for f in sorted((ROOT / "docs" / "adr").glob("[0-9]*.md"))]
+LOCAL = {src.resolve(): f"{name}.html" for name, src, _ in PAGES}
+NAV = '<div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div>'
 
 
 def page(title: str, body: str) -> str:
@@ -39,14 +48,31 @@ def page(title: str, body: str) -> str:
 
 
 def fix_links(html: str, src: Path) -> str:
-    # Relative links point into the repository; send them to GitHub (readable once the repository is public).
-    base = src.parent.relative_to(ROOT).as_posix() + "/"
-    return re.sub(r'href="(?!https?:|#|mailto:)([^"]+)"', lambda m: f'href="{REPO}{base}{m.group(1)}"', html)
+    # Links to documents published here stay here; images are copied next to the pages; anything else
+    # (source files) goes to GitHub, readable once the repository is public.
+    def href(m: re.Match) -> str:
+        target, _, anchor = m.group(1).partition("#")
+        path = (src.parent / target).resolve()
+        if path in LOCAL:
+            return f'href="{LOCAL[path]}{"#" + anchor if anchor else ""}"'
+        return f'href="{REPO}{path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else target}"'
+
+    def img(m: re.Match) -> str:
+        path = (src.parent / m.group(1)).resolve()
+        if path.is_file() and path.is_relative_to(ROOT):
+            rel = path.relative_to(ROOT).as_posix().replace("/", "_")
+            shutil.copy(path, OUT / "img" / rel)
+            return f'src="img/{rel}"'
+        return m.group(0)
+
+    html = re.sub(r'href="(?!https?:|#|mailto:)([^"]+)"', href, html)
+    return re.sub(r'src="(?!https?:|data:)([^"]+)"', img, html)
 
 
 OUT.mkdir(parents=True, exist_ok=True)
+(OUT / "img").mkdir(exist_ok=True)
 for name, src, title in PAGES:
-    html = markdown.markdown(src.read_text(), extensions=["tables", "fenced_code", "sane_lists"])
+    html = markdown.markdown(src.read_text(), extensions=["tables", "fenced_code", "sane_lists", "toc"])
     (OUT / f"{name}.html").write_text(page(title, fix_links(html, src)))
 shutil.copy(ROOT / "docs" / "presentation.pdf", OUT / "presentation.pdf")
 index = """<h1>Seek In Space: evidence</h1>
@@ -54,7 +80,8 @@ index = """<h1>Seek In Space: evidence</h1>
 <ul>
 <li><a href="presentation.pdf">Presentation</a> (7 slides, PDF)</li>
 <li><a href="methods.html">Methods</a>: pipeline parameters, the checks on the five challenge targets, known limitations</li>
-<li><a href="validation.html">Validation report</a>: target-by-target measurements and controls</li>
+<li><a href="validation.html">Validation report</a>: current results first, then the full history with failures</li>
+<li><a href="overview.html">Project overview</a> (the README), <a href="architecture.html">architecture</a>, <a href="data-access-performance.html">data access and performance</a>, <a href="adr.html">63 architecture decision records</a></li>
 <li><a href="/docs">HTTP API reference</a> (interactive) and the MCP server at <code>https://seekin.space/mcp</code></li>
 </ul>
 <h2>Try these</h2>

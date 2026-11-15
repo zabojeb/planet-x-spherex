@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0053 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0053-analyze-one-clicked-position-as-one-job-with-independent-steps-and-a-plain-language-verdict">ADR-0053: Analyze one clicked position as one job with independent steps and a plain-language verdict</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The viewer's most useful action is "click a point → Analyze": a person (or an AI agent through MCP) wants to know what the object at a position is and whether it is interesting, without calling eight endpoints and combining their answers. The individual analyses already exist (re-measure photometry, spectral analysis, motion fit, periodogram, field candidates, known objects), but they have different costs, depend on different upstream services (ESA Gaia, IRSA, CDS mirrors, JPL), and any of them can fail.</p>
+<h2 id="decision">Decision</h2>
+<p><code>POST /api/sequences/{id}/analyze {ra, dec, pmra?, pmdec?, ref_epoch?, name?}</code> starts or joins a job on the field job runner (<code>field/jobs.py</code>, kind <code>p</code>): deduplicated per sequence and position rounded to 1e-4° (≈0.4″) and motion rounded to 1 mas/yr, every <code>GET /api/analyses/{job}</code> is a heartbeat, <code>DELETE</code> withdraws, a job nobody polls for 60 s is cancelled (410), results are written next to the sequence and served immutable.</p>
+<p><code>analysis/point.py</code> runs eight steps in order — identification, photometry, spectrum (+ classification + spectral variability), motion, periodogram, colours (red excess), known objects, tracklets — each wrapped so that an exception becomes <code>{"error": ...}</code> in its slot and the job still finishes. Cancellation is checked between steps. When the request carries no motion and a Gaia DR3 source lies within 4″ at the sequence's epochs, photometry follows that source's motion (recorded in <code>point.motion_used</code>), so fast movers are measured where they are in each exposure; the motion fit itself is blind so it can be compared with Gaia.</p>
+<p>A rule-based <code>verdict</code> turns the slots into findings <code>{kind, text, confidence, novelty, evidence}</code> and an overall <code>novelty</code> in [0, 1] (0.1 base plus each finding's contribution, clipped): unexplained motion without a Gaia counterpart (+0.55), unidentified intra-visit mover (+0.5 high quality), red excess without Gaia (+0.35), brown-dwarf / composite spectra (+0.2–0.25), variability (+0.1–0.15); a SIMBAD identification (−0.3), Gaia match (−0.15) or known asteroid (−0.1) lower it. The rules are explicit so a person can see why a point was ranked. Variability is only claimed when a detector's ratio spectrum changes by ≥ 5 % at |z| ≥ 5 — for saturated (ring, relative) photometry by ≥ 25 % in at least two detectors, because rings drift by up to ~14 % (and one detector by ~30 %) on the constant Barnard's Star — and a period only with ≥ 5 epochs and P &gt; 20 d, so within-visit cadence and ring systematics don't produce false periods.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>One call answers "what is this and is it new?" for the UI and for agents; partial upstream outages degrade the answer instead of failing it.</li>
+<li>The steps run sequentially in one thread (≈10–60 s, dominated by re-measuring every exposure and by first-time catalogue / JPL queries); the job runner limits concurrency to two.</li>
+<li>Intra-visit tracklets come from a finished field analysis of the same sequence; without one the slot says so instead of running the 4–5 min search.</li>
+<li>Novelty weights are heuristics; they are for ranking and explanation, not probabilities.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Fan-out from the client</strong> (eight requests): more round trips, each with its own error handling, and no single verdict for agents.</li>
+<li><strong>Run steps in parallel</strong>: the expensive step (photometry) already uses the process pool; parallel catalogue and JPL queries would hit rate limits.</li>
+<li><strong>A learned novelty score</strong>: no labelled set of "interesting" SPHEREx points exists yet; explicit rules are explainable and testable.</li>
+</ul></main></body></html>

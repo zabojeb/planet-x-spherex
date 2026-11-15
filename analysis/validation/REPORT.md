@@ -1,5 +1,20 @@
 # Validation on the five challenge targets
 
+## Current results (pipeline ALGO_VERSION 3, 2026-11-15)
+
+| Target | What we measured | Reference | Limitations |
+|---|---|---|---|
+| Barnard's Star | Three visit centroids within 0.5″ of the linear Gaia proper-motion prediction (residuals 0.36/0.29, 0.11/−0.06, −0.06/−0.27″) | Gaia DR3 motion | Saturated: relative ring photometry; parallax not modelled; spectral variability correctly reported as within systematics |
+| ε Indi B | T-dwarf-like spectrum, closest standard T3, CH₄(3.3)/4 µm index 0.19; motion 4.42 ± 0.29″/yr | Gaia 4.68″/yr; T1+T6 unresolved binary | Template weights are relative, not probabilities |
+| WISE 0855−0714 | Moving 3.8–5 µm excess (S/N 6.7–10.2), deblended D6 flux ≈ 0.46 mJy | ~285 K Y dwarf | Blended with a G = 16.3 star 8″ away at short wavelengths |
+| R Draconis | Periods 235.7 d (single band) and 246.9 d (multiband) from 2,452 ring measurements; long baseline 247.0 ± 0.5 d | VSX 246.1 d | ~2 cycles with gaps; formal FAPs are not empirical significances |
+| RW Aurigae | D5/D6 relative flux fell 1.88× / 1.86× between the first and last visits | — | Saturated: ring systematics up to ~15 % per detector |
+| 433 Eros | Rotation 5.27029 ± 0.00019 h from 308 ePSF points | 5.27026 h | 16 Psyche's period was not recovered (one visit at the orbital alias) |
+
+Calibration: synthetic J/H/Ks photometry of one isolated comparison star agrees with 2MASS within ~2 %; broader absolute calibration is still being validated. The sections below are the full history, starting with the first pipeline version and its failures; [ALGO_VERSION 3](#algo_version-3-ring-photometry-in-the-pipeline) is where the current ring-photometry results begin.
+
+## History
+
 Date: 2026-11-14. Data: SPHEREx DR1 + QR3 Level 2 images through the pipeline at `ALGO_VERSION = 1`.
 Scripts in this folder ran on the dev server against the cached sequences listed below.
 

@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0038 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0038-ask-irsas-cutout-service-first-and-read-from-s3-when-it-is-busy">ADR-0038: Ask IRSA's cutout service first and read from S3 when it is busy</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+<li><strong>Extends:</strong> <a href="adr-0002-s3-range-reads.html">ADR-0002</a>, <a href="adr-0037-per-file-chunk-cache.html">ADR-0037</a></li>
+</ul>
+<h2 id="context">Context</h2>
+<ul>
+<li><strong>IRSA cuts SPHEREx Level 2 files on its side.</strong> The IBE cutout service (<a href="https://irsa.ipac.caltech.edu/data/SPHEREx/docs/cutout_tool.html">IRSA SPHEREx cutout tool</a>, <a href="https://irsa.ipac.caltech.edu/ibe/cutouts.html">IBE cutouts</a>) takes a centre and a size on the file's IRSA URL:</li>
+</ul>
+<p><code>GET https://irsa.ipac.caltech.edu/ibe/data/spherex/.../level2_....fits?center=&lt;ra&gt;,&lt;dec&gt;deg&amp;size=&lt;n&gt;pix</code></p>
+<p>It answers with a MEF in which every extension is cut to the same window. One request replaces the three rounds of range reads of a new file (ADR-0037), and FLAGS arrives as plain int32, so nothing is decoded.
+- <strong>The answer is not small.</strong> Measured from the dev server for a 6′ field (95 px):
+  - The answer holds PRIMARY, IMAGE, FLAGS, VARIANCE, ZODI, then the <strong>EPSF table unmodified</strong> and WCS-WAVE: <strong>4.16 MB</strong>, more than the ~1.7 MB the range reader reads for the same exposure.
+  - IMAGE, FLAGS and VARIANCE come first. Reading the stream only up to the end of the VARIANCE data and then closing the connection transfers <strong>~160 KB</strong>.
+  - A <code>Range</code> header is answered with 503, so the cut-off has to be done by closing the stream.
+- <strong>The service is often busy.</strong> It answers "503 Server busy" to a fair share of requests:</p>
+<table>
+<thead>
+<tr>
+<th>Requests in flight</th>
+<th>503 answers</th>
+<th>Latency of the rest</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1–8</td>
+<td>20–35 %</td>
+<td>0.45–0.65 s unloaded, 1.7–2.9 s when the build loads it</td>
+</tr>
+<tr>
+<td>16</td>
+<td>~65 %</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>At 8 slots and ~2 s per answer, serving all 358 exposures of Barnard's Star from IRSA alone would take about a minute. S3 does it in seconds.
+- <strong>The pixels are the same.</strong> Cutouts were compared against the range reader value by value: IMAGE, FLAGS and VARIANCE are identical, and the cutout's alternate WCS "A" gives its detector offset (<code>CRPIX1A = 1 − x0</code>, <code>CRVAL1A = 0</code>, <code>CDELT1A = 1</code>).</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong><code>SPHEREX_CUTOUT_SOURCE=irsa</code> (the default) asks the service first.</strong> A window that the chunk cache cannot serve, for a file whose layout is not known yet, is asked from IRSA when one of <code>SPHEREX_IRSA_IN_FLIGHT</code> (8) request slots is free. It is read from S3 when:</li>
+<li>no slot is free (callers never wait for one);</li>
+<li>the service answers anything other than 200, including 503;</li>
+<li>the request takes longer than <code>SPHEREX_IRSA_TIMEOUT</code> (15 s);</li>
+<li>the answer cannot be parsed, or does not cover the window.</li>
+</ul>
+<p><code>SPHEREX_CUTOUT_SOURCE=s3</code> reads from S3 only.
+- <strong>Slots are shared by the whole build:</strong> a semaphore across the process-pool workers (ADR-0039), or one in-process semaphore when there is no pool. So at most 8 requests are open at once, however many batches run.
+- <strong>Read the stream up to VARIANCE and close it</strong> (<code>io.irsa.IrsaCutouts.fetch</code>). The headers are parsed as they arrive. Once IMAGE, FLAGS and VARIANCE are complete, the reader stops and the connection is dropped, so the EPSF table is never transferred.
+- <strong>Restore the detector frame.</strong> The slim IMAGE header gets <code>CRPIX1/2</code> shifted by the cutout's offset and <code>NAXIS1/2</code> set to 2040. With that header, the window is computed exactly as it is for S3, and the cutout becomes a chunk like any other (ADR-0037), with the file's FLAGS bit definitions. The request asks for 2 px more than the window on each side (<code>IRSA_MARGIN</code>), because the service centres by its own rounding.
+- <strong>EPSF and WCS-WAVE</strong> are still read from S3, once per detector, as before.
+- <strong>An IRSA chunk has no file layout.</strong> A later, wider field is asked from IRSA again. If it falls back to S3, the reader learns the layout with one header read.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li><strong>Same results.</strong> Builds with IRSA first and with S3 only gave the same output files.</li>
+<li><strong>On the dev server it neither helps nor hurts.</strong> The server is in the same AWS region as the bucket, so S3 is fast. A cold Barnard's Star 6′ build (358 exposures, 29 pool workers) took:</li>
+<li>S3 only: 6.8–8.0 s;</li>
+<li>IRSA first, 8 slots: 6.6–7.4 s, with 22–27 exposures served by IRSA;</li>
+<li>IRSA first, 16 slots: 9.6 s, because most requests were answered with 503 and the slots were held by slow answers.</li>
+</ul>
+<p>With the opening epoch read first (ADR-0039), three runs each gave 6.6–7.9 s from S3 only and 7.8–8.0 s with IRSA first, which served 18–20 exposures.
+- <strong>Off AWS it should help.</strong> A laptop or another region pays for every byte from S3 (87 % of a cold build on a laptop is downloading, ADR-0037). Each exposure IRSA serves is ~160 KB instead of ~1.7 MB. How much a cold build gains there depends on how many exposures find a free slot, and has not been measured yet.
+- <strong>The service is a dependency only for speed.</strong> When it is down or busy, every exposure is read from S3, and the build takes as long as it did before.
+- <strong>Watch the format.</strong> The parser checks the extension types, the WCS "A" keywords and that the window fits the detector, and falls back to S3 otherwise. A change of the cutout format shows up as <code>irsa_failed</code> in the build log, not as wrong pixels.</p>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>IRSA only:</strong> about a minute per build at the request rate the service accepts, and nothing at all when it is down.</li>
+<li><strong>More slots:</strong> at 16 in flight, about 65 % of requests were answered with 503, and the build was slower than with 8.</li>
+<li><strong>Read the full answer:</strong> 4.2 MB per exposure, more than the range reads from S3.</li>
+<li><strong>Ask with a <code>Range</code> header to skip the EPSF table:</strong> the service answers it with 503.</li>
+</ul></main></body></html>

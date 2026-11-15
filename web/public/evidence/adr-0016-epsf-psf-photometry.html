@@ -1,0 +1,54 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0016 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0016-fit-the-detectors-effective-psf-for-photometry-skipping-saturated-pixels">ADR-0016: Fit the detector's effective PSF for photometry, skipping saturated pixels</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+<li><strong>Supersedes:</strong> <a href="adr-0009-forced-aperture-photometry.html">ADR-0009</a></li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The validation of ALGO_VERSION 1 (<a href="validation.html">analysis/validation/REPORT.md</a>) found three problems with the aperture photometry of ADR-0009:</p>
+<ul>
+<li><strong>Bright stars were unusable.</strong> Every measurement of Barnard's Star, RW Aur and R Dra was flagged, because the aperture contains saturated (<code>OVERFLOW</code>, <code>NONLINEAR</code>) pixels.</li>
+<li><strong>Fluxes ran about 5 % low.</strong> The Gaussian aperture correction from the median <code>PSF_FWHM</code> does not describe the undersampled real PSF. A field star compared against catalogues gave J 0.94, H 0.97, Ks 0.94, W1 0.91 and W2 0.99.</li>
+<li><strong>Error bars were too small.</strong> A constant star had reduced χ² ≈ 3.8.</li>
+</ul>
+<p>Every Level 2 file carries an <code>EPSF</code> extension: a 21 × 21 grid of detector zones (~97 px each, 441 rows), each with a 33 × 33 effective PSF oversampled 5× (photutils ePSF convention, each array sums to 1). The table is identical in every DR1 and QR3 file of a detector; we checked row 220 of three D1 files (two DR1 weeks and one QR3 week) byte for byte. The ePSF is compact. At D1, a centred star puts 67 % of its flux in the central pixel and 97 % within 3 × 3 pixels; at D6 the figures are 49 % and 94 %.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong>Primary measurement: an ePSF fit</strong> (<code>photometry.psf_photometry</code>):</li>
+<li>The ePSF comes from the zone nearest the cutout centre. The table is read once per detector and cached in <code>epsf/D&lt;n&gt;.npz</code>.</li>
+<li>The ePSF is evaluated with a cubic spline at the target's sub-pixel position and normalised to unit sum at that phase.</li>
+<li>Flux and a constant background are fitted by weighted linear least squares (weights 1/<code>VARIANCE</code>) on pixels within 5 native pixels. Saturated (<code>OVERFLOW</code>, <code>NONLINEAR</code>) and masked pixels are left out. Pixels outside the ePSF support constrain only the background.</li>
+<li>A fit is made when the usable pixels hold at least 2 % of the PSF. It is <code>flagged</code> when they hold less than 20 %, when more than 20 % of the PSF weight sits on masked pixels, or when a bright-source artifact bit (<code>GHOST</code>, <code>BLOOM</code>, <code>CROSSTALK</code>) is on a fitted pixel.</li>
+<li><code>saturated</code> is set when a saturated pixel lies within 2 px of the target.</li>
+<li><strong>Secondary measurement: the aperture sum</strong> of ADR-0009, kept as <code>flux_ap_mjy</code> / <code>err_ap_mjy</code>. It becomes the primary value (<code>method: "aperture"</code>) when the fit is impossible. Saturation always flags an aperture value.</li>
+<li><strong>Errors.</strong> A 3 % systematic floor is added in quadrature to every error, PSF and aperture alike.</li>
+<li><strong>meta.json.</strong> Each photometry record gains these fields: <code>method</code> (<code>"psf"</code> | <code>"aperture"</code>), <code>saturated</code>, <code>npix</code>, <code>chi2</code>, <code>psf_weight</code>, <code>flux_ap_mjy</code> and <code>err_ap_mjy</code>. <code>flux_mjy</code> and <code>err_mjy</code> hold the primary measurement.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li><strong>No aperture correction.</strong> The fitted flux is the total flux under the ePSF normalisation used by the SPHEREx pipeline, so no aperture correction is needed.</li>
+<li><strong>Mildly saturated stars become measurable</strong> (a few saturated core pixels).</li>
+<li><strong>Heavily saturated stars are only partly rescued.</strong> With the 3 × 3 core saturated, a few per cent of the PSF is left in usable pixels. Those fits follow brightness changes but are flagged, and their absolute level depends on how good the ePSF is at 1.5–3.3 px. When nothing usable is left inside the ePSF support (±3.3 px), the measurement falls back to the flagged aperture value.</li>
+<li><strong>Blends.</strong> A fit with a fixed position and a single source still absorbs light from neighbours within ~10″ (for example WISE 0855 next to a G = 16.3 star); <code>chi2</code> exposes this but nothing deblends yet.</li>
+<li><strong>Cost.</strong> One 3.9 MB read per detector, ever, and a 2-parameter least-squares fit per exposure.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>photutils <code>PSFPhotometry</code> with <code>ImagePSF</code>:</strong> more general (free positions, grouping), but much slower per exposure and harder to restrict to a pixel mask with a fixed position.</li>
+<li><strong>Reading the ePSF row per file:</strong> unnecessary, since the table is identical across files of a detector. If a future calibration release changes it, the cache key must include that version.</li>
+<li><strong>An extended PSF wing model for saturated stars:</strong> the ePSF stops at ±3.3 px and SPHEREx publishes no calibrated wing profile, so ring photometry beyond the core would give relative brightness only.</li>
+</ul></main></body></html>

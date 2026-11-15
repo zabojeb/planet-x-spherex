@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0047 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0047-search-movers-with-blind-per-source-motion-fits-that-several-detectors-agree-on-plus-shift-and-stack">ADR-0047: Search movers with blind per-source motion fits that several detectors agree on, plus shift-and-stack</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>Nearby brown dwarfs and "Planet X"-type objects show as proper motion across the 6-month visits. With 3–4 visits the motion error is ~300 mas/yr (ADR-0026). Colour blends and halos shift centroids differently per detector and fake motions.</p>
+<h2 id="decision">Decision</h2>
+<p>Every unblended source with S/N ≥ 8 (up to 200) gets the ADR-0026 fit without a prior. A mover needs total motion ≥ 4σ and ≥ 500 mas/yr, below 15″/yr (faster than any known star: a centroid jump), and at least two detectors whose own fits are ≥ 3σ and point within 35° of the combined motion. Movers are compared with Gaia DR3 / CatWISE: within 4σ → <code>known_mover</code>, otherwise <code>discrepant_motion</code>; no catalogue motion → <code>unknown_mover</code> (ranked highest). Faint movers: static-subtracted epoch S/N maps (co-add minus median over epochs, summed over detectors) are shifted and stacked over 1–15″/yr in 15° steps; a peak must reach S/N 6 and beat zero motion by 2; saturated footprints and bright stars are masked.</p>
+<h2 id="consequences">Consequences</h2>
+<p>Barnard's Star and ε Indi B come out as known movers matched to Gaia. The detector-agreement rule removes most halo artefacts but also rejects movers seen in one detector only (the coldest dwarfs, visible only in D6); those are caught by the red-excess map (ADR-0046 photometry) instead.</p>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<p>Gaia-prior fits only (cannot find unknown movers); epoch-to-epoch source cross-matching (fails at 1–2 px motions).</p></main></body></html>

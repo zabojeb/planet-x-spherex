@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0015 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0015-frontend-stack-and-url-addressable-views">ADR-0015: Frontend stack and URL-addressable views</h1>
+<ul>
+<li><strong>Status:</strong> Accepted (implementation in progress)</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The tool is public-facing and should be embeddable in other sites; the challenge suggests putting coordinates in the URL. The browser receives raw typed arrays and does all display operations itself (ADR-0005). The demo is judged visually, and astronomical images read best on a dark background.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong>Stack:</strong> Vite + React + TypeScript single-page app in <code>web/</code>, no UI framework, plain CSS with custom properties. Small libraries (for example <code>d3-scale</code>) are allowed.</li>
+<li><strong>Rendering:</strong> images on <code>&lt;canvas&gt;</code> from typed arrays; overlays (target track, catalogue markers, compass, scale bar, flags) in SVG aligned to the canvas.</li>
+<li><strong>Charts:</strong> hand-written SVG following our data-visualisation method: thin marks, markers at least 8 px, a single y-axis, hover tooltips, a legend whenever there are two or more series, ordinal colour ramps instead of rainbows, colours checked with the palette validator.</li>
+<li><strong>Theme:</strong> dark only, using the method's dark palette and surfaces.</li>
+<li><strong>State in the URL:</strong> target id or coordinates with proper motion, field, mode, detector, epoch, speed, stretch and overlays are kept in the query string with <code>history.replaceState</code>, so a link reproduces a view. <code>?embed=1</code> shows only the viewer and its controls, for iframes.</li>
+<li><strong>Serving:</strong> <code>web/dist</code> is served by the API at <code>/</code>; in development the Vite server proxies <code>/api</code> to the dev API.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>No build-time coupling to the backend; the only contract is the HTTP API.</li>
+<li>Every view can be shared or embedded with a link.</li>
+<li>Hand-written charts need deliberate work on accessibility (labels, keyboard focus, table views).</li>
+<li>Large fields mean more pixels to stretch in JavaScript; fine for the 59 × 59 default, to be measured at 30′.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Next.js:</strong> server-side rendering is not needed for a client-side viewer.</li>
+<li><strong>Aladin Lite as the main viewer:</strong> excellent sky context with HiPS surveys and catalogues, but not built for typed-array blinking and subtraction. It remains a candidate for a context panel.</li>
+<li><strong>Plotly or another chart library:</strong> heavy, and harder to bring in line with the visualisation rules.</li>
+</ul></main></body></html>

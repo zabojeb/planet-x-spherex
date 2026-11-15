@@ -1,0 +1,51 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0014 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0014-development-compute-on-a-vastai-instance-next-to-s3">ADR-0014: Development compute on a vast.ai instance next to S3</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The data live in S3 us-east-1 (Virginia). From the team's location each small range request took 1.5–10 s, which makes a 2,000-request build impractical. The team asked to rent compute on vast.ai for development and experiments, and we may train small ML models.</p>
+<h2 id="decision">Decision</h2>
+<p>Rent one on-demand (not interruptible), verified vast.ai instance on the US east coast:</p>
+<ul>
+<li>Pennsylvania; RTX 4080 16 GB; 32 vCPU (EPYC 7742); 63 GB RAM; 150 GB disk; ~0.9 Gbit/s.</li>
+<li>$0.273 per hour while running; about $0.02 per hour for the disk while stopped.</li>
+<li>Image <code>pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime</code> (Python 3.11), with the astro stack in <code>/workspace/venv</code>.</li>
+</ul>
+<p>Workflow and rules:</p>
+<ul>
+<li>Access by SSH with a key dedicated to this instance.</li>
+<li>The API runs in a <code>tmux</code> session on container port 8000; vast.ai maps container ports to random public ports.</li>
+<li><code>scripts/deploy.sh</code> syncs the repository with <code>rsync</code>, installs the backend and restarts the API.</li>
+<li>Connection details live in a git-ignored <code>.env.deploy</code>; the repository only has <code>.env.example</code>.</li>
+<li>No GitHub tokens or other secrets go on the host, because it belongs to a marketplace provider rather than a data centre. Code reaches it over SSH from a developer machine.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Measured 67 ms median per S3 request from the instance versus 1.5–10 s from the team's location, about 25× faster or more.</li>
+<li>A GPU is available for ML experiments.</li>
+<li>The instance is a Docker container: <code>docker compose</code> does not run inside it, so services run directly (uvicorn in tmux).</li>
+<li>Marketplace reliability: the host could go away. Everything on it is reproducible from the repository and the public archive.</li>
+<li>It costs money until it is destroyed; stop it when idle (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/development.md">development.md</a>).</li>
+<li>The public URL is plain HTTP on a random port: fine for development, not for the final public demo.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>AWS in us-east-1:</strong> the lowest latency to the bucket, but needs an account with credits.</li>
+<li><strong>A regular VPS on the US east coast:</strong> similar latency and better for a stable public demo; still an option for deployment.</li>
+<li><strong>Laptops:</strong> too far from the data.</li>
+</ul></main></body></html>

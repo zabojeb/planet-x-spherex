@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0022 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0022-offer-three-3d-views-relief-time-cube-cube-drawn-with-threejs-loaded-on-demand">ADR-0022: Offer three 3D views (relief, time cube, λ cube), drawn with three.js loaded on demand</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The flat viewer answers "what is where" but makes two questions slow to read. <em>Does anything move?</em> means comparing frames by eye, and a blink only shows two frames at a time. <em>At which wavelengths is a source bright?</em> means switching detectors one by one. The data for both is already in the browser: per-epoch, per-detector co-adds on one common grid (ADR-0005, ADR-0006). Fields are small: 59 × 59 pixels by default, 293 × 293 at 30′.</p>
+<p>Each 3D picture answers a different question, so we offer three:</p>
+<table>
+<thead>
+<tr>
+<th>View</th>
+<th>What it is</th>
+<th>Answers</th>
+<th>Best example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Relief</td>
+<td>The frame on screen as a height field, using the same stretch and colours as the flat sky</td>
+<td>How bright and how compact is a source; in Difference, which way it moved (peak now, pit then)</td>
+<td>Barnard's Star, Difference</td>
+</tr>
+<tr>
+<td>Time cube</td>
+<td>Every epoch as a layer at its date (in Exposures mode: every exposure of the visit at its time); the sky is transparent, sources glow</td>
+<td>Moves: a still star is a vertical column, a mover leans along its predicted track</td>
+<td>Barnard's Star (a lean of about 2 pixels over a year, with the track threading it)</td>
+</tr>
+<tr>
+<td>λ cube</td>
+<td>Every detector of the epoch as a layer, short to long wavelength</td>
+<td>Colour: a source lights up only where it is bright</td>
+<td>None yet, see below</td>
+</tr>
+</tbody>
+</table>
+<p>The λ cube has no clean example in the sequences built so far. Barnard's Star has data in only D2, D5 and D6, and it is bright in all three. WISE 0855 has all six detectors, but in two of its three epochs it sits on a background star that is brightest in D1–D2 (<code>analysis/validation/wise0855_blend.png</code>). A good showcase needs a very red source without a blend.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li>3D is a view state (<code>view3d</code>: <code>off</code>, <code>relief</code>, <code>time</code>, <code>bands</code>), separate from the mode. The relief draws whatever the mode draws, Exposures included. The cubes stack that mode's frames. In Exposures mode with one detector, the time cube stacks that epoch's single exposures at their times, so an asteroid crossing the field during a visit becomes a straight diagonal. Stack has no per-epoch frame, so the time cube shows it as Blink. RGB and Exposures have no per-detector frame, so the λ cube shows them as Blink.</li>
+<li>Colours come from the same <code>computeDisplay</code> and painting as the flat view, with the same stretch and percentile limits, so 3D never disagrees with 2D.</li>
+<li>Height is signal-to-noise above the sky (median and MAD of each frame) on a log scale: flat within 2σ, 1 at 200σ, slightly more for saturated stars (<code>heightField</code> in <code>render.ts</code>). It does not depend on the stretch, so it stays put while blinking, and a difference image's noise stays flat. A first version used the stretched values, but a difference image then became a field of spikes, because its colour limits are about 3σ. Layer opacity follows the same height, so noise is transparent and a 10σ source opaque (<code>sliceAlpha</code>).</li>
+<li>Orientation is the sky's: north is the far side, east is left. The predicted track and the target crosshair are drawn on top. In the time cube they thread through the epochs at their dates.</li>
+<li>Plane loading follows the view (<code>planesNeeded3d</code>). The time cube needs every epoch of the selection, the λ cube every detector of the current epoch, nothing more.</li>
+<li>Rendering uses three.js (WebGL) with OrbitControls, in its own lazily imported chunk (<code>Sky3D.tsx</code>), so the 2D viewer does not download it. It renders on demand, only while something changes.</li>
+<li>The view and its height are in the URL (<code>v3d</code>, <code>h3d</code>) and toggle with <code>v</code> or the rail's 3D button.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>One click shows a mover or a colour in a single picture, which is good for the demo and for newcomers. The flat blink stays the primary tool.</li>
+<li>three.js adds a lazy chunk of 129 kB gzip (511 kB minified), paid only by people who open 3D.</li>
+<li>The cubes fetch more planes up front than a blink does (all epochs, or all detectors). At the default field this is under 1 MB.</li>
+<li>Heights are signal-to-noise on a log scale, not fluxes. The hover readout and the charts stay the place for numbers.</li>
+<li>WebGL is required. Without it the view shows a note, and the 2D viewer is unaffected.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Hand-written WebGL:</strong> no dependency, but orbit controls, picking, text labels and resource handling would be ours to write and debug during a hackathon.</li>
+<li><strong>Plotly or another chart library's 3D surface:</strong> heavy, styled as a chart rather than as the sky, and cannot do a stack of transparent layers.</li>
+<li><strong>Volume ray-marching of the cubes:</strong> prettier, but much more shader work. With only 4–30 epochs or 6 detectors, discrete layers read more clearly.</li>
+<li><strong>3D as a sixth mode:</strong> it would hide Difference and RGB in 3D, which give the most telling reliefs.</li>
+</ul>
+<h2 id="amendment-2026-11-14-open-on-the-time-cube-draw-the-catalogues-in-3d">Amendment (2026-11-14): open on the time cube, draw the catalogues in 3D</h2>
+<ul>
+<li>The full viewer now opens on the time cube (<code>view3d</code> defaults to <code>time</code>; a link to the flat sky carries <code>v3d=off</code>). It shows at a glance what the site is for: still stars are columns, a mover leans. An embed has no 3D controls, so it stays on the flat sky unless its link asks for a 3D view.</li>
+<li>So the three.js chunk is now loaded on a first visit to the full viewer, not only by people who open 3D, and the first frame waits for every epoch's planes of the current detector (under 1 MB at the default field).</li>
+<li>The catalogue layers are drawn in all three views, with the flat sky's shapes and colours, as camera-facing point sprites: on the current layer in the cubes, on the surface in the relief, with the most-cited SIMBAD names. In the time cube a fast mover (&gt; 0.1″/yr) also gets its path through the layers. Hovering a source names it; clicking it opens its card on the flat sky, where the card and the fly-to live.</li>
+</ul></main></body></html>

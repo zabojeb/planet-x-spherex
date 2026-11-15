@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0041 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0041-measure-curated-features-against-power-law-side-windows-plus-automatic-detections">ADR-0041: Measure curated features against power-law side windows, plus automatic detections</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>SPHEREx spectra (R 35–130) show molecular bands (H₂O, CH₄, CO, CO₂), ices (H₂O 3.05, CO₂ 4.27, CO 4.67 µm),
+PAH 3.3 µm and recombination lines (Paα, Brγ, Brα). A first version interpolated the continuum linearly and
+"detected" water at 2.7 µm at 11σ in a G star: a Rayleigh–Jeans F_ν ∝ λ⁻² SED is convex, so linear
+interpolation between distant side windows fakes absorption.</p>
+<h2 id="decision">Decision</h2>
+<p><code>spectral/features.py</code> keeps a curated list (16 features) with band and side windows. Two sides: the continuum
+is interpolated as a power law (log-log). One side (where the other side is itself absorbed in cool dwarfs):
+the side flux is carried to the band centre with the local log-log slope of a smooth pseudo-continuum.
+Window means include a 2 % systematic floor. Every feature reports depth, error, equivalent width and
+significance, detected or not. Flux-ratio indices (H₂O 1.4/1.9, CH₄ 1.6/2.2/3.3, CO 2.3, 4 µm peak/J,
+K/4.5 µm) need a detected denominator. Automatic detection fits a cubic spline continuum in log-log with
+asymmetric clipping and reports runs of bins beyond 3σ (narrower than 0.5 µm), identified against the list;
+a <code>continuum.reliable</code> flag says when molecular bands cover so much of the spectrum (cool dwarfs) that the
+automatic detections are not meaningful. Ice and PAH detections are suppressed in the summary of cool dwarfs,
+whose molecular bands occupy the same windows.</p>
+<h2 id="consequences">Consequences</h2>
+<p>No false detections on the G=13.9 comparison star; the T dwarf ε Indi B shows all its bands at high
+significance. Narrow lines are diluted at this resolution, so their depths are lower limits.</p>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li>Fitting each feature with a Gaussian on a local polynomial: too few bins per feature at R≈40.</li>
+<li>Using the best template as continuum: templates stop at 2.5 µm.</li>
+</ul></main></body></html>

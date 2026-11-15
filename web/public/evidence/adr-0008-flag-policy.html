@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0008 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0008-contamination-flag-policy">ADR-0008: Contamination-flag policy</h1>
+<ul>
+<li><strong>Status:</strong> Superseded by <a href="adr-0018-photometry-flag-policy.html">ADR-0018</a></li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The <code>FLAGS</code> extension is a per-pixel bitmask with 22 defined bits; names and descriptions are in the header keywords <code>MSKNnnnn</code> and <code>MSKDnnnn</code> (table in <a href="data.html#flags">docs/data.md</a>). Some bits mark pixels that are simply unusable (dead, hot, cosmic-ray hits, lost data). Others mark conditions around bright sources. <code>SOURCE</code> covers most pixels that belong to known sources. The cores of bright stars set <code>OVERFLOW</code> and <code>NONLINEAR</code>, so masking those bits would cut a hole in every bright star.</p>
+<h2 id="decision">Decision</h2>
+<p>Use two masks, defined in one place in the code:</p>
+<ul>
+<li><strong>Image mask</strong> (pixels set to NaN before alignment): <code>TRANSIENT</code>, <code>SUR_ERROR</code>, <code>NONFUNC</code>, <code>MISSING_DATA</code>, <code>HOT</code>, <code>COLD</code>, <code>PERSIST</code>, <code>OUTLIER</code>, <code>STREAK</code>, <code>SNOWBALL</code>.</li>
+<li><strong>Photometry-bad bits</strong>: the image mask plus <code>OVERFLOW</code>, <code>NONLINEAR</code>, <code>GHOST</code>, <code>BLOOM</code>, <code>HALO</code>, <code>CROSSTALK</code>. A measurement is marked <code>flagged</code> if any of these bits occurs inside its aperture, or if more than 5% of the aperture is masked.</li>
+</ul>
+<p><code>SOURCE</code>, <code>DICHROIC</code>, <code>FULLSAMPLE</code>, <code>PHANMISS</code>, <code>GHOST_FPA</code> and <code>GHOST_EXT</code> never mask anything.</p>
+<p>Each result also ships the bitwise OR of all flags per epoch and detector (<code>flags.u32</code>), and the bit definitions read from the files, so users can inspect any flag in the viewer.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Bright stars keep their shape in images.</li>
+<li>Photometry of saturated stars is clearly marked: all 358 measurements of Barnard's Star are flagged, and its median fluxes (1.3–2.6 Jy) are far below what its K ≈ 4.5 magnitude implies.</li>
+<li>Unmasked <code>OVERFLOW</code> pixels can leave residuals in difference images of bright stars.</li>
+<li>The policy is fixed on the server for now; it is not yet a request parameter.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Mask every flagged pixel:</strong> destroys bright stars and the many <code>SOURCE</code> pixels.</li>
+<li><strong>Mask nothing:</strong> cosmic rays, hot pixels and streaks dominate blinks and differences.</li>
+</ul></main></body></html>
