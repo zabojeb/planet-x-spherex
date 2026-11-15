@@ -1125,5 +1125,7 @@ button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opa
 .goto-step { display: flex; align-items: center; gap: 12px; }
 .goto-step .nav-pad { display: grid; }
 
-/* menus that drop down from the top bar (search suggestions, Random, the coordinate box) stay above the tool rail */
-.topleft { z-index: 33; }
+/* stacking of the floating chrome: tool rail 32 < the pick card 33 (it may cover the rail, e.g. full width on phones)
+   < the top bar 34, whose drop-downs (search suggestions, Random, the coordinate box) stay above everything */
+.pick { z-index: 33; }
+.topleft { z-index: 34; }
