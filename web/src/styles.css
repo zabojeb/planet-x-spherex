@@ -1013,3 +1013,38 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 .goto-here-body .muted { font-size: 11px; }
 .goto-step { display: flex; align-items: center; gap: 12px; }
 .goto-step .nav-pad { display: grid; }
+
+/* ---- instant probe in the pick card */
+.probe { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--hair); padding-top: 6px; }
+.probe-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-3); }
+.probe-main { font-size: 13px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.probe-main .muted, .probe-sub { color: var(--text-3); }
+.probe-sub { font-variant-numeric: tabular-nums; line-height: 1.35; }
+.probe-hints { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.probe-hints li { font-size: 12px; line-height: 1.35; color: var(--text-2); padding-left: 10px; position: relative; }
+.probe-hints li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+.probe-hints li.hint-saturated::before, .probe-hints li.hint-faint::before { background: var(--warning); }
+.probe-charts { display: flex; gap: 8px; flex-wrap: wrap; }
+.probe-mini { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.probe-mini figcaption { color: var(--text-3); }
+.probe-zero { stroke: var(--hair-2); stroke-width: 1; }
+.probe-axis { font-family: var(--mono); font-size: 9px; fill: var(--text-3); }
+.probe-table summary { cursor: pointer; color: var(--text-3); }
+.probe-table table { width: 100%; border-collapse: collapse; margin-top: 3px; }
+.probe-table td { padding: 1px 4px 1px 0; font-variant-numeric: tabular-nums; }
+.probe-table tr.on td { color: var(--accent); }
+.coords-compact { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+
+/* ---- Explore: guided tour */
+.tour { position: absolute; z-index: 7; top: 150px; left: 20px; width: min(340px, calc(100vw - 32px)); padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.tour-kicker { color: var(--text-3); }
+.tour-title { font-family: var(--display); font-size: 24px; line-height: 1.05; color: var(--text-1); }
+.tour-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.tour-text .inline-icon { vertical-align: -2px; color: var(--accent); }
+.tour-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+.tour-actions .btn.primary { margin-left: auto; }
+@media (max-width: 760px) {
+  .pick-open .rail { display: none; } /* the full-width card needs the space; closing it brings the rail back */
+  .tour { top: auto; bottom: calc(196px + env(safe-area-inset-bottom)); }
+  .probe-charts { gap: 6px; }
+}

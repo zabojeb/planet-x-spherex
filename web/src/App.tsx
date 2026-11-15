@@ -29,7 +29,9 @@ import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, plane
 import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
 import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
-import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
+import { AUDIENCE_KEY, DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type Audience, type TargetSpec, type View3D, type ViewState } from "./state";
+import { plainHints, probe, probeNeeds } from "./probe";
+import { TourCard, type ChallengeState } from "./components/Tour";
 import type { ArchivalMeta, CatalogSource, ExposureStack, Meta, MovingChoice, Photometry, SequenceData, Target } from "./types";
 
 // three.js is a separate chunk, fetched the first time a 3D view opens.
@@ -99,7 +101,14 @@ export default function App() {
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
   const [fovOverride, setFovOverride] = useState<number | null>(initial.fov);
-  const [view, setView] = useState<ViewState>({ ...DEFAULT_VIEW, ...(embed ? { view3d: EMBED_VIEW3D } : null), ...initial.view });
+  // Explore for first-time visitors; a link's ?ui= wins, then what this browser chose last time.
+  const storedUi = safeStorage(AUDIENCE_KEY);
+  const [view, setView] = useState<ViewState>({
+    ...DEFAULT_VIEW,
+    ...(embed ? { view3d: EMBED_VIEW3D } : null),
+    ui: storedUi === "research" || storedUi === "explore" ? (storedUi as Audience) : DEFAULT_VIEW.ui,
+    ...initial.view,
+  });
   const [seq, setSeq] = useState<SequenceData | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +168,13 @@ export default function App() {
   const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
+  useEffect(() => {
+    if (!embed) safeStorage(AUDIENCE_KEY, view.ui);
+  }, [view.ui, embed]);
+  const research = view.ui === "research";
+  const [tourOn, setTourOn] = useState(false);
+  const [challenge, setChallenge] = useState<ChallengeState | null>(null);
+  const [probeTick, setProbeTick] = useState(0);
   if (view.view3d !== "off") last3d.current = view.view3d;
   const is3d = view.view3d !== "off";
   const isCube = view.view3d === "time" || view.view3d === "bands";
@@ -532,6 +548,7 @@ export default function App() {
     setView((v) => ({ ...v, epoch: 0, ref: -1, stack: null, mode: v.mode === "exp" ? "blink" : v.mode, longBase: false, arch: -1 }));
     setPlaying(true);
     setHero(false);
+    setChallenge(null);
   };
   const choosePreset = (id: string) => {
     setSpec({ kind: "preset", id });
@@ -751,7 +768,15 @@ export default function App() {
   const flagBits = meta ? view.flagBits ?? defaultFlagBits(meta.flag_bits) : [];
   const flagMask = flagBits.reduce((m, b) => m | (1 << b), 0);
   const flags = derived && view.overlays.includes("flags") && !lbActive ? derived.flagsOr(view.epoch, view.mode === "rgb" ? "rgb" : view.band) : null;
-  const overlays = useMemo(() => new Set(view.overlays), [view.overlays]);
+  // "Find it yourself": target, track and catalogue markers stay hidden until the reveal.
+  const hideMarks = !!challenge && !challenge.revealed;
+  const revealed = !!challenge?.revealed;
+  const overlays = useMemo(() => {
+    const o = new Set(view.overlays);
+    if (hideMarks) for (const k of ["target", "track", "gaia", "catwise", "2mass", "simbad"] as const) o.delete(k);
+    if (revealed) o.add("target");
+    return o;
+  }, [view.overlays, hideMarks, revealed]);
   const canPlay = sequenceItems.length > 1 || (view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1);
   const errorText = error ?? presetsError ?? (unknownPreset ? `Unknown target "${spec.kind === "preset" ? spec.id : ""}"` : null);
 
@@ -795,6 +820,49 @@ export default function App() {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, selWorld?.[0], selWorld?.[1], catalogs, view.overlays, year]);
+  // ---- instant probe: quick photometry at the selection from the planes already in memory
+  const probePos = useMemo(() => {
+    if (!sel || !meta) return null;
+    const g = meta.grid;
+    if (sel.kind === "target") {
+      const tr = meta.target.track;
+      return (e: number): [number, number] => {
+        const t = tr.find((q) => q.epoch === e) ?? tr[0];
+        return t ? [t.x, t.y] : [-1, -1];
+      };
+    }
+    if (sel.kind === "source") {
+      const src = sel.src;
+      return (e: number): [number, number] => worldToPixel(g, ...propagate(src, mjdToYear(meta.epochs[e]?.mjd_mean ?? 0)));
+    }
+    const at = worldToPixel(g, sel.ra, sel.dec);
+    return (): [number, number] => at;
+  }, [sel, meta]);
+  const probeRes = useMemo(
+    () => (meta && seq && probePos ? probe(meta, seq.planes, probePos, view.epoch, view.band) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [meta, seq, probePos, view.epoch, view.band, planesTick, probeTick],
+  );
+  const [probeLoading, setProbeLoading] = useState(false);
+  const probeKey = sel && meta ? `${meta.id}|${view.epoch}|${view.band}|${probeRes?.lcBand ?? ""}|${sel.kind}` : "";
+  useEffect(() => {
+    if (!probeKey || !seq || !meta) return;
+    const keys = probeNeeds(meta, view.epoch, view.band, probeRes?.lcBand ?? null).filter((k) => !seq.planes.plane(k.array, k.e, k.b));
+    if (!keys.length) return;
+    const ctrl = new AbortController();
+    setProbeLoading(true);
+    ensurePlanes(seq, keys, ctrl.signal)
+      .then(() => !ctrl.signal.aborted && setProbeTick((t) => t + 1), () => undefined)
+      .finally(() => !ctrl.signal.aborted && setProbeLoading(false));
+    return () => {
+      ctrl.abort();
+      setProbeLoading(false);
+    };
+  }, [probeKey, seq]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selPm = !sel ? null : sel.kind === "source" ? totalPm(sel.src) : sel.kind === "target" && target ? Math.hypot(target.pmra, target.pmdec) : null;
+  const hints = probeRes && meta && !research ? plainHints(probeRes, meta.flag_bits, selPm, year) : [];
+  const challengeResult = challenge?.revealed && challenge.guess && targetWorld ? separation(...challenge.guess, ...targetWorld) * 3600 : null;
+
   const card =
     sel && meta ? (
       <PickCard
@@ -807,6 +875,11 @@ export default function App() {
         value={sel.kind === "point" ? valueAt(display, meta.grid.n, ...worldToPixel(meta.grid, sel.ra, sel.dec)) : null}
         counterparts={counterparts}
         fovArcmin={fov}
+        probe={probeRes}
+        probeLoading={probeLoading}
+        hints={hints}
+        flagDefs={meta.flag_bits}
+        audience={view.ui}
         onClose={() => setSel(null)}
         onSelect={setSel}
         onDetails={() => {
@@ -961,10 +1034,19 @@ export default function App() {
       onInteract={() => hero && setHero(false)}
       selection={sel}
       onSelect={(s) => {
+        if (hideMarks) {
+          // in the challenge any click is the guess (a click near the hidden target still picks it)
+          const g = s ? selectionWorld(s, year, targetWorld) : null;
+          if (g) {
+            setChallenge({ guess: g, revealed: false });
+            setSel({ kind: "point", ra: g[0], dec: g[1] });
+          } else setSel(null);
+          return;
+        }
         setSel(s);
         if (s) setHero(false);
       }}
-      card={card}
+      card={hideMarks ? null : card}
       marks={lbActive ? undefined : ft.marks}
       onMark={onMark}
       ruler={ruler}
@@ -1037,7 +1119,7 @@ export default function App() {
 
   return (
     <div
-      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${sel && !hideMarks ? " pick-open" : ""}`}
       style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
@@ -1083,15 +1165,15 @@ export default function App() {
           meta ? (
             <div className="panel-stack">
               <DisplayPanel view={view} set={set} />
-              <MeasureTools ruler={ruler} onRuler={setRuler} magnifier={magnifier} onMagnifier={setMagnifier} invert={view.invert} onInvert={(invert) => set({ invert })} />
-              <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
+              {research && <MeasureTools ruler={ruler} onRuler={setRuler} magnifier={magnifier} onMagnifier={setMagnifier} invert={view.invert} onInvert={(invert) => set({ invert })} />}
+              {research && <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />}
             </div>
           ) : undefined
         }
         layers={
           meta ? (
             <>
-              <LayersPanel view={view} set={set} catalogStatus={catalogStatus} />
+              <LayersPanel view={view} set={set} catalogStatus={catalogStatus} simple={!research} />
               <LongBaselineControls
                 on={view.longBase}
                 onToggle={(on) => set(on ? { longBase: true, mode: "blink", view3d: "off", arch: -1 } : { longBase: false, arch: -1 })}
@@ -1104,14 +1186,50 @@ export default function App() {
             </>
           ) : undefined
         }
-        field={meta && !comoving ? <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} /> : undefined}
-        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} /> : undefined}
+        field={meta && !comoving && research ? <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} /> : undefined}
+        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={research ? (k) => exportUrl(meta.id, k) : undefined} /> : undefined}
         detailsOpen={!!drawer}
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
         on3d={meta ? toggle3d : undefined}
         fullscreen={fullscreen.supported ? fullscreen : undefined}
+        audience={view.ui}
+        onAudience={(ui) => {
+          set({ ui });
+          if (ui === "research") {
+            setTourOn(false);
+            setChallenge(null);
+          }
+        }}
+        tourOn={tourOn}
+        onTour={research ? undefined : () => {
+          setTourOn((t) => !t);
+          setChallenge(null);
+          setHero(false);
+        }}
       />
+      {tourOn && !research && presets.length > 0 && (
+        <TourCard
+          presets={presets}
+          current={spec.kind === "preset" ? spec.id : null}
+          onGo={(id) => {
+            setChallenge(null);
+            setSel(null);
+            if (spec.kind !== "preset" || spec.id !== id) choosePreset(id);
+          }}
+          challenge={challenge}
+          onChallenge={(c) => {
+            setChallenge(c);
+            setSel(null);
+            if (c && !c.revealed) setPlaying(true);
+          }}
+          result={challengeResult}
+          onClose={() => {
+            setTourOn(false);
+            setChallenge(null);
+          }}
+        />
+      )}
       {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
       {drawer && fullMeta && (

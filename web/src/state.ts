@@ -47,7 +47,12 @@ export interface ViewState {
   archBands: ArchBands; // [2MASS band, WISE band] shown in the long baseline
   arch: number; // archival frame on screen (index in the archival frames), -1 = a SPHEREx epoch
   invert: boolean; // dark stars on a light sky
+  /** Explore = plain language, fewer controls; Research = numbers with errors, flags, exports, every control. */
+  ui: Audience;
 }
+
+export type Audience = "explore" | "research";
+export const AUDIENCE_KEY = "spherex-audience";
 
 export const DEFAULT_VIEW: ViewState = {
   mode: "blink",
@@ -73,6 +78,7 @@ export const DEFAULT_VIEW: ViewState = {
   archBands: DEFAULT_ARCH_BANDS,
   arch: -1,
   invert: false,
+  ui: "explore",
 };
 
 /** An embedded viewer has no 3D controls, so it shows the flat sky unless its link asks for a 3D view. */
@@ -163,6 +169,8 @@ export function parseUrl(search = window.location.search): UrlState {
   if (lbb) view.archBands = lbb;
   setNum("arch", "arch");
   if (q.get("inv") === "1") view.invert = true;
+  const ui = q.get("ui");
+  if (ui === "explore" || ui === "research") view.ui = ui;
   return { target, fov: num(q.get("fov")) ?? null, view, embed: q.get("embed") === "1", hasParams: [...q.keys()].length > 0 };
 }
 
@@ -211,6 +219,7 @@ export function buildQuery(spec: TargetSpec | null, fov: number, view: ViewState
   if (view.view3d !== (embed ? EMBED_VIEW3D : d.view3d)) q.set("v3d", view.view3d);
   if (view.view3d !== "off" && view.height3d !== d.height3d) q.set("h3d", fmt(view.height3d, 2));
   if (view.invert) q.set("inv", "1");
+  if (view.ui !== d.ui && !embed) q.set("ui", view.ui);
   if (view.longBase) {
     q.set("lb", "1");
     if (view.archBands.join(",") !== d.archBands.join(",")) q.set("lbb", view.archBands.join(","));
