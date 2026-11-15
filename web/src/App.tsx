@@ -198,11 +198,23 @@ export default function App() {
 
   const target: Target | null = spec.kind === "coords" ? spec.target : presets.find((t) => t.id === spec.id) ?? null;
   const fov = fovOverride ?? target?.fov_arcmin ?? 6;
+  // What a build is for, and the last target that loaded: when a new search fails, the error offers to go back to it
+  // (its sequence is still on screen, so going back needs no new build).
+  const loadKey = target
+    ? [target.ra, target.dec, target.pmra, target.pmdec, target.ref_epoch, target.moving?.object_name, target.moving?.naif_id, fov].join("|")
+    : null;
+  const loaded = useRef<{ key: string; spec: TargetSpec; fovOverride: number | null; name: string } | null>(null);
   const unknownPreset = spec.kind === "preset" && presets.length > 0 && !target;
 
   // ---- server build + arrays
   useEffect(() => {
     if (!target) return;
+    if (loaded.current && loaded.current.key === loadKey && metaId.current) {
+      // back to the sequence that is still loaded: just clear the failed attempt
+      setError(null);
+      setProgress(null);
+      return;
+    }
     const ctrl = new AbortController();
     setError(null);
     setProgress({ stage: "queued", done: 0, total: 0, elapsed: 0 });
@@ -213,6 +225,7 @@ export default function App() {
     )
       .then((data) => {
         metaId.current = data.meta.id;
+        loaded.current = { key: loadKey!, spec, fovOverride, name: target.name || data.meta.target.name || "the previous field" };
         rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
@@ -773,6 +786,18 @@ export default function App() {
   const overlays = useMemo(() => new Set(view.overlays), [view.overlays]);
   const canPlay = sequenceItems.length > 1 || (view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1);
   const errorText = error ?? presetsError ?? (unknownPreset ? `Unknown target "${spec.kind === "preset" ? spec.id : ""}"` : null);
+  // Back to the last target that loaded, when the current one failed (not offered for the first load).
+  const back =
+    error && loaded.current && loaded.current.key !== loadKey
+      ? {
+          label: loaded.current.name,
+          go: () => {
+            const prev = loaded.current!;
+            setSpec(prev.spec);
+            setFovOverride(prev.fovOverride);
+          },
+        }
+      : null;
 
   const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}` : "";
   const bandShort = view.mode === "rgb" ? "RGB" : view.band === "all" ? "All" : view.band;
@@ -937,6 +962,7 @@ export default function App() {
         progress={progress}
         error={errorText}
         onRetry={() => setReloadKey((k) => k + 1)}
+      back={back}
         lockKey={meta?.id ?? "none"}
         onPick={(key) => {
           if (expCube) return setExpIndex(Number(key.slice(1)));
@@ -976,6 +1002,7 @@ export default function App() {
       lockKey={meta?.id ?? "none"}
       error={errorText}
       onRetry={() => setReloadKey((k) => k + 1)}
+      back={back}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
       selection={sel}

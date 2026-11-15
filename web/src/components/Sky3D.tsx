@@ -7,7 +7,7 @@
  * Orientation is the sky's: north is the far side, east is left. Drag to orbit, right-drag to pan, scroll to
  * zoom, double-click to reset; click a layer's label to show that epoch or detector, or a source to open it.
  */
-import { RotateCcw } from "lucide-react";
+import { ArrowLeft, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -71,6 +71,8 @@ export interface Sky3DProps {
   progress: Progress | null;
   error: string | null;
   onRetry: () => void;
+  /** When a new search failed: go back to the last target that loaded. */
+  back?: { label: string; go: () => void } | null;
   lockKey: string;
   onPick: (key: string) => void;
   onPickObject: (key: string) => void;
@@ -760,9 +762,16 @@ export default function Sky3D(p: Sky3DProps) {
       {p.error && !p.progress && (
         <div className="sky-note glass error" role="alert" onPointerDown={(e) => e.stopPropagation()}>
           <span>{p.error}</span>
-          <button className="btn" onClick={p.onRetry}>
-            <RotateCcw size={14} /> Try again
-          </button>
+          <div className="sky-note-actions">
+            {p.back && (
+              <button className="btn" onClick={p.back.go} title="Close this error and return to the field you were viewing">
+                <ArrowLeft size={14} /> Back to {p.back.label}
+              </button>
+            )}
+            <button className="btn" onClick={p.onRetry}>
+              <RotateCcw size={14} /> Try again
+            </button>
+          </div>
         </div>
       )}
     </div>
