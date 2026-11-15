@@ -11,7 +11,7 @@ import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
 import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
-import { formatDate, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
@@ -225,7 +225,7 @@ export default function App() {
     )
       .then((data) => {
         metaId.current = data.meta.id;
-        loaded.current = { key: loadKey!, spec, fovOverride, name: target.name || data.meta.target.name || "the previous field" };
+        loaded.current = { key: loadKey!, spec, fovOverride, name: target.name || data.meta.target.name || `${formatRA(target.ra)} ${formatDec(target.dec)}` }; // unnamed fields by position
         rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
