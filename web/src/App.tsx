@@ -9,9 +9,9 @@ import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames,
 import { ArchivalStrip, LongBaselineControls } from "./components/LongBaseline";
 import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
-import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
+import type { AnalysisSubject } from "./components/AnalysisModal";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
-import { formatDate, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { compassPoint, formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, positionAngle, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
@@ -27,6 +27,7 @@ import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
 import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
+import { cutStamp, locateSource } from "./locate";
 import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
 import { AUDIENCE_KEY, DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type Audience, type TargetSpec, type View3D, type ViewState } from "./state";
@@ -36,6 +37,8 @@ import type { ArchivalMeta, CatalogSource, ExposureStack, Meta, MovingChoice, Ph
 
 // three.js is a separate chunk, fetched the first time a 3D view opens.
 const Sky3D = lazy(() => import("./components/Sky3D"));
+// The analysis window (and the spectral charts it shows) loads the first time Analyze is pressed.
+const AnalysisModal = lazy(() => import("./components/AnalysisModal").then((m) => ({ default: m.AnalysisModal })));
 
 interface StageHud {
   epoch: string;
@@ -87,16 +90,47 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
   return { ...v, band, mode, epoch, ref: keep ? v.ref : -1, stack: keep ? v.stack : null, arch: keep ? v.arch : -1 };
 }
 
+/** The same view on a newer result of the same build (a preview growing into the full result). A preview has
+ *  fewer visits, so other epoch numbers: epochs are matched by time. */
+function carryView(v: ViewState, from: Meta, data: SequenceData): ViewState {
+  const to = data.meta.epochs;
+  const map = (e: number): number => {
+    const ep = from.epochs[e];
+    if (!ep || !to.length) return e;
+    let best = 0;
+    for (let i = 1; i < to.length; i++) if (Math.abs(to[i].mjd_mean - ep.mjd_mean) < Math.abs(to[best].mjd_mean - ep.mjd_mean)) best = i;
+    return best;
+  };
+  const d = new Derived(data);
+  const band = v.band !== "all" && !d.playable(v.band).length ? "all" : v.band;
+  return {
+    ...v,
+    band,
+    epoch: map(v.epoch),
+    ref: v.ref >= 0 ? map(v.ref) : v.ref,
+    stack: v.stack ? [...new Set(v.stack.map(map))].sort((a, b) => a - b) : null,
+  };
+}
+
+/** What the user asked to see (a result of it may come as previews first), and the pixels a result covers. */
+const placeOf = (t: Target) => `${t.ra}|${t.dec}|${t.pmra}|${t.pmdec}|${t.ref_epoch}`;
+const gridOf = (m: Meta) => `${m.grid.ra}|${m.grid.dec}|${m.grid.n}|${m.grid.pixscale_arcsec}`;
+
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
-const MOBILE_FRAME = { top: 108, bottom: 290 };
-const MID_FRAME = { top: 160, bottom: 264 }; // top: below the coordinate box
+const MOBILE_FRAME = { top: 108, bottom: 254 }; // bottom: dock + compact HUD, plus a line for the cursor/selection readout
+const MID_FRAME = { top: 160, bottom: 168 }; // top: below the coordinate box; bottom: lifted HUD + readout line
+/** The HUD's left edge and the clearance it keeps from the dock before it moves above it. */
+const HUD_LEFT = 20;
+const HUD_DOCK_GAP = 16;
+
+/** Shown where a tool waits for the full result of a build still running (a preview is on screen). */
+const WAIT_FULL = "Available once the sequence has finished loading";
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
   const mobile = useMediaQuery("(max-width: 760px)");
-  const mid = useMediaQuery("(min-width: 761px) and (max-width: 1400px)");
   const [presets, setPresets] = useState<Target[]>([]);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
@@ -115,24 +149,43 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
-  // The landing index sits above the HUD (epoch, target, coordinates), whose height depends on the width
-  // and the mode: track the HUD's top and expose the clearance as --hud-clear for the .hero rule.
+  // Two things follow the HUD (compass, scale, date) in the bottom-left corner, measured rather than guessed
+  // from breakpoints because its width and height change with the mode and the date label:
+  // - hudLifted: on screens wider than a phone the HUD moves above the dock only when it would actually
+  //   reach it (its right edge within HUD_DOCK_GAP of the dock's left edge);
+  // - hudClear: the landing index stays above the HUD (--hud-clear for the .hero rule).
+  const [hudLifted, setHudLifted] = useState(false);
+  const downWidth = useRef(0); // the HUD's width when last measured in its unlifted place
   const [hudClear, setHudClear] = useState(0);
   useEffect(() => {
-    if (!hero) return;
     let hud: Element | null = null;
-    const measure = () => {
-      const el = document.querySelector(".hud-min");
-      if (el !== hud) {
-        if (hud) ro.unobserve(hud);
-        hud = el;
-        if (hud) ro.observe(hud);
+    let dock: Element | null = null;
+    const watch = (prev: Element | null, sel: string) => {
+      const el = document.querySelector(sel);
+      if (el !== prev) {
+        if (prev) ro.unobserve(prev);
+        if (el) ro.observe(el);
       }
-      const r = hud?.getBoundingClientRect();
-      setHudClear(r && r.height ? Math.ceil(window.innerHeight - r.top) : 0);
+      return el;
+    };
+    const measure = () => {
+      hud = watch(hud, ".hud-min");
+      dock = watch(dock, ".dock");
+      const h = hud?.getBoundingClientRect();
+      const d = dock?.getBoundingClientRect();
+      // The HUD's unlifted left edge is the gutter. Lifting shrinks the image frame, which can change the scale
+      // bar's length and so the HUD's width; to drop back down it must fit with the width it last had down there
+      // (or its current width, if larger), so it does not flip between the two places at the threshold.
+      setHudLifted((was) => {
+        if (mobile || !h || !d || !h.width) return false;
+        if (!was) downWidth.current = h.width;
+        const width = was ? Math.max(h.width, downWidth.current) : h.width;
+        return HUD_LEFT + width + HUD_DOCK_GAP > d.left;
+      });
+      setHudClear(hero && h && h.height ? Math.ceil(window.innerHeight - h.top) : 0);
     };
     const ro = new ResizeObserver(measure);
-    const mo = new MutationObserver(measure); // the HUD mounts once the first sequence is in
+    const mo = new MutationObserver(measure); // the HUD and the dock mount once the first sequence is in
     mo.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", measure);
     measure();
@@ -141,7 +194,7 @@ export default function App() {
       mo.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [hero]);
+  }, [hero, mobile]);
   const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
   const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
@@ -150,6 +203,14 @@ export default function App() {
   const [expIndex, setExpIndex] = useState(0);
   const keepView = useRef(initial.hasParams);
   const metaId = useRef<string | null>(null);
+  // The result on screen and the place it shows (a preview of the build still running, or a full result).
+  const shown = useRef<{ place: string; meta: Meta } | null>(null);
+  // The view as the last result opened it: if the user has not changed it by the time the full result replaces a
+  // preview, the full result opens as it would have by itself (e.g. Difference on the last visit).
+  const autoView = useRef<ViewState | null>(null);
+  const [shownPlace, setShownPlace] = useState("");
+  // Grid whose first frame is on screen: catalogues and other extras wait for it, so the image comes first.
+  const [frameReady, setFrameReady] = useState("");
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
   const fullscreen = useFullscreen();
   const [planesTick, setPlanesTick] = useState(0);
@@ -194,21 +255,36 @@ export default function App() {
 
   const target: Target | null = spec.kind === "coords" ? spec.target : presets.find((t) => t.id === spec.id) ?? null;
   const fov = fovOverride ?? target?.fov_arcmin ?? 6;
+  // What a build is for, and the last target that loaded: when a new search fails, the error offers to go back to it
+  // (its sequence is still on screen, so going back needs no new build).
+  const loadKey = target
+    ? [target.ra, target.dec, target.pmra, target.pmdec, target.ref_epoch, target.moving?.object_name, target.moving?.naif_id, fov].join("|")
+    : null;
+  const loaded = useRef<{ key: string; spec: TargetSpec; fovOverride: number | null; name: string } | null>(null);
   const unknownPreset = spec.kind === "preset" && presets.length > 0 && !target;
 
   // ---- server build + arrays
   useEffect(() => {
     if (!target) return;
+    if (loaded.current && loaded.current.key === loadKey && metaId.current) {
+      // back to the sequence that is still loaded: just clear the failed attempt
+      setError(null);
+      setProgress(null);
+      return;
+    }
     const ctrl = new AbortController();
+    const place = placeOf(target);
     setError(null);
     setProgress({ stage: "queued", done: 0, total: 0, elapsed: 0 });
-    loadSequence(
-      { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null, fov_arcmin: fov, ...(target.moving ?? {}) },
-      setProgress,
-      ctrl.signal,
-    )
-      .then((data) => {
-        metaId.current = data.meta.id;
+    // Show a result: a preview while the build runs (the opening visit first, then more), then the full one.
+    const adopt = (data: SequenceData) => {
+      if (ctrl.signal.aborted) return;
+      const prev = shown.current;
+      // The same build growing: keep what the user looks at (and the overlays already loaded).
+      const growing = !!prev && prev.place === place && !!prev.meta.preview && prev.meta.preview.of === (data.meta.preview?.of ?? data.meta.id);
+      metaId.current = data.meta.id;
+      if (!growing) {
+        loaded.current = { key: loadKey!, spec, fovOverride, name: target.name || data.meta.target.name || `${formatRA(target.ra)} ${formatDec(target.dec)}` }; // unnamed fields by position
         rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
@@ -217,10 +293,29 @@ export default function App() {
         setAnalysis(null);
         setVerify(null);
         setTablesError(null);
-        const keep = keepView.current; // read now: the updater below runs later
-        keepView.current = false;
-        setView((v) => normalizeView(v, data, keep, target, initial.view));
-        setSeq(data);
+      }
+      const keep = keepView.current; // read now: the updater below runs later
+      if (!data.meta.preview) keepView.current = false; // the view in the URL applies to the full result too
+      const a = autoView.current; // read here: the updater must give the same result if React calls it twice
+      setView((v) => {
+        const untouched = !!a && a.mode === v.mode && a.band === v.band && a.epoch === v.epoch && a.ref === v.ref && a.stack === v.stack;
+        if (growing && !keep && !untouched) return carryView(v, prev.meta, data);
+        const next = normalizeView(v, data, keep, target, initial.view);
+        autoView.current = next;
+        return next;
+      });
+      setSeq(data);
+      shown.current = { place, meta: data.meta };
+      setShownPlace(place);
+    };
+    loadSequence(
+      { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null, fov_arcmin: fov, ...(target.moving ?? {}) },
+      setProgress,
+      ctrl.signal,
+      adopt,
+    )
+      .then((data) => {
+        adopt(data);
         // Stays on "download" until the planes of the first frame are in (see the planes effect).
         setProgress({ stage: "download", done: 0, total: 0, elapsed: 0 });
       })
@@ -237,10 +332,13 @@ export default function App() {
   const meta = seq?.meta ?? null;
   /** Co-moving with a solar-system object: stars trail, catalogues and archival images do not apply. */
   const comoving = meta?.grid.frame === "comoving";
+  /** A preview of a build still running is on screen (ADR-0039). Analyses, measurements, archival epochs and
+   *  exports wait for the full result: on a preview they would see only some epochs, and the server deletes it. */
+  const building = !!meta?.preview;
   useEffect(() => {
     setSel(null);
     setHoverKey(null);
-  }, [meta?.id]);
+  }, [meta ? gridOf(meta) : ""]); // eslint-disable-line react-hooks/exhaustive-deps -- a preview's full result keeps the selection
   const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ref, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   const refEpoch = derived ? effectiveRef(derived, view) : -1;
 
@@ -273,19 +371,26 @@ export default function App() {
   useEffect(() => {
     if (!seq || !need) return;
     const ctrl = new AbortController();
+    const key = gridOf(seq.meta);
+    const tick = () => !ctrl.signal.aborted && setPlanesTick((t) => t + 1);
     setPlanesBusy(true);
     ensurePlanes(seq, need.now, ctrl.signal, (done, total) => setProgress((p) => (p?.stage === "download" ? { ...p, done, total } : p)))
-      .then(() => {
+      .then(async () => {
         if (ctrl.signal.aborted) return;
         setPlanesBusy(false);
         setProgress((p) => (p?.stage === "download" ? null : p));
         setPlanesTick((t) => t + 1);
-        // Look-ahead is best effort: a failure here only means the next frame downloads when shown.
-        ensurePlanes(seq, need.soon, ctrl.signal).then(() => !ctrl.signal.aborted && setPlanesTick((t) => t + 1), () => undefined);
+        setFrameReady(key);
+        // Then the flag overlay, then the frames shown next. Best effort: a failure only means they download
+        // when shown.
+        await ensurePlanes(seq, need.after, ctrl.signal).then(tick, () => undefined);
+        if (!ctrl.signal.aborted) await ensurePlanes(seq, need.soon, ctrl.signal).then(tick, () => undefined);
       })
       .catch((e) => {
         if (ctrl.signal.aborted || e?.name === "AbortError") return;
         setPlanesBusy(false);
+        // A preview can be removed under us once the full result is written; the full result follows.
+        if (seq.meta.preview) return;
         setProgress(null);
         setError(`Could not download the images: ${e?.message || e}`);
       });
@@ -302,10 +407,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [derived, view.mode, view.band, view.epoch, view.ref, view.lo, view.hi, view.stack, expStack, expIndex, expView.error, planesTick],
   );
-  // While the next frame downloads, keep showing the last one of the same sequence.
-  const lastDisplay = useRef<{ id: string; d: Display } | null>(null);
-  if (computed && meta) lastDisplay.current = { id: meta.id, d: computed };
-  const display = computed ?? (lastDisplay.current && lastDisplay.current.id === meta?.id ? lastDisplay.current.d : null);
+  // While the next frame downloads, keep showing the last one on the same pixels (also from the preview the
+  // full result replaces, which has the same grid).
+  const gridKey = meta ? gridOf(meta) : "";
+  const lastDisplay = useRef<{ key: string; d: Display } | null>(null);
+  if (computed && meta) lastDisplay.current = { key: gridKey, d: computed };
+  const display = computed ?? (lastDisplay.current && lastDisplay.current.key === gridKey ? lastDisplay.current.d : null);
 
   // ---- per-exposure tables (columns), only when something on screen needs them
   const wantExposures = !!seq && (view.mode === "exp" || drawer === "details");
@@ -335,7 +442,7 @@ export default function App() {
 
   // ---- long baseline: 2MASS / AllWISE / NEOWISE frames before the SPHEREx epochs (Blink, flat view)
   const archFov = useMemo(() => (meta ? archivalFov(target ?? meta.target, meta.grid.fov_arcmin) : null), [meta?.id, target?.pmra, target?.pmdec]); // eslint-disable-line react-hooks/exhaustive-deps
-  const archKey = view.longBase && meta && !comoving && !embed ? `${meta.id}|${archFov ?? ""}` : "";
+  const archKey = view.longBase && meta && !comoving && !building && !embed ? `${meta.id}|${archFov ?? ""}` : "";
   const [archival, setArchival] = useState<{ key: string; meta: ArchivalMeta | null; error: string | null; progress: Progress | null }>({ key: "", meta: null, error: null, progress: null });
   useEffect(() => {
     if (!archKey || !meta) return;
@@ -405,7 +512,7 @@ export default function App() {
   })();
 
   // ---- field tools: candidates, known objects, Track & Stack (their marks and stacked image go on the sky)
-  const ft = useFieldTools(meta, view.epoch);
+  const ft = useFieldTools(building ? null : meta, view.epoch);
 
   // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
   const slices = useMemo(
@@ -441,26 +548,29 @@ export default function App() {
   // ---- catalogs for overlays
   const wanted = view.overlays.filter((o): o is CatalogId => (CATALOG_IDS as readonly string[]).includes(o));
   const catalogCtrl = useRef<AbortController | null>(null);
+  // Keyed by the field (a preview and its full result share it); queried once its first frame is on screen.
+  const catKey = useRef("");
+  catKey.current = gridKey;
   useEffect(() => {
-    catalogCtrl.current?.abort(); // a new sequence cancels catalog queries for the old one
+    catalogCtrl.current?.abort(); // a new field cancels catalog queries for the old one
     catalogCtrl.current = new AbortController();
     return () => catalogCtrl.current?.abort();
-  }, [meta?.id]);
+  }, [gridKey]);
   useEffect(() => {
-    if (!meta || comoving) return;
+    if (!meta || comoving || frameReady !== gridKey) return;
     for (const cat of wanted) {
       if (catalogStatus[cat]) continue;
-      const id = meta.id;
+      const key = gridKey;
       setCatalogStatus((s) => ({ ...s, [cat]: { state: "loading" } }));
       fetchCatalog(cat, meta.grid.ra, meta.grid.dec, Math.min(30, meta.grid.fov_arcmin * 0.75), catalogCtrl.current?.signal)
         .then((rows) => {
-          if (metaId.current !== id) return;
+          if (catKey.current !== key) return;
           setCatalogs((c) => ({ ...c, [cat]: rows }));
           setCatalogStatus((s) => ({ ...s, [cat]: { state: "ready", count: rows.length } }));
         })
-        .catch((e) => metaId.current === id && e?.name !== "AbortError" && setCatalogStatus((s) => ({ ...s, [cat]: { state: "error", message: String(e.message || e) } })));
+        .catch((e) => catKey.current === key && e?.name !== "AbortError" && setCatalogStatus((s) => ({ ...s, [cat]: { state: "error", message: String(e.message || e) } })));
     }
-  }, [meta?.id, wanted.join(","), catalogStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gridKey, frameReady, wanted.join(","), catalogStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Turning a failed catalog off clears its error, so turning it on again retries.
   useEffect(() => {
@@ -636,6 +746,7 @@ export default function App() {
   /** Forced photometry of a catalogue source or a pinned position; its curves replace the target's in the drawer. */
   const measureAt = async (key: string, label: string, pos: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number }) => {
     if (!meta) return;
+    if (building) throw new Error(WAIT_FULL);
     const res = await measureSource(meta.id, { ...pos, name: label }).catch((e) => {
       throw e instanceof ApiError && (e.status === 404 || e.status === 405) ? new Error("Source photometry is not available on this server yet.") : e;
     });
@@ -652,17 +763,51 @@ export default function App() {
     if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
     return Promise.resolve();
   };
-  /** Open the automatic analysis of a selection in the drawer. */
+  /** Open the analysis window for a selection. A pin is a hint: the source whose light dominates there is found
+   *  in the S/N image of the shown epoch and its centre is analysed (or the window says there is none). */
   const analyzeSelection = (s: Selection, world: [number, number] | null) => {
-    if (!world) return;
+    if (!world || !meta || !derived) return;
+    const g = meta.grid;
+    const e = Math.max(0, Math.min(view.epoch, meta.epochs.length - 1));
+    const epochYear = mjdToYear(meta.epochs[e]?.mjd_mean ?? meta.epochs[0].mjd_mean);
+    const snr = derived.ready(e, "all") ? derived.all(e) : display?.kind === "scalar" ? display.img : null;
+    const rgb = derived.ready(e, "rgb");
+    const picture = (cx: number, cy: number, click?: [number, number] | null): AnalysisSubject["stamp"] =>
+      snr || rgb ? { stamp: cutStamp(rgb ? derived.rgb(e) : [snr!], g.n, cx, cy, 12), rgb, centre: [cx, cy], click: click ?? null, pixscale: g.pixscale_arcsec } : null;
+    const label = (ra: number, dec: number) => `${ra.toFixed(5)} ${dec >= 0 ? "+" : ""}${dec.toFixed(5)}`;
     let subject: AnalysisSubject;
-    if (s.kind === "target" && target) subject = { key: `target:${meta?.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null } };
-    else if (s.kind === "source") subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) } };
-    else subject = { key: `pt:${world[0].toFixed(6)},${world[1].toFixed(6)}`, label: `${world[0].toFixed(5)} ${world[1] >= 0 ? "+" : ""}${world[1].toFixed(5)}`, pos: { ra: world[0], dec: world[1] } };
+    if (s.kind === "target" && target) {
+      const [x, y] = worldToPixel(g, world[0], world[1]);
+      subject = { key: `target:${meta.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null }, stamp: picture(x, y) };
+    } else if (s.kind === "source") {
+      const [x, y] = worldToPixel(g, world[0], world[1]);
+      subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) }, stamp: picture(x, y) };
+    } else {
+      const [x0, y0] = worldToPixel(g, world[0], world[1]);
+      const loc = snr ? locateSource(snr, g.n, x0, y0) : null;
+      if (loc?.found) {
+        const [ra, dec] = pixelToWorld(g, loc.x, loc.y);
+        const off = loc.offsetPx * g.pixscale_arcsec;
+        subject = {
+          key: `pt:${ra.toFixed(5)},${dec.toFixed(5)}`,
+          label: label(ra, dec),
+          pos: { ra, dec, pmra: 0, pmdec: 0, ref_epoch: epochYear },
+          click: world,
+          located: { found: true, snr: loc.snr, offsetArcsec: off, pa: compassPoint(positionAngle(world[0], world[1], ra, dec)), how: loc.how },
+          stamp: picture(loc.x, loc.y, off >= 1 ? [x0, y0] : null),
+        };
+      } else
+        subject = {
+          key: `pt:${world[0].toFixed(5)},${world[1].toFixed(5)}`,
+          label: label(world[0], world[1]),
+          pos: { ra: world[0], dec: world[1], pmra: 0, pmdec: 0, ref_epoch: epochYear },
+          located: loc ? { found: false, snr: loc.snr } : null,
+          stamp: picture(x0, y0),
+        };
+    }
     setAnalysis(subject);
     setSel(null);
     setHero(false);
-    setDrawer("analysis");
   };
   /** Per-exposure fits at a selection; a field candidate brings its trial motion along. */
   const verifySelection = (world: [number, number] | null, label: string) => {
@@ -750,7 +895,7 @@ export default function App() {
         frames: `${nb} frames`,
         target: trackPoint ? [trackPoint.ra, trackPoint.dec] : null,
       };
-      if (view.mode === "diff") hud.extra = `minus epoch ${pad2(refEpoch + 1)} · ${formatDate(meta.epochs[refEpoch]?.mjd_mean ?? 0).slice(0, 7)}`;
+      if (view.mode === "diff" && !(refEpoch === view.epoch && playable.length < 2)) hud.extra = `minus epoch ${pad2(refEpoch + 1)} · ${formatDate(meta.epochs[refEpoch]?.mjd_mean ?? 0).slice(0, 7)}`;
     }
     if (curArch) {
       const at0 = propagate({ ra: meta.target.ra, dec: meta.target.dec, epoch: meta.target.ref_epoch, pmra: meta.target.pmra, pmdec: meta.target.pmdec }, curArch.epoch_year);
@@ -778,7 +923,23 @@ export default function App() {
     return o;
   }, [view.overlays, hideMarks, revealed]);
   const canPlay = sequenceItems.length > 1 || (view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1);
+  // While a build runs: is what is on screen of the place being loaded (a preview, or the same place at another
+  // field size)? Then it stays bright and only the chip at the edge shows the progress.
+  const onPlace = !!target && shownPlace === placeOf(target);
+  const chipNote = meta?.preview && progress ? `Preview: ${meta.preview.frames} of ${meta.preview.total} exposures` : null;
   const errorText = error ?? presetsError ?? (unknownPreset ? `Unknown target "${spec.kind === "preset" ? spec.id : ""}"` : null);
+  // Back to the last target that loaded, when the current one failed (not offered for the first load).
+  const back =
+    error && loaded.current && loaded.current.key !== loadKey
+      ? {
+          label: loaded.current.name,
+          go: () => {
+            const prev = loaded.current!;
+            setSpec(prev.spec);
+            setFovOverride(prev.fovOverride);
+          },
+        }
+      : null;
 
   const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}` : "";
   const bandShort = view.mode === "rgb" ? "RGB" : view.band === "all" ? "All" : view.band;
@@ -989,9 +1150,12 @@ export default function App() {
         dateLabel={label3d.date}
         subLabel={label3d.sub}
         progress={progress}
+        dim={!!seq && !onPlace}
+        chipNote={chipNote}
         error={errorText}
         onRetry={() => setReloadKey((k) => k + 1)}
-        lockKey={meta?.id ?? "none"}
+      back={back}
+        lockKey={gridKey || "none"}
         onPick={(key) => {
           if (expCube) return setExpIndex(Number(key.slice(1)));
           const s = slices.find((x) => x.key === key);
@@ -1021,15 +1185,18 @@ export default function App() {
       year={year}
       span={span}
       targetPx={targetPx}
-      loading={target?.name ? { name: target.name, note: target.description } : null}
+      loading={target?.name && !onPlace ? { name: target.name, note: target.description } : null}
+      dim={!!seq && !onPlace}
+      chipNote={chipNote}
       targetWorld={targetWorld}
       track={track}
       trackIndex={trackIndex}
       dateLabel={dateLabel}
       progress={progress}
-      lockKey={meta?.id ?? "none"}
+      lockKey={gridKey || "none"}
       error={errorText}
       onRetry={() => setReloadKey((k) => k + 1)}
+      back={back}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
       selection={sel}
@@ -1056,7 +1223,7 @@ export default function App() {
       focus={focus}
       onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
-      frame={drawer ? undefined : mobile ? MOBILE_FRAME : mid ? MID_FRAME : undefined}
+      frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
     />
   );
 
@@ -1119,7 +1286,7 @@ export default function App() {
 
   return (
     <div
-      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${sel && !hideMarks ? " pick-open" : ""}`}
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}${sel && !hideMarks ? " pick-open" : ""}`}
       style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
@@ -1179,15 +1346,26 @@ export default function App() {
                 onToggle={(on) => set(on ? { longBase: true, mode: "blink", view3d: "off", arch: -1 } : { longBase: false, arch: -1 })}
                 bands={view.archBands}
                 onBands={(archBands) => set({ archBands, arch: -1 })}
-                unavailable={comoving ? "Not for co-moving sequences (the field follows the object)" : null}
+                unavailable={comoving ? "Not for co-moving sequences (the field follows the object)" : building ? WAIT_FULL : null}
                 status={archStatus}
                 error={arch?.error ?? null}
               />
             </>
           ) : undefined
         }
-        field={meta && !comoving && research ? <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} /> : undefined}
-        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={research ? (k) => exportUrl(meta.id, k) : undefined} /> : undefined}
+        field={
+          meta && !comoving && research ? (
+            building ? (
+              <div className="field-panel">
+                <div className="micro menu-title">Field analysis</div>
+                <p className="small muted">{WAIT_FULL}</p>
+              </div>
+            ) : (
+              <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} />
+            )
+          ) : undefined
+        }
+        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={research && !building ? (k) => exportUrl(meta.id, k) : undefined} /> : undefined}
         detailsOpen={!!drawer}
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
@@ -1243,8 +1421,8 @@ export default function App() {
           source={source}
           onClearSource={() => setSource(null)}
           onNeedPhotometry={() => setLegacySpectrum(true)}
-          analysis={analysis}
           verify={verify}
+          waitFull={building ? WAIT_FULL : null}
           target={target}
           epoch={view.epoch}
           band={view.band}
@@ -1256,6 +1434,22 @@ export default function App() {
           flagsOn={flagsOn}
           onFlagsOn={setFlagsOn}
         />
+      )}
+      {analysis && meta && (
+        <Suspense fallback={null}>
+          <AnalysisModal
+            subject={analysis}
+            meta={meta}
+            ylog={view.ylog}
+            onYlog={(ylog) => set({ ylog })}
+            onClose={() => setAnalysis(null)}
+            onOpenCurves={(photometry, label) => {
+              setSource({ key: `an:${analysis.key}`, label, photometry });
+              setAnalysis(null);
+              setDrawer("lightcurve");
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

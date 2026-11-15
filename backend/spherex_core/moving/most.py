@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,7 +22,7 @@ from datetime import date
 
 from astropy.io import ascii as asciitable
 
-from .. import cache
+from .. import cache, endpoints, upstreams
 from ..errors import UpstreamError
 
 MOST_URL = "https://irsa.ipac.caltech.edu/cgi-bin/MOST/nph-most"
@@ -136,14 +137,19 @@ def query_most(name: str | None = None, obj_type: str | None = None, begin: str 
     if use_cache and cache.is_fresh(path, CACHE_HOURS):
         return MostResult.from_dict(json.loads(path.read_text()))
     url = MOST_URL + "?" + urllib.parse.urlencode(q)
+    t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
             text = r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")
+        # 4xx answers (unknown or ambiguous object) mean the service works
+        upstreams.record(endpoints.SSO_MOST, time.perf_counter() - t0, e.code < 500, e, breaker=False)
         raise _error_from_body(body, e.code) from e
     except Exception as e:  # noqa: BLE001 - network failures
+        upstreams.record(endpoints.SSO_MOST, time.perf_counter() - t0, False, e, breaker=False)
         raise UpstreamError(f"IRSA MOST is unavailable: {e}") from e
+    upstreams.record(endpoints.SSO_MOST, time.perf_counter() - t0, True, breaker=False)
     result = parse_most(text, q)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")

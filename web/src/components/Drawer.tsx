@@ -5,18 +5,16 @@ import { lazy, Suspense } from "react";
 import type { BandSel } from "../render";
 import type { Mode } from "../state";
 import type { Meta, Photometry, Target } from "../types";
-import type { AnalysisSubject } from "./chart/PointAnalysisPanel";
 import type { VerifySubject } from "./chart/VerifyPanel";
 import { Segmented } from "./ui/primitives";
 
 const SpectralPanel = lazy(() => import("./chart/SpectralPanel").then((m) => ({ default: m.SpectralPanel })));
 const LightCurveChart = lazy(() => import("./chart/LightCurveChart").then((m) => ({ default: m.LightCurveChart })));
 const PeriodogramChart = lazy(() => import("./chart/PeriodogramChart").then((m) => ({ default: m.PeriodogramChart })));
-const PointAnalysisPanel = lazy(() => import("./chart/PointAnalysisPanel").then((m) => ({ default: m.PointAnalysisPanel })));
 const VerifyPanel = lazy(() => import("./chart/VerifyPanel").then((m) => ({ default: m.VerifyPanel })));
 const SidePanel = lazy(() => import("./SidePanel").then((m) => ({ default: m.SidePanel })));
 
-export type DrawerTab = "analysis" | "verify" | "spectrum" | "lightcurve" | "periodogram" | "details";
+export type DrawerTab = "verify" | "spectrum" | "lightcurve" | "periodogram" | "details";
 
 interface Props {
   tab: DrawerTab;
@@ -40,9 +38,10 @@ interface Props {
   onClearSource?: () => void;
   /** The spectrum tab fell back to the per-exposure chart and needs the photometry table. */
   onNeedPhotometry?: () => void;
-  /** Automatic analysis of a position (Analysis tab) and per-exposure verification (Verify tab). */
-  analysis?: AnalysisSubject | null;
+  /** Per-exposure verification of a position (Verify tab). The analysis of a source opens in its own window. */
   verify?: VerifySubject | null;
+  /** Set while a preview is on screen: the Analysis and Verify jobs start once the full result is in. */
+  waitFull?: string | null;
 }
 
 export function Drawer(p: Props) {
@@ -55,7 +54,6 @@ export function Drawer(p: Props) {
           value={p.tab}
           onChange={p.onTab}
           options={[
-            ...(p.analysis ? [{ value: "analysis" as const, label: "Analysis" }] : []),
             ...(p.verify ? [{ value: "verify" as const, label: "Verify" }] : []),
             { value: "spectrum", label: "Spectrum" },
             { value: "lightcurve", label: "Light curve" },
@@ -75,9 +73,9 @@ export function Drawer(p: Props) {
             ]}
           />
         )}
-        {(p.tab === "analysis" || p.tab === "verify") && (p.tab === "analysis" ? p.analysis : p.verify) ? (
+        {p.tab === "verify" && p.verify ? (
           <span className="drawer-title source-chip">
-            <span className="mono">{(p.tab === "analysis" ? p.analysis : p.verify)!.label}</span>
+            <span className="mono">{p.verify.label}</span>
           </span>
         ) : p.source ? (
           <span className="drawer-title source-chip">
@@ -95,13 +93,8 @@ export function Drawer(p: Props) {
       </header>
       <div className="drawer-body">
         <Suspense fallback={<div className="skeleton" style={{ height: 260 }} />}>
-          {/* kept mounted while the drawer is open, so switching tabs does not cancel a running analysis */}
-          {p.analysis && (
-            <div hidden={p.tab !== "analysis"}>
-              <PointAnalysisPanel subject={p.analysis} meta={p.meta} ylog={p.ylog} onClose={p.onClose} />
-            </div>
-          )}
-          {p.tab === "verify" && p.verify && <VerifyPanel seqId={p.meta.id} subject={p.verify} />}
+          {p.tab === "verify" && p.waitFull && <p className="small muted">{p.waitFull}</p>}
+          {p.tab === "verify" && p.verify && !p.waitFull && <VerifyPanel seqId={p.meta.id} subject={p.verify} />}
           {p.tab === "periodogram" && <PeriodogramChart id={p.meta.id} source={p.source} />}
           {p.tab === "spectrum" && (
             <SpectralPanel meta={p.meta} epoch={p.epoch} ylog={p.ylog} target={p.target} source={p.source} photometryReady={p.tablesReady} onNeedPhotometry={p.onNeedPhotometry} />

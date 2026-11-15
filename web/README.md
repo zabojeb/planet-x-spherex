@@ -125,11 +125,16 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
 
 ## Point analysis and field tools
 
-- **Analyze** (pick card of any pinned point, catalogue source or the target): `POST /api/sequences/{id}/analyze`,
-  polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with DELETE). The Analysis tab shows the
-  verdict first (findings with a confidence bar, novelty badge), then expandable sections: identification,
-  spectrum + classification, motion vs catalogue, light curve + period, red excess, nearby tracklets. Each slot may
-  be `{error}` and says so.
+- **Analyze** (pick card of any pinned point, catalogue source or the target) opens the analysis window over the
+  sky. The source under the click and its centre are found in the browser's images first (`locate.ts`); then
+  `POST /api/sequences/{id}/analyze`, polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with
+  DELETE), ticks off each step from the job's `steps` map while they run side by side. The window leads with what
+  the source is (class, type, SIMBAD name, a stamp with the located centre), then tabs: Checks (SPHEREx against
+  Gaia, CatWISE, 2MASS and SIMBAD, findings), Spectrum, Variability, Motion, Catalogues. Steps cut off at the 60 s
+  deadline and unreachable services (`timings`) are listed with **Run again** (`force: true`; its polls bypass
+  the browser's immutable copy of the old result). Catalogues that timed out are asked again from the browser.
+  Saturated stars (mostly relative ring fluxes) get no class or blackbody. A server without `/analyze` gets the
+  same window assembled from the photometry, spectrum, motion and catalogue endpoints (`pointAnalysis.ts`).
 - **Verify** (pick card): `POST .../verify`, an 11×11 cutout and PSF-fit S/N per exposure, fixed or along a
   candidate's motion.
 - **Field analysis** (rail → scan icon): `POST .../field` job with candidate lists (movers, tracklets, variables,

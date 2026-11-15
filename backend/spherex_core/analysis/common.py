@@ -59,6 +59,20 @@ def load_context(seq_id: str) -> SequenceContext:
                            Grid(float(g["ra"]), float(g["dec"]), int(g["n"]), float(g["pixscale_arcsec"])))
 
 
+PREVIEW_NOT_ANALYSED = ("This is a preview of a build that is still running; analyses and exports run on the full "
+                        "sequence once it is written.")
+
+
+def full_context(seq_id: str) -> SequenceContext:
+    """load_context for work that is stored next to the sequence or handed out (jobs, measurements, exports):
+    a preview (ADR-0039) holds only some epochs and is deleted once the full result is written, so it raises
+    NotFound for one."""
+    ctx = load_context(seq_id)
+    if ctx.meta.get("preview"):
+        raise NotFound(PREVIEW_NOT_ANALYSED)
+    return ctx
+
+
 def sequence_frames(ctx: SequenceContext, use_cache: bool = True) -> list[Frame | None]:
     """The Level 2 file of every entry in meta['exposures'], in the same order (None if it cannot be located).
 

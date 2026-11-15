@@ -1,6 +1,6 @@
 # ADR-0013: Process pool and slim FITS headers for per-frame work
 
-- **Status:** Accepted
+- **Status:** Accepted, extended by [ADR-0039](0039-batched-fetch-and-previews.md) (reading and parsing moved onto the pool too)
 - **Date:** 2026-11-14
 
 ## Context

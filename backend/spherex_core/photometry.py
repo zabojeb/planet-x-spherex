@@ -216,6 +216,11 @@ RING_MIN_COVERAGE = 0.9  # the ring must lie almost entirely inside the cutout
 RING_CORE_PERCENTILE = 95  # a detector's ring starts outside this percentile of its saturated-core radii
 RING_SATURATED_SHARE = 0.5  # a detector switches to rings when at least this share of exposures saturate
 
+# Every measurement here reads variance only within this many native px of the target (rows and columns): the
+# ring's background annulus reaches farthest, the PSF fit and the aperture stay well inside it. The reader
+# fetches VARIANCE only there (io.level2, ADR-0037); test_photometry checks that nothing changes.
+VARIANCE_RADIUS = int(np.ceil(max(RING_BKG_ANNULUS[1], PSF_FIT_RADIUS))) + 1
+
 
 def radial_profile(image: np.ndarray, variance: np.ndarray, flags: np.ndarray, x: float, y: float,
                    bad_bits: int, core_bits: int, frame_bkg: float,
