@@ -12,7 +12,7 @@
  * The view maths (every gesture keeps the grabbed point under the pointer) is in viewport.ts, with tests.
  */
 import { Globe, LocateFixed, RotateCcw, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Progress } from "../api";
 import { formatAngle, formatDec, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, totalPm, worldToPixel } from "../astro";
 import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
@@ -24,7 +24,7 @@ import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type Map
 import { LoadChip } from "./Progress";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
-import { dragged, layerOrigin, pinched, spread, wheelFactor, zoomAround, type Anchor, type PinchStart, type Pt, type View } from "../viewport";
+import { dragged, layerOrigin, pinched, placeCard, spread, wheelFactor, zoomAround, type Anchor, type Margins, type PinchStart, type Pt, type View } from "../viewport";
 
 export type Selection = { kind: "target" } | { kind: "source"; cat: string; src: CatalogSource } | { kind: "point"; ra: number; dec: number };
 export type StepDir = "N" | "S" | "E" | "W";
@@ -109,6 +109,11 @@ interface Props {
   mapPick?: { ra: number; dec: number } | null;
   onMapPick?: (pos: { ra: number; dec: number } | null) => void;
   mapCard?: ReactNode;
+  /** A card the app renders outside the sky (the analysis window) and the sky position it is about: the card is
+   *  kept next to that point as the view pans and zooms, in the field and on the map, and the point is marked.
+   *  On phones the card stays docked as a bottom sheet (CSS) and only the mark moves. */
+  anchor?: [number, number] | null;
+  anchorEl?: RefObject<HTMLDivElement>;
   /** Map mode, throttled: the map camera, for layers that depend on the view (footprints). */
   onMapView?: (cam: MapCamera) => void;
   /** Overlays drawn on the map. */
@@ -153,6 +158,10 @@ const MAP_DIM = 0.3;
 /** Width of the view, in degrees, for "zoom out to the whole sky": nearly a hemisphere. */
 const SKY_FOV = 150;
 const MAX_SCALE = 48; // screen pixels per image pixel
+/** Phones dock the anchored card as a bottom sheet (the same breakpoint as the CSS). */
+const PHONE = "(max-width: 760px)";
+/** Kept clear by an anchored card: the header, the tool rail on the right, the transport at the bottom. */
+const CARD_MARGINS: Margins = { top: 64, right: 72, bottom: 72, left: 16 };
 
 export type Marker = { cat: string; src: CatalogSource; x: number; y: number; from?: [number, number]; to?: [number, number]; pm: number };
 
@@ -483,6 +492,53 @@ export function SkyView(p: Props) {
   const live = useRef({ frame: () => {}, wheel: (_e: WheelEvent) => {}, fieldWheel: (_e: WheelEvent) => {}, click: (_ra: number, _dec: number, _drag: boolean) => {}, move: (_pos: [number, number] | null) => {}, place: (_key: string) => {} });
   const pickRef = useRef<HTMLDivElement>(null);
   const pinRef = useRef<HTMLDivElement>(null);
+  // The anchored card (p.anchorEl, rendered by the app outside this box) and its mark, set straight on the DOM
+  // so the card keeps up with the map's own frame loop as well as with the field's renders.
+  const anchorPin = useRef<HTMLDivElement>(null);
+  const anchorAt = useRef<Pt | null>(null);
+  const anchorKey = useRef("");
+  const placeAnchor = (at: Pt | null, force = false) => {
+    anchorAt.current = at;
+    const key = at ? `${at[0].toFixed(1)},${at[1].toFixed(1)},${W},${H}` : "";
+    if (key === anchorKey.current && !force) return; // the map calls this every frame
+    anchorKey.current = key;
+    const pin = anchorPin.current;
+    if (pin) {
+      pin.style.visibility = at ? "" : "hidden";
+      if (at) pin.style.transform = `translate(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px)`;
+    }
+    const el = p.anchorEl?.current;
+    if (!el || !at || !W) return; // behind the map's horizon (or not measured yet): the card stays where it was
+    if (window.matchMedia(PHONE).matches) {
+      el.style.left = el.style.top = "";
+      el.classList.remove("placed");
+      return;
+    }
+    const box = boxRef.current?.getBoundingClientRect();
+    const { left, top, side } = placeCard(at, [el.offsetWidth, el.offsetHeight], [W, H], CARD_MARGINS);
+    el.style.left = `${((box?.left ?? 0) + left).toFixed(0)}px`;
+    el.style.top = `${((box?.top ?? 0) + top).toFixed(0)}px`;
+    el.dataset.side = side;
+    el.classList.add("placed");
+  };
+  // The card changes size as its results come in (and when the lazily loaded window first renders). When the
+  // sky goes (the 3D view) the card goes back to its docked place.
+  const anchored = !!p.anchor;
+  const placeLatest = useRef(placeAnchor);
+  placeLatest.current = placeAnchor; // the observer below outlives renders: it calls this render's (W, H)
+  useEffect(() => {
+    const el = p.anchorEl?.current;
+    if (!anchored || !el) return;
+    const ro = new ResizeObserver(() => placeLatest.current(anchorAt.current, true));
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      el.classList.remove("placed");
+      el.style.left = el.style.top = "";
+      delete el.dataset.side;
+      anchorKey.current = "";
+    };
+  }, [anchored]); // eslint-disable-line react-hooks/exhaustive-deps
   const viewSent = useRef({ t: 0, key: "" });
   live.current.frame = () => {
     if (!skyMap || !mapOn) return;
@@ -500,6 +556,7 @@ export function SkyView(p: Props) {
           pin.style.transform = `translate(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px)`;
         }
       }
+      if (p.anchor) placeAnchor(skyMap.world2pix(p.anchor[0], p.anchor[1]));
       if (p.onMapView) {
         const cam = skyMap.camera();
         const key = `${cam.ra.toFixed(2)}|${cam.dec.toFixed(2)}|${Math.log(cam.fov).toFixed(1)}`;
@@ -976,6 +1033,12 @@ export function SkyView(p: Props) {
   const readout = world ? { label: "Cursor", pos: world } : selWorld ? { label: p.selection?.kind === "point" ? "Pin" : "Selected", pos: selWorld } : p.targetWorld ? { label: "Target", pos: p.targetWorld } : null;
 
   const cardLeft = selPos ? Math.max(12, Math.min(selPos[0] + 18, W - 300)) : 0;
+  // the anchored card follows its point through every pan and zoom of the field (the map's frame loop does it there)
+  const anchorPx = p.anchor && p.grid ? worldToPixel(p.grid, p.anchor[0], p.anchor[1]) : null;
+  const anchorPos = anchorPx ? toScreen(anchorPx[0], anchorPx[1]) : null;
+  useLayoutEffect(() => {
+    if (!isMap) placeAnchor(anchorPos);
+  });
   const cardTop = selPos ? Math.max(70, Math.min(selPos[1] - 24, H - 420)) : 0;
 
   return (
@@ -1235,6 +1298,8 @@ export function SkyView(p: Props) {
           </div>
         </>
       )}
+
+      {p.anchor && <div ref={anchorPin} className="map-pin anchor-pin" style={{ visibility: "hidden" }} aria-hidden />}
 
       {!isMap && p.selection && selPos && p.card && (
         <div className="pick glass" style={{ left: cardLeft, top: cardTop }} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop} onWheel={stop}>

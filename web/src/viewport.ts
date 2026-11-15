@@ -64,3 +64,33 @@ export function wheelFactor(e: { deltaY: number; deltaMode: number; ctrlKey: boo
   const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pageHeight : 1);
   return Math.exp(-px * (e.ctrlKey ? 0.01 : 0.0016));
 }
+
+/** Space kept clear around a card placed over the sky (the header, the transport, the screen edges). */
+export interface Margins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Where a card of size `card` goes next to the screen point `at` in a `box`: to the right of the point when it
+ *  fits, else to its left, else as far right as it fits; its top a little above the point. Kept inside the
+ *  margins, so a point near an edge (or off the screen) still leaves the card wholly on screen. */
+export function placeCard(at: Pt, card: Pt, box: Pt, m: Margins, gap = 18): { left: number; top: number; side: "right" | "left" | "over" } {
+  const [w, h] = card;
+  const [W, H] = box;
+  const maxLeft = Math.max(m.left, W - m.right - w);
+  let left = at[0] + gap;
+  let side: "right" | "left" | "over" = "right";
+  if (left > maxLeft) {
+    left = at[0] - gap - w;
+    side = "left";
+    if (left < m.left) {
+      left = maxLeft;
+      side = "over";
+    }
+  }
+  left = Math.max(m.left, Math.min(left, maxLeft));
+  const top = Math.max(m.top, Math.min(at[1] - 24, H - m.bottom - h));
+  return { left, top, side };
+}

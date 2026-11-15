@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pixelToWorld, separation, worldToPixel } from "./astro.ts";
 import type { Grid } from "./types.ts";
-import { dragged, gridToLayer, layerOrigin, layerToGrid, layerToScreen, pinched, screenToLayer, spread, wheelFactor, zoomAround, type Anchor, type Pt, type View } from "./viewport.ts";
+import { dragged, gridToLayer, layerOrigin, layerToGrid, layerToScreen, pinched, placeCard, screenToLayer, spread, wheelFactor, zoomAround, type Anchor, type Pt, type View } from "./viewport.ts";
 
 const close = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b}`);
 const closePt = (a: Pt, b: Pt, tol: number, what: string) => {
@@ -122,4 +122,25 @@ test("wheel: down zooms out, a trackpad pinch (ctrl) is stronger, lines count as
   assert.ok(wheelFactor({ deltaY: -100, deltaMode: 0, ctrlKey: false }) > 1);
   close(wheelFactor({ deltaY: 3, deltaMode: 1, ctrlKey: false }), wheelFactor({ deltaY: 48, deltaMode: 0, ctrlKey: false }), 1e-12, "lines");
   assert.ok(wheelFactor({ deltaY: -10, deltaMode: 0, ctrlKey: true }) > wheelFactor({ deltaY: -10, deltaMode: 0, ctrlKey: false }));
+});
+
+test("an anchored card sits beside its point and never leaves the screen", () => {
+  const m = { top: 64, right: 12, bottom: 110, left: 12 };
+  const box: Pt = [1440, 900];
+  const card: Pt = [440, 520];
+  // room on the right: just right of the point, its top a little above it
+  assert.deepEqual(placeCard([400, 300], card, box, m), { left: 418, top: 270, side: "right" });
+  // near the right edge: flips to the left of the point
+  assert.deepEqual(placeCard([1300, 300], card, box, m), { left: 842, top: 270, side: "left" });
+  // too low: lifted so its bottom clears the transport; too high: below the header
+  assert.equal(placeCard([400, 850], card, box, m).top, 900 - 110 - 520);
+  assert.equal(placeCard([400, 10], card, box, m).top, 64);
+  // a narrow box with no room on either side: as far right as it fits
+  assert.deepEqual(placeCard([200, 300], [440, 300], [500, 800], m), { left: 48, top: 276, side: "over" });
+  // a point panned far off the screen still leaves the card wholly on it
+  for (const at of [[-5000, -5000], [5000, 5000], [-5000, 5000], [5000, -5000]] as Pt[]) {
+    const { left, top } = placeCard(at, card, box, m);
+    assert.ok(left >= m.left && left + card[0] <= box[0] - m.right, `left ${left} for ${at}`);
+    assert.ok(top >= m.top && top + card[1] <= box[1] - m.bottom, `top ${top} for ${at}`);
+  }
 });

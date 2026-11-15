@@ -1,7 +1,9 @@
 /**
  * The analysis window: one source, found under the click, measured by SPHEREx and checked against catalogues.
  *
- * Opens over the sky as soon as Analyze is pressed. The stamp and the located centre are known at once (they
+ * Opens next to its object as soon as Analyze is pressed (the app renders it in a holder that SkyView keeps beside
+ * the point; a bottom sheet on phones) and is not modal: the sky stays live around it, and only its close button
+ * or Esc closes it. The stamp and the located centre are known at once (they
  * come from the images the browser already has); the steps of the server job (or of the browser fallback,
  * see pointAnalysis.ts) tick off while it runs. The result leads with what it is (class, type, known name),
  * then the SPHEREx-vs-catalogue checks, then tabs with the spectrum, variability, motion and counterparts.
@@ -62,12 +64,10 @@ class WindowBoundary extends Component<{ onClose: () => void; children: ReactNod
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="am-backdrop" onMouseDown={(e) => e.target === e.currentTarget && this.props.onClose()}>
-        <section className="am glass am-broken" role="alertdialog" aria-modal="true" aria-label="Analysis window error">
-          <p>This result could not be shown: <span className="err">{this.state.error.message}</span></p>
-          <button className="btn" onClick={this.props.onClose}>Close</button>
-        </section>
-      </div>
+      <section className="am glass am-broken" role="alertdialog" aria-label="Analysis window error">
+        <p>This result could not be shown: <span className="err">{this.state.error.message}</span></p>
+        <button className="btn" onClick={this.props.onClose}>Close</button>
+      </section>
     );
   }
 }
@@ -101,21 +101,23 @@ function AnalysisWindow(p: Props) {
     return () => ctrl.abort(); // withdraws the job when the window closes or the subject changes
   }, [runKey, p.meta.id, skip]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keys belong to the window while it is open: Esc closes it, nothing reaches the sky's shortcuts.
+  // The window is not modal: the sky stays live around it (pan, zoom, pick another point) and only its close
+  // button or Esc closes it. Esc is the window's from anywhere; other keys are its own while focus is inside it,
+  // and reach the sky's shortcuts otherwise.
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    box.current?.focus();
+    box.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      e.stopPropagation();
       if (e.key === "Escape") {
+        e.stopPropagation();
         e.preventDefault();
         p.onClose();
-      }
+      } else if (box.current?.contains(document.activeElement)) e.stopPropagation();
     };
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      prev?.focus?.();
+      if (!document.activeElement || document.activeElement === document.body || box.current?.contains(document.activeElement)) prev?.focus?.({ preventScroll: true });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -134,118 +136,116 @@ function AnalysisWindow(p: Props) {
   const title = skip ? "No source under the click" : r ? (h?.title ?? "Source") : cur.error ? "The analysis failed" : "Analysing…";
 
   return (
-    <div className="am-backdrop" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <section ref={box} className="am glass" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
-        <header className="am-head">
-          <div className="am-topline">
-            <div className="micro am-kicker">
-              {kicker}
-              <span className="am-subject mono">{p.subject.label}</span>
-            </div>
-            {records.length > 0 && p.onOpenCurves && (
-              <button className="btn ghost icon" onClick={() => p.onOpenCurves!(records, p.subject.label)} aria-label="Open in the drawer" title="Open in the drawer: light curve, periodogram and data of this source">
-                <PanelBottomOpen size={15} />
-              </button>
-            )}
-            {(r || cur.error) && (
-              <button className="btn ghost icon" onClick={() => setRerun((n) => n + 1)} aria-label="Run the analysis again" title="Run again: measure afresh instead of using the saved result">
-                <RotateCcw size={14} />
-              </button>
-            )}
-            <button className="btn ghost icon" onClick={p.onClose} aria-label="Close analysis" title="Close (Esc)">
-              <X size={16} />
+    <section ref={box} className="am glass" role="dialog" aria-labelledby={titleId} tabIndex={-1}>
+      <header className="am-head">
+        <div className="am-topline">
+          <div className="micro am-kicker">
+            {kicker}
+            <span className="am-subject mono">{p.subject.label}</span>
+          </div>
+          {records.length > 0 && p.onOpenCurves && (
+            <button className="btn ghost icon" onClick={() => p.onOpenCurves!(records, p.subject.label)} aria-label="Open in the drawer" title="Open in the drawer: light curve, periodogram and data of this source">
+              <PanelBottomOpen size={15} />
             </button>
-          </div>
-          <div className="am-ident">
-            {p.subject.stamp && <StampView {...p.subject.stamp} />}
-            <div className="am-head-main">
-              <h2 id={titleId} className="am-title">
-                {title}
-                {h?.type && <span className="am-type mono">{h.type}</span>}
-              </h2>
-              <div className="am-sub mono">
-                <span>{formatRA(pos.ra)} {formatDec(pos.dec)}</span>
-                <CopyButton text={`${pos.ra.toFixed(6)} ${pos.dec >= 0 ? "+" : ""}${pos.dec.toFixed(6)}`} label="coordinates" />
-              </div>
-              {h?.knownAs && <div className="am-known">≈ {h.knownAs}</div>}
-              {loc?.found && (
-                <div className="am-loc mono">
-                  {loc.offsetArcsec >= 0.5 && <>centre {loc.offsetArcsec.toFixed(1)}″ {loc.pa} of the click · </>}
-                  peak S/N {loc.snr >= 100 ? loc.snr.toFixed(0) : loc.snr.toFixed(1)}
-                </div>
-              )}
-              {(!!h?.tags.length || novelty != null || (checks && checks.checked > 0)) && (
-                <div className="am-tags">
-                  {checks && checks.checked > 0 && <Agreement agree={checks.agree} checked={checks.checked} />}
-                  {novelty != null && (
-                    <span className={`badge novelty${novelty >= 0.4 ? " hot" : ""}`} title="How unusual the findings are, 0 (well known) to 1 (nothing like it in the catalogues)">
-                      novelty<span className="num">{novelty.toFixed(2)}</span>
-                    </span>
-                  )}
-                  {h?.tags.map((t) => <span key={t} className="badge">{t}</span>)}
-                </div>
-              )}
+          )}
+          {(r || cur.error) && (
+            <button className="btn ghost icon" onClick={() => setRerun((n) => n + 1)} aria-label="Run the analysis again" title="Run again: measure afresh instead of using the saved result">
+              <RotateCcw size={14} />
+            </button>
+          )}
+          <button className="btn ghost icon" onClick={p.onClose} aria-label="Close analysis" title="Close (Esc)">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="am-ident">
+          {p.subject.stamp && <StampView {...p.subject.stamp} />}
+          <div className="am-head-main">
+            <h2 id={titleId} className="am-title">
+              {title}
+              {h?.type && <span className="am-type mono">{h.type}</span>}
+            </h2>
+            <div className="am-sub mono">
+              <span>{formatRA(pos.ra)} {formatDec(pos.dec)}</span>
+              <CopyButton text={`${pos.ra.toFixed(6)} ${pos.dec >= 0 ? "+" : ""}${pos.dec.toFixed(6)}`} label="coordinates" />
             </div>
-          </div>
-        </header>
-
-        <div className="am-scroll">
-        <div className="am-hero">
-          <div className="am-hero-text">
-            {skip ? (
-              <div className="am-empty">
-                <p>
-                  Nothing stands out within {Math.round(5 * (p.subject.stamp?.pixscale ?? 6.15))}″ of this point
-                  {loc && !loc.found && loc.snr != null ? ` (S/N ${loc.snr.toFixed(1)} at the pin)` : ""}: it looks like empty sky in the image shown.
-                  Click closer to a source, or measure this position anyway.
-                </p>
-                <button className="btn" onClick={() => setAnyway(true)}>Analyze this position anyway</button>
+            {h?.knownAs && <div className="am-known">≈ {h.knownAs}</div>}
+            {loc?.found && (
+              <div className="am-loc mono">
+                {loc.offsetArcsec >= 0.5 && <>centre {loc.offsetArcsec.toFixed(1)}″ {loc.pa} of the click · </>}
+                peak S/N {loc.snr >= 100 ? loc.snr.toFixed(0) : loc.snr.toFixed(1)}
               </div>
-            ) : cur.error ? (
-              <div className="am-empty">
-                <p className="err">{cur.error}</p>
-                <button className="btn" onClick={() => setRerun((n) => n + 1)}><RotateCcw size={13} /> Try again</button>
+            )}
+            {(!!h?.tags.length || novelty != null || (checks && checks.checked > 0)) && (
+              <div className="am-tags">
+                {checks && checks.checked > 0 && <Agreement agree={checks.agree} checked={checks.checked} />}
+                {novelty != null && (
+                  <span className={`badge novelty${novelty >= 0.4 ? " hot" : ""}`} title="How unusual the findings are, 0 (well known) to 1 (nothing like it in the catalogues)">
+                    novelty<span className="num">{novelty.toFixed(2)}</span>
+                  </span>
+                )}
+                {h?.tags.map((t) => <span key={t} className="badge">{t}</span>)}
               </div>
-            ) : !r ? (
-              <Steps progress={cur.progress} located={!!loc?.found} />
-            ) : (
-              <>
-                <Verdict r={r} h={h!} located={loc?.found ? { offsetArcsec: loc.offsetArcsec, pa: loc.pa } : null} />
-                <Incomplete r={r} onRerun={() => setRerun((n) => n + 1)} />
-              </>
             )}
           </div>
         </div>
+      </header>
 
-        {r && (
-          <>
-            <nav className="am-tabs">
-              <Segmented<Tab>
-                label="Analysis sections"
-                size="sm"
-                value={tab}
-                onChange={setTab}
-                options={[
-                  { value: "overview", label: "Checks" },
-                  { value: "spectrum", label: "Spectrum" },
-                  { value: "variability", label: "Variability" },
-                  { value: "motion", label: "Motion" },
-                  { value: "catalogs", label: "Catalogues" },
-                ]}
-              />
-            </nav>
-            <div className="am-body">
-              {tab === "overview" && <Overview r={r} checks={checks!} />}
-              {tab === "spectrum" && <SpectrumTab r={r} meta={p.meta} ylog={p.ylog} onYlog={p.onYlog} />}
-              {tab === "variability" && <VariabilityTab r={r} meta={p.meta} />}
-              {tab === "motion" && <MotionTab r={r} />}
-              {tab === "catalogs" && <CatalogsTab r={r} fov={p.meta.grid.fov_arcmin} />}
+      <div className="am-scroll">
+      <div className="am-hero">
+        <div className="am-hero-text">
+          {skip ? (
+            <div className="am-empty">
+              <p>
+                Nothing stands out within {Math.round(5 * (p.subject.stamp?.pixscale ?? 6.15))}″ of this point
+                {loc && !loc.found && loc.snr != null ? ` (S/N ${loc.snr.toFixed(1)} at the pin)` : ""}: it looks like empty sky in the image shown.
+                Click closer to a source, or measure this position anyway.
+              </p>
+              <button className="btn" onClick={() => setAnyway(true)}>Analyze this position anyway</button>
             </div>
-          </>
-        )}
+          ) : cur.error ? (
+            <div className="am-empty">
+              <p className="err">{cur.error}</p>
+              <button className="btn" onClick={() => setRerun((n) => n + 1)}><RotateCcw size={13} /> Try again</button>
+            </div>
+          ) : !r ? (
+            <Steps progress={cur.progress} located={!!loc?.found} />
+          ) : (
+            <>
+              <Verdict r={r} h={h!} located={loc?.found ? { offsetArcsec: loc.offsetArcsec, pa: loc.pa } : null} />
+              <Incomplete r={r} onRerun={() => setRerun((n) => n + 1)} />
+            </>
+          )}
         </div>
-      </section>
-    </div>
+      </div>
+
+      {r && (
+        <>
+          <nav className="am-tabs">
+            <Segmented<Tab>
+              label="Analysis sections"
+              size="sm"
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: "overview", label: "Checks" },
+                { value: "spectrum", label: "Spectrum" },
+                { value: "variability", label: "Variability" },
+                { value: "motion", label: "Motion" },
+                { value: "catalogs", label: "Catalogues" },
+              ]}
+            />
+          </nav>
+          <div className="am-body">
+            {tab === "overview" && <Overview r={r} checks={checks!} />}
+            {tab === "spectrum" && <SpectrumTab r={r} meta={p.meta} ylog={p.ylog} onYlog={p.onYlog} />}
+            {tab === "variability" && <VariabilityTab r={r} meta={p.meta} />}
+            {tab === "motion" && <MotionTab r={r} />}
+            {tab === "catalogs" && <CatalogsTab r={r} fov={p.meta.grid.fov_arcmin} />}
+          </div>
+        </>
+      )}
+      </div>
+    </section>
   );
 }
 

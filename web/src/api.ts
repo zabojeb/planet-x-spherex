@@ -521,6 +521,8 @@ async function fetchPlane(meta: Meta, k: PlaneKey): Promise<void> {
   return p;
 }
 
+/** The lone first plane request while the server's support for single planes is unknown (see ensurePlanes). */
+let probe: Promise<void> | null = null;
 let running = 0;
 const waiting: (() => void)[] = [];
 async function slot<T>(fn: () => Promise<T>): Promise<T> {
@@ -551,27 +553,42 @@ export async function ensurePlanes(
   const total = meta.epochs.length * meta.bands.length;
   const byArray = new Map<ArrayName, PlaneKey[]>();
   for (const k of missing) byArray.set(k.array, [...(byArray.get(k.array) ?? []), k]);
-  const jobs: (() => Promise<void>)[] = [];
+  const jobs: { plane: boolean; go: () => Promise<void> }[] = [];
   for (const [array, list] of byArray) {
-    if (caps.planes === false || list.length > CUBE_SHARE * total) jobs.push(() => fetchCube(meta, array));
+    if (caps.planes === false || list.length > CUBE_SHARE * total) jobs.push({ plane: false, go: () => fetchCube(meta, array) });
     else
       for (const k of list)
-        jobs.push(async () => {
-          if (seq.planes.plane(k.array, k.e, k.b)) return; // arrived with a cube meanwhile
-          return caps.planes === false ? fetchCube(meta, k.array) : fetchPlane(meta, k);
+        jobs.push({
+          plane: true,
+          go: async () => {
+            if (seq.planes.plane(k.array, k.e, k.b)) return; // arrived with a cube meanwhile
+            return caps.planes === false ? fetchCube(meta, k.array) : fetchPlane(meta, k);
+          },
         });
   }
+  const count = jobs.length;
   let done = 0;
-  onProgress?.(0, jobs.length);
-  const run = (job: () => Promise<void>) =>
+  onProgress?.(0, count);
+  const run = (job: (typeof jobs)[number]) =>
     slot(async () => {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
-      await job();
-      onProgress?.(++done, jobs.length);
+      await job.go();
+      onProgress?.(++done, count);
     });
-  // Until we know whether the server serves single planes, send one request first (an older server
-  // answers with the whole cube, and six of those in parallel would be wasteful).
-  if (caps.planes === undefined && jobs.length > 1) await run(jobs.shift()!);
+  // Until we know whether the server serves single planes, one plane request goes out first (an older server
+  // answers with the whole cube, and six of those in parallel would be wasteful); plane requests of other calls
+  // meanwhile wait for its answer rather than send a probe of their own.
+  if (caps.planes === undefined && jobs.some((j) => j.plane)) {
+    if (probe) await probe.catch(() => undefined);
+    else {
+      const [first] = jobs.splice(jobs.findIndex((j) => j.plane), 1);
+      const p = run(first).finally(() => {
+        if (probe === p) probe = null;
+      });
+      probe = p;
+      await p;
+    }
+  }
   await Promise.all(jobs.map(run));
 }
 
