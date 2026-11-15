@@ -34,7 +34,7 @@ def ades_psv(tracklets: list[dict], sequence: str, include_low: bool = False) ->
     states = observer.states(mjds) if mjds else {}
     head = ["# version=2022", "# observatory", "! mpcCode 288", "# telescope", "! design Reflector",
             "! detector HgCdTe", "# comment",
-            f"! line Planet X x SPHEREx tracklets, sequence {sequence}. FOLLOW-UP DATA, NOT A SUBMISSION.",
+            f"! line Seek In Space tracklets, sequence {sequence}. FOLLOW-UP DATA, NOT A SUBMISSION.",
             "! line Positions from resampled SPHEREx Level 2 images; mode CCD is a placeholder for HgCdTe.",
             "|".join(COLUMNS)]
     lines = []

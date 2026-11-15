@@ -1,4 +1,4 @@
-"""Core library of the Planet X x SPHEREx viewer. No web framework imports live here.
+"""Core library of the Seek In Space viewer. No web framework imports live here.
 
 Module map
 ----------

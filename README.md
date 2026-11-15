@@ -1,117 +1,186 @@
-# Planet X × SPHEREx
+<div align="center">
 
-**NASA Space Apps Challenge 2026 — [Planet X and SPHEREx](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/)**
+# Seek In Space
 
-**Live:** https://seekin.space · **Presentation:** [docs/presentation.pdf](docs/presentation.pdf)
+### Watch the infrared sky move.
 
-A public web tool for watching the infrared sky change. Enter an object name or a position (RA/Dec) and get a short "movie" of that patch of sky built from NASA SPHEREx images, so anyone can spot things that move (nearby stars, brown dwarfs, asteroids, comets) or change brightness (variable stars), and see their infrared spectrum.
+A public time machine for NASA's **SPHEREx** all-sky survey. Name a star or click anywhere on the sky, and watch that patch change across every SPHEREx visit, with spectra, light curves and motion measured for you.
 
-> **Status, 2026-11-14 (hackathon day 1).** The data pipeline works on our development server: for a sky position it finds every SPHEREx image, reads cutouts straight from NASA's public S3 bucket, aligns them, groups them into epochs, co-adds each detector and measures the target in every exposure. The web viewer is being built. MCP access for AI agents, ML tools and release monitoring come next.
+**[▶ Open seekin.space](https://seekin.space)** &nbsp;·&nbsp; [Presentation](docs/presentation.pdf) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [For AI agents](#for-ai-agents-mcp) &nbsp;·&nbsp; [Docs](#documentation)
 
-## What it does
+NASA Space Apps Challenge 2026 &nbsp;·&nbsp; Challenge: [Planet X and SPHEREx](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/) &nbsp;·&nbsp; Team NUPASA
 
-1. **Find** every SPHEREx Level 2 image that covers the position, in the current releases (DR1 and the weekly QR3), including the Deep Survey fields.
-2. **Follow the target**: positions are propagated with proper motion, so fast movers like Barnard's Star (4.5′ from its J2000 position) stay in the field.
-3. **Read only what is needed** from each 64 MB file with HTTP range requests, about 2 MB per exposure for a 6′ field.
-4. **Align and stack**: every exposure is resampled to a common north-up grid, grouped into epochs (visits about six months apart), and co-added per detector to raise the signal-to-noise ratio.
-5. **Measure**: forced photometry at the target in every exposure, with the exact wavelength of each pixel, gives a spectrum per visit and a light curve.
-6. **Show**: the browser blinks the epochs, subtracts or stacks them, builds false-colour images, overlays Gaia, CatWISE and 2MASS sources at the right date, and plots the spectrum and light curve (in progress).
+<img src="docs/images/readme/hero.jpg" alt="Seek In Space: Barnard's Star climbing through three SPHEREx visits in the 3D time cube" width="100%">
+
+</div>
+
+## Why
+
+Since May 2025 SPHEREx has photographed the whole sky every six months in 102 infrared colours (0.75–5 µm). Objects that move or change between visits (nearby brown dwarfs, fast stars, asteroids, comets, variable stars) show up when you compare those images, the way Pluto was found by blinking two plates in 1930 and the way Backyard Worlds volunteers found hundreds of brown dwarfs with WiseView on WISE data.
+
+Seek In Space is that kind of tool for SPHEREx: it finds the images of a spot in the indexed releases, reads only the pixels it needs from NASA's open cloud bucket, aligns them, and plays them as a movie in your browser. It measures what it shows, too.
+
+## Try it in 30 seconds
+
+| Open | What you will see |
+|---|---|
+| [**Barnard's Star**](https://seekin.space/?target=barnard&mode=diff) | The fastest-moving star: the red–blue pair is where it was and where it is a year later |
+| [**Barnard's Star in 3D**](https://seekin.space/?target=barnard&v3d=time) | Time stacked upward: the star's track climbs through three visits |
+| [**ε Indi B**](https://seekin.space/?target=eps-indi-b) | A brown dwarf binary; open *Spectrum* to see water and methane bands and a T-dwarf-like classification |
+| [**WISE 0855−0714**](https://seekin.space/?target=wise-0855&mode=rgb) | The coldest known brown dwarf (~285 K): a moving source at the long-wavelength end, next to a brighter star |
+| [**R Draconis**](https://seekin.space/?target=r-dra) | A Mira variable in 2,493 exposures; open *Light curve* and *Period* |
+| [**RW Aurigae**](https://seekin.space/?target=rw-aur) | A young star that faded by about half at 4–5 µm within a year |
+
+Or type any name or coordinates into the search box, press **Random**, or zoom out to the all-sky map and click anywhere. Every view is a link you can share or embed.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/readme/sky-map.jpg" alt="All-sky SPHEREx map with the Milky Way"><br><sub><b>All-sky map.</b> SPHEREx's own all-sky image (HiPS) on Aladin Lite; click anywhere to build a sequence there.</sub></td>
+<td width="50%"><img src="docs/images/readme/blink.jpg" alt="Difference image of Barnard's Star"><br><sub><b>Blink and difference.</b> Every visit aligned north-up; the star's motion shows as a red–blue pair.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/readme/spectrum.jpg" alt="102-band spectrum of epsilon Indi B with water, methane and CO bands marked"><br><sub><b>Spectrum on click.</b> 102 bands with features found automatically and a template classification.</sub></td>
+<td width="50%"><img src="docs/images/readme/light-curve.jpg" alt="Light curve of R Draconis over 18 months"><br><sub><b>Light curves and periods.</b> Every exposure, per-visit medians and a Lomb–Scargle periodogram.</sub></td>
+</tr>
+</table>
 
 ## Features
 
-| Feature | Status |
+### See
+
+- **Five ways to compare visits:** blink, difference, stack, false-colour RGB across the six detectors, and single exposures.
+- **3D views:** relief, a *time cube* (visits stacked in time) and a *λ cube* (the field stacked by wavelength).
+- **All-sky map** of SPHEREx's own HiPS on Aladin Lite, served from our cache, with one camera shared by the map and the field.
+- **Overlays at the right date:** Gaia DR3 and CatWISE2020 moved to the date of the visit you are looking at, 2MASS at its own epoch, and known asteroids and comets where they were at that moment.
+- **Search as you type** over ~4,500 named objects with aliases and typo tolerance, plus coordinates in any common format and CDS Sesame for everything else. A *Random* button explores objects or empty sky.
+- **Field of view** from 2′ to 30′, any detector or all six, and your choice of stretch and colour map.
+
+### Measure
+
+- **Photometry with the detector's own PSF** and the exact wavelength of every pixel. Saturated stars are measured in a ring outside the core, as relative fluxes, and labelled as such.
+- **102-band spectra** with water, methane, CO, CO₂ and ice features, the closest stellar or M/L/T-dwarf template, infrared-excess and composite detection, and spectral variability between visits.
+- **Light curves and periodograms**, plus **proper motion** fitted to per-visit centroids.
+- **Click anywhere** for an instant flux estimate. *Analyze* runs the full set of checks and ends with a plain-language verdict.
+
+### Discover
+
+- **Whole-field search:** sources, movers, variables and red, cold brown-dwarf candidates. A classifier trained on injected sources filters moving-object detections.
+- **Solar system:** moving-object detection and tracklets, Track & Stack within a visit, and known objects computed from SPHEREx's own position. IRSA MOST finds every exposure of a named asteroid or comet, and a *co-moving* sequence keeps it centred while the stars trail.
+- **Comets:** coma, tail and CO₂-band tests give a 0–100 comet-likeness score, a heuristic ranking rather than a probability (the known comet 3I/ATLAS scores 99.9; the asteroids 433 Eros and 16 Psyche score ≤ 1). A *Comet hunt* panel and a watch list of bright comets are included.
+- **26-year baseline:** 2MASS (1999), AllWISE (2010) and NEOWISE (2014–2024) frames on the same grid, with SPHEREx tied to the WISE bands, for long-term motion and long-period variables.
+
+### Share and export
+
+- FITS co-adds with WCS, photometry as CSV or VOTable, **ADES** reports for the Minor Planet Center, and a script that downloads the original files.
+- Every view lives in its URL, and the *Share* panel gives an embeddable `<iframe>`.
+
+### For everyone
+
+- **Explore mode** for newcomers: plain language, fewer controls, a guided tour of the five challenge targets and a *find it yourself* game.
+- **Research mode** for scientists: fluxes with errors, flags, χ², wavelengths and every export.
+
+## For AI agents (MCP)
+
+Seek In Space includes a [Model Context Protocol](https://modelcontextprotocol.io) server with **30 tools**: resolve targets, build sequences, fetch images, analyse a point or a whole field, search for moving objects and comets, match catalogues and export reports. An assistant such as Claude can chain them into a search-and-verify loop; [`scripts/mcp_discovery_demo.py`](scripts/mcp_discovery_demo.py) runs one in the ε Indi field.
+
+```bash
+claude mcp add seek-in-space --transport http https://seekin.space/mcp
+```
+
+Tool list and examples: [docs/mcp.md](docs/mcp.md).
+
+## Validated on the five challenge targets
+
+| Target | What it is | What we measured |
+|---|---|---|
+| Barnard's Star | The fastest-moving star (10.4″/yr) | Three visit centroids lie within 0.5″ of the linear Gaia-motion prediction; about 4.4′ of motion between the 2MASS epoch (2000) and SPHEREx (2026) |
+| ε Indi B | T1 + T6 brown dwarf binary, unresolved | T-dwarf-like spectrum (closest standard T3) with strong 3.3 µm methane; motion 4.42 ± 0.29″/yr against 4.68″/yr from Gaia |
+| WISE 0855−0714 | The coldest known brown dwarf | A moving 3.8–5 µm excess consistent with a ~285 K object; a star 8″ away dominates the shorter wavelengths |
+| R Draconis | Mira variable | SPHEREx-only period estimates of 235.7 and 246.9 days from two models, against ~246 days in the catalogue |
+| RW Aurigae | Young T Tauri binary | Faded by about 1.9× at 4–5 µm between the first and last visits (relative photometry of a saturated star) |
+
+Synthetic J/H/Ks photometry of an isolated comparison star agrees with 2MASS to about 2 %; broader absolute calibration is still being validated. Details, plots and caveats: [docs/methods.md](docs/methods.md) and [analysis/validation/REPORT.md](analysis/validation/REPORT.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+  Q["Name, RA/Dec<br>or a click on the map"] --> F["<b>Find</b><br>own index of 1.6 M<br>SPHEREx files"]
+  F --> R["<b>Read</b><br>HTTP range reads<br>from NASA's S3 bucket"]
+  R --> A["<b>Align</b><br>common grid, visits,<br>per-detector co-adds"]
+  A --> M["<b>Measure</b><br>PSF photometry,<br>per-pixel wavelengths"]
+  M --> N["<b>Analyse</b><br>spectra, motion, periods,<br>catalogues, movers"]
+  N --> W["Web app"]
+  N --> P["HTTP API"]
+  N --> C["MCP server"]
+```
+
+1. **Find:** a local index of all 1,628,230 SPHEREx DR1 and weekly QR3 Level 2 files answers in about 90 ms (median over 200 random positions) and keeps working when IRSA's services are down. IRSA TAP and SIA are fallbacks, and the index re-syncs every hour.
+2. **Read:** each 64 MB file is read with HTTP range requests, about 2 MB per exposure for a 6′ field, matching astropy exactly in our tests, compressed flag maps included. IRSA's cutout service is used when it is fast.
+3. **Align:** every exposure is resampled onto one north-up grid, grouped into visits, and co-added per detector with outlier rejection and flag masking. Proper motion keeps fast stars on target.
+4. **Measure and analyse:** forced photometry with each file's own PSF gives a spectrum per visit and a light curve; the analyses above run on top.
+
+A cached field opens in seconds (358 exposures of Barnard's Star in about 5 s). A position nobody asked for before takes 6–13 s for about 200 exposures on our server next to the data.
+
+**Stack:** Python (astropy, photutils, NumPy/SciPy, FastAPI, asyncio/aiohttp, a process pool and a cancellable job queue) · React + TypeScript + Vite · Aladin Lite · three.js · MCP SDK. Design decisions are recorded in 63 [architecture decision records](docs/adr/README.md).
+
+## How it answers the challenge
+
+| The challenge asks for | Seek In Space |
 |---|---|
-| Image discovery for any position (IRSA TAP; DR1 + QR3, wide + deep; releases configurable) | Done |
-| Cutouts straight from S3 with range requests, identical to astropy's reads | Done |
-| Proper-motion-aware targets; the five challenge targets as presets; coordinate input | Done |
-| Search with suggestions as you type: ~4,500 SIMBAD objects with aliases, typo tolerance, object types, coordinates with nearby objects; other names through CDS Sesame | Done |
-| Random button: a random object (or kind of object) or a random patch of sky | Done |
-| Alignment on a common grid, epoch grouping, per-detector co-adds with outlier rejection | Done |
-| Forced photometry with per-pixel wavelengths (data for spectra and light curves) | Done |
-| Contamination flags per epoch and detector, definitions read from the files | Done |
-| HTTP API with background jobs, progress and binary arrays | Implemented |
-| Gaia DR3, CatWISE2020 and 2MASS cone searches for overlays | Implemented |
-| Long-baseline light curves 1997–2026: 2MASS / AllWISE / NEOWISE frames measured like the target, SPHEREx synthetic W1/W2 cross-calibrated on field stars, multiband period search ([ADR-0059](docs/adr/0059-long-baseline-light-curves.md)) | Implemented |
-| Web viewer: blink, difference, stack, false-colour RGB, single exposures, overlays, charts | In progress |
-| Field-of-view choice, shareable and embeddable links with the view in the URL | In progress (API supports it) |
-| MCP server so AI agents can use the tool | Planned |
-| ML tools: moving-source candidates, real/bogus ranking, spectral classification | Planned |
-| Release monitor and "what's new" (TAP already sees weekly data) | Planned |
-| Split into services: api, worker, mcp, web (seams already in place) | Planned |
-
-"Done" means we ran it on real data and checked the result; "Implemented" means the code exists and runs but has not been fully checked end to end.
-
-## Key findings so far
-
-- The IRSA cutout service was overloaded during the hackathon (`503`, ~95 s per cutout), so we read the public S3 copies directly: 358 exposures of Barnard's Star in 37.7 s from a server next to the bucket ([ADR-0002](docs/adr/0002-s3-range-reads.md)).
-- Barnard's Star's measured position per visit matches its proper motion to better than 1″; it moved 10″ (1.6 SPHEREx pixels) north in a year ([methods](docs/methods.md#validation-so-far)).
-- Bright stars saturate SPHEREx: Barnard's Star's photometry is all flagged, though its images still show the motion.
-- The wavelength of every pixel comes from a lookup table that astropy misreads when SIP distortion keywords are present; we interpolate it ourselves ([data](docs/data.md#wcs-wave-wavelength-per-pixel)).
+| A public web tool: enter RA/Dec, see a time series played like a video | ✅ Any position, name or map click; blink, difference, stack, RGB, 3D time cube |
+| Easy updates as new releases arrive | ✅ DR1 and the weekly QR3 data are indexed automatically (the file index re-syncs every hour), and a sequence can be rebuilt to pick up new exposures; [`/api/releases`](https://seekin.space/api/releases) reports what is available |
+| Creative use of the 102 bands: per-detector co-adds, spectra on the fly | ✅ Six-detector co-adds, RGB across detectors, 102-band spectra with template matching, λ cube |
+| Adding or subtracting epochs | ✅ Difference against any reference visit, stacks of any set of visits |
+| User-selectable field of view | ✅ 2′ to 30′ |
+| Overlays from Gaia and WISE | ✅ Gaia DR3 and CatWISE2020 at each visit's date, plus 2MASS and known solar-system objects |
+| Coordinates in the URL so the tool can be embedded | ✅ Every view is a URL; embeddable `<iframe>` |
+| Metadata such as contamination flags | ✅ Flags per visit and detector, read from the files themselves |
+| Reuse of existing tools (Astropy, Aladin) | ✅ Astropy and photutils in the pipeline, Aladin Lite for the sky map |
 
 ## Quick start
 
-Backend (Python 3.11+):
+The live site needs nothing installed. To run your own copy (Python 3.11+, Node 20+):
 
 ```bash
 uv pip install -e "backend[dev]"
 ```
 
 ```bash
-SPHEREX_CACHE_DIR=./cache uvicorn spherex_api.main:app --port 8000
+npm --prefix web ci && npm --prefix web run build
 ```
 
 ```bash
-python scripts/build_sequence.py barnard
+SPHEREX_CACHE_DIR=./cache uvicorn spherex_api.main:app --port 8000
 ```
 
-Reading from S3 is slow far from us-east-1, so we run the backend on a server in US-East. Setup, tests, deploy and the web dev server are in [docs/development.md](docs/development.md).
+Then open http://localhost:8000. Reading SPHEREx data is fastest from a machine in US-East, near the S3 bucket. Tests: `pytest -m "not network"` in `backend/` and `npm --prefix web test`. Development, deploy and the production setup are described in [docs/development.md](docs/development.md).
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): components, request lifecycle, module map
-- [SPHEREx data for developers](docs/data.md): detectors, releases, file layout, flags, wavelengths, access
-- [Methods](docs/methods.md): pipeline parameters, validation, known limitations
-- [HTTP API](docs/api.md)
-- [Development](docs/development.md)
-- [Architecture Decision Records](docs/adr/README.md)
-
-## Test targets
-
-Coverage from IRSA TAP on 2026-11-14 (DR1 + QR3, all six detectors).
-
-| Target | What it is | RA, Dec (J2000) | Proper motion | SPHEREx coverage | What we should see |
-|---|---|---|---|---|---|
-| Barnard's Star | M4 dwarf, the largest proper motion of any star | 17:57:48.50 +04:41:36.2 | 10.4″/yr | 363 images, 3 main visits, Aug 2025 – Sep 2026 | ~2 px shift; it is ~4.5′ away from its J2000 position |
-| ε Indi B | T1 + T6 brown dwarf binary, 6.7′ from ε Indi A | 22:04:10.52 −56:46:57.7 | 4.7″/yr | 465 images, 4 visits, Apr 2025 – Oct 2026 | ~1 px shift shared with ε Indi A; methane absorption in its spectrum |
-| WISE 0855−0714 | Coldest known brown dwarf (~285 K) | 08:55:10.831 −07:14:42.53 | 8.1″/yr | 258 images, 4 visits, May 2025 – May 2026 | Visible only at the long-wavelength end (D5–D6, ~3.8–5 µm); ~1.4 px shift |
-| RW Aurigae | Young T Tauri binary with deep dimming episodes | 05:07:49.54 +30:24:05.1 | small | 335 images, 3 visits, Sep 2025 – Sep 2026 | Brightness and colour changes between visits |
-| R Draconis | Mira variable, period ≈ 245 days | 16:32:40.19 +66:45:18.0 | small | 2,493 images (Deep Survey area near the north ecliptic pole), nearly continuous Apr 2025 – Sep 2026 | A light curve covering ~2 pulsation cycles |
-
-## Team objectives
-
-| Objective | Where it stands |
+| Document | What is in it |
 |---|---|
-| An intuitive interface | web viewer in progress ([ADR-0015](docs/adr/0015-frontend-stack.md)) |
-| A robust service architecture | modular monolith with seams for api / worker / mcp / web ([ADR-0004](docs/adr/0004-modular-monolith.md)) |
-| Classical and ML analysis tools | co-adds, difference imaging and forced photometry done; ML planned |
-| An MCP server for AI agents | planned, as an adapter over the same services as the HTTP API |
-| Automatic discovery of new data | TAP search sees weekly data with no lag; collections configurable ([ADR-0003](docs/adr/0003-tap-image-discovery.md)); release monitor planned |
+| [Presentation](docs/presentation.pdf) | The 7-slide project deck |
+| [Architecture](docs/architecture.md) | Components, request lifecycle, module map |
+| [SPHEREx data for developers](docs/data.md) | Detectors, releases, file layout, flags, wavelengths, access |
+| [Methods](docs/methods.md) | Pipeline parameters, validation, known limitations |
+| [HTTP API](docs/api.md) | Every endpoint, with examples |
+| [MCP server](docs/mcp.md) | Tools for AI agents |
+| [Data access and performance](docs/data-access-performance.md) | Mirrors, fallbacks, caching and timings |
+| [Development](docs/development.md) | Setup, tests, deploy, production server |
+| [Architecture decision records](docs/adr/README.md) | 63 decisions and why we made them |
 
-## The challenge
+## Limitations
 
-Since May 2025 SPHEREx has mapped the whole sky every ~6 months in 102 near-infrared bands (0.75–5.0 µm), returning images of more than a billion objects. Objects that move between visits show up when you compare images taken at different times. That is how Pluto was found, and how volunteers on [Backyard Worlds](http://backyardworlds.org/) find brown dwarfs with [WiseView](http://byw.tools/wiseview) on WISE data.
+- No confirmed discovery yet, only candidates.
+- Our non-polar showcase fields have 3–4 SPHEREx visits so far; motion and variability get better with every release.
+- Saturated stars get relative photometry only, with epoch-to-epoch systematics of up to ~15 %.
+- Scores and template weights (comet-likeness, classification) are heuristic rankings, not calibrated probabilities.
+- The comet search confirms known movers well but does not yet find fast comets from a single pass.
+- Long-baseline frames and some catalogue overlays depend on IRSA services, which are sometimes down.
 
-**Required:** a public web tool where users enter RA/Dec and see a time series of SPHEREx images of that patch, played like a short video.
+## Acknowledgements
 
-**Suggested extras (from the brief):** easy updates as new data releases arrive · creative use of the 102 bands (e.g. co-add each of the 6 detector arrays for signal-to-noise; spectra on the fly) · adding or subtracting epochs · user-selectable field of view · overlays from Gaia and WISE · coordinates in the URL so the tool can be embedded · metadata such as contamination flags · reuse of existing tools (Astropy, Aladin from CDS).
+This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration.
 
-## Resources
-
-- IRSA SPHEREx: https://irsa.ipac.caltech.edu/Missions/spherex.html · [Explanatory Supplement](https://irsa.ipac.caltech.edu/data/SPHEREx/docs/SPHEREx_Expsupp.pdf) · [Archive documentation](https://caltech-ipac.github.io/spherex-archive-documentation/)
-- Tutorial notebooks: https://caltech-ipac.github.io/irsa-tutorials/spherex/ (intro, cutouts, PSF, mosaics, HiPS cubes, Source Discovery Tool)
-- WiseView, the reference tool for WISE: http://byw.tools/wiseview
-- Gaia DR3: https://archive.stsci.edu/missions-and-data/gaia
-- Aladin Lite (CDS): https://aladin.cds.unistra.fr/AladinLite/
-- Astropy: https://www.astropy.org/ · astroquery: https://astroquery.readthedocs.io/
-
-**Acknowledgement required when using SPHEREx data:** "This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration."
+It also uses data from the European Space Agency mission Gaia, processed by the Gaia Data Processing and Analysis Consortium; from 2MASS, WISE and NEOWISE through NASA/IPAC's Infrared Science Archive (IRSA); and services from CDS Strasbourg (Aladin Lite, SIMBAD, Sesame) and JPL's Solar System Dynamics group. Thanks to the WiseView and Backyard Worlds projects, whose blink tools inspired this one.

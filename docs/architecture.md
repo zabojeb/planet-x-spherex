@@ -1,6 +1,6 @@
 # Architecture
 
-Planet X × SPHEREx is a modular monolith ([ADR-0004](adr/0004-modular-monolith.md)): one Python domain library that knows SPHEREx, thin adapters that expose it (HTTP today, MCP next, a CLI for operators), and a static web client. This page shows how the pieces connect and how one request flows through them.
+Seek In Space is a modular monolith ([ADR-0004](adr/0004-modular-monolith.md)): one Python domain library that knows SPHEREx, thin adapters that expose it (the HTTP API, the MCP server for AI agents at `/mcp`, a CLI for operators), and a static web client. This page shows how the pieces connect and how one request flows through them.
 
 ## Components and data flow
 
@@ -14,7 +14,7 @@ flowchart LR
     JOBS["Job runner<br/>asyncio + process pool"]
     CORE["Domain library (spherex_core)<br/>targets · archive · io · processing<br/>photometry · catalogs · pipeline"]
     CACHE[("Cache dir<br/>TAP results · per-file chunks · wave maps<br/>catalog cones · name lookups · sequence results")]
-    MCP["MCP server (planned)"]
+    MCP["MCP server"]
     CLI["CLI scripts/build_sequence.py"]
   end
   subgraph External["Public services"]

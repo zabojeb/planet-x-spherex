@@ -1,4 +1,4 @@
-// Railway config as code for Planet X x SPHEREx (plan with `railway config plan`, apply with `railway config apply`).
+// Railway config as code for Seek In Space (plan with `railway config plan`, apply with `railway config apply`).
 // One Docker image (repo-root Dockerfile), two roles; everything in US East next to the SPHEREx S3 bucket.
 // Bucket credentials are set once with `railway bucket credentials` (see docs/deploy-railway.md) and preserved here.
 import { bucket, defineRailway, github, preserve, project, redis, service } from "railway/iac";
@@ -30,5 +30,5 @@ export default defineRailway(() => {
     replicas: { "us-east4": 2 },
   });
 
-  return project("planet-x-spherex", { resources: [queue, results, api, worker] });
+  return project("seek-in-space", { resources: [queue, results, api, worker] });
 });

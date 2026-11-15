@@ -142,7 +142,7 @@ def tap_query(urls: list[str], adql: str, retries: int = 1) -> list[dict]:
     for url in list(urls):
         for attempt in range(retries + 1):
             try:
-                req = urllib.request.Request(url, data=body, headers={"User-Agent": "planet-x-spherex index builder"})
+                req = urllib.request.Request(url, data=body, headers={"User-Agent": "seek-in-space index builder"})
                 with urllib.request.urlopen(req, timeout=300) as r:
                     text = r.read().decode("utf-8")
                 if text.lstrip().startswith("<"):

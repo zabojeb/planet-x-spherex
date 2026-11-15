@@ -33,7 +33,7 @@ Railway bills used CPU and RAM per minute, not the allocation. At roughly $20 pe
 Run from the repository root. Commands that need a linked project are marked.
 
 1. Sign in: `railway login` (already done on this machine).
-2. Create the project: `railway init --name planet-x-spherex`.
+2. Create the project: `railway init --name seek-in-space`.
 3. Add Redis: `railway add --database redis --json`.
 4. Create the bucket in US East: `railway bucket create spherex-results --region iad --json`.
 5. Create the services (linked project): `railway add --service api --json` and `railway add --service worker --json`.

@@ -1,7 +1,7 @@
 [project]
 name = "spherex-backend"
 version = "0.1.0"
-description = "Planet X x SPHEREx: data access, processing and API for blinking SPHEREx images over time"
+description = "Seek In Space: data access, processing and API for blinking SPHEREx images over time"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",

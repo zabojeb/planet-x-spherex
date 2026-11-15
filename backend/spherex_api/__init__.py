@@ -1,1 +1,1 @@
-"""HTTP API for the Planet X x SPHEREx viewer."""
+"""HTTP API for the Seek In Space viewer."""
