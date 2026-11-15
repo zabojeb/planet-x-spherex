@@ -28,7 +28,7 @@ import { HIGH_PM, SkyView, catalogMarkers, markerTip, selectionWorld, sourceKey,
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
+import { bandLabel, computeDisplay, effectiveRef, firstPlane, isPartial, otherDetectors, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
 import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
 import { cutStamp, locateSource } from "./locate";
 import { Derived, percentiles, type BandSel } from "./render";
@@ -276,6 +276,7 @@ export default function App() {
   const skyCtl = useRef<SkyController | null>(null);
   /** "Analyze" on the map: analyse this point once its new field has fully loaded. */
   const pendingAnalyze = useRef<{ ra: number; dec: number } | null>(null);
+  const analysisEl = useRef<HTMLDivElement>(null); // holds the analysis window; SkyView keeps it next to its point
   const onMapMode = useCallback((on: boolean) => {
     setMapMode(on);
     if (!on) setMapPick(null);
@@ -313,6 +314,10 @@ export default function App() {
   const loadKey = target
     ? [target.ra, target.dec, target.pmra, target.pmdec, target.ref_epoch, target.moving?.object_name, target.moving?.naif_id, fov].join("|")
     : null;
+  // grids whose first image (perhaps one detector) and first whole frame have been measured, for profiling:
+  // performance.getEntriesByName("first-image" | "first-frame")
+  const firstImage = useRef("");
+  const firstFrame = useRef("");
   const loaded = useRef<{ key: string; spec: TargetSpec; fovOverride: number | null; name: string } | null>(null);
   const unknownPreset = spec.kind === "preset" && presets.length > 0 && !target;
 
@@ -329,6 +334,10 @@ export default function App() {
     const place = placeOf(target);
     setError(null);
     setProgress({ stage: "queued", done: 0, total: 0, elapsed: 0 });
+    // the start of a load, for the profiling measures "first-image" and "first-frame"
+    performance.clearMarks("load-start");
+    performance.mark("load-start");
+    firstImage.current = firstFrame.current = "";
     // Show a result: a preview while the build runs (the opening visit first, then more), then the full one.
     const adopt = (data: SequenceData) => {
       if (ctrl.signal.aborted) return;
@@ -421,23 +430,40 @@ export default function App() {
     [derived, view.mode, view.band, view.epoch, view.ref, view.stack, view.ends, view.partial, view.view3d, willPlay, flagsOn],
   );
   const needKey = need ? [...need.now, ...need.soon].map((k) => `${k.array}${k.e}${k.b}`).join(",") : "";
+  const first = useMemo(() => (derived && need && !isCube ? firstPlane(derived, view, need.now) : null), [derived, needKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!seq || !need) return;
     const ctrl = new AbortController();
     const key = gridOf(seq.meta);
     const tick = () => !ctrl.signal.aborted && setPlanesTick((t) => t + 1);
     setPlanesBusy(true);
-    ensurePlanes(seq, need.now, ctrl.signal, (done, total) => setProgress((p) => (p?.stage === "download" ? { ...p, done, total } : p)))
+    const drawn = () => {
+      setProgress((p) => (p?.stage === "download" ? null : p));
+      setPlanesTick((t) => t + 1);
+    };
+    // the whole frame: what waits for it (catalogues, an analysis asked for on the map) can start
+    const shown = () => {
+      drawn();
+      setFrameReady(key);
+    };
+    // One plane (the current epoch on one detector) goes out first and is shown as soon as it lands; the rest of
+    // the frame follows right behind it (the request limiter is first in, first out).
+    const lead = first
+      ? ensurePlanes(seq, [first], ctrl.signal).then(() => {
+          if (!ctrl.signal.aborted) drawn();
+        })
+      : Promise.resolve();
+    const rest = first ? need.now.filter((k) => k.array !== first.array || k.e !== first.e || k.b !== first.b) : need.now;
+    Promise.all([lead, ensurePlanes(seq, rest, ctrl.signal, (done, total) => setProgress((p) => (p?.stage === "download" ? { ...p, done, total } : p)))])
       .then(async () => {
         if (ctrl.signal.aborted) return;
         setPlanesBusy(false);
-        setProgress((p) => (p?.stage === "download" ? null : p));
-        setPlanesTick((t) => t + 1);
-        setFrameReady(key);
-        // Then the flag overlay, then the frames shown next. Best effort: a failure only means they download
-        // when shown.
+        shown();
+        // Then the flag overlay, the frames shown next and the other detectors of this epoch. Best effort: a
+        // failure only means they download when shown.
         await ensurePlanes(seq, need.after, ctrl.signal).then(tick, () => undefined);
         if (!ctrl.signal.aborted) await ensurePlanes(seq, need.soon, ctrl.signal).then(tick, () => undefined);
+        if (!ctrl.signal.aborted && derived) await ensurePlanes(seq, otherDetectors(derived, view, [...need.now, ...need.after, ...need.soon]), ctrl.signal).then(tick, () => undefined);
       })
       .catch((e) => {
         if (ctrl.signal.aborted || e?.name === "AbortError") return;
@@ -465,7 +491,38 @@ export default function App() {
   const gridKey = meta ? gridOf(meta) : "";
   const lastDisplay = useRef<{ key: string; d: Display } | null>(null);
   if (computed && meta) lastDisplay.current = { key: gridKey, d: computed };
-  const display = computed ?? (lastDisplay.current && lastDisplay.current.key === gridKey ? lastDisplay.current.d : null);
+  // The lead plane on its own (one detector, current epoch) while the rest of the first frame downloads.
+  const provisional = useMemo(
+    () =>
+      !computed && derived && first && seq?.planes.plane("coadds", first.e, first.b)
+        ? computeDisplay(derived, { ...view, mode: "blink", band: first.b, epoch: first.e }, expView)
+        : null,
+    [computed, derived, first, planesTick], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const sameGrid = lastDisplay.current && lastDisplay.current.key === gridKey ? lastDisplay.current.d : null;
+  const display = computed ?? sameGrid ?? provisional;
+  const leadOnly = !computed && !sameGrid && !!provisional ? first : null; // which plane stands in for the frame
+  // epochs whose image for the shown detector is on its way (the scrubber marks them)
+  const pendingEpochs = useMemo(() => {
+    if (!derived || !need || view.mode === "exp") return [];
+    const sel = view.mode === "rgb" ? "rgb" : view.band;
+    const fetching = new Set([...need.now, ...need.soon].filter((k) => k.array === "coadds").map((k) => k.e));
+    return derived.playable(sel).filter((e) => fetching.has(e) && !derived.ready(e, sel));
+  }, [derived, needKey, view.mode, view.band, planesTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const measureOnce = (name: string, done: { current: string }) => {
+    if (done.current === gridKey) return;
+    done.current = gridKey;
+    try {
+      performance.clearMeasures(name);
+      performance.measure(name, "load-start");
+    } catch {
+      /* no load-start mark (e.g. a hot reload) */
+    }
+  };
+  if (gridKey && !seq?.meta.preview) {
+    if (display) measureOnce("first-image", firstImage);
+    if (computed) measureOnce("first-frame", firstFrame);
+  }
 
   // ---- per-exposure tables (columns), only when something on screen needs them
   const wantExposures = !!seq && (view.mode === "exp" || drawer === "details");
@@ -1024,6 +1081,12 @@ export default function App() {
     }
     return epochInfo ? mjdToYear(epochInfo.mjd_mean) : 2026;
   })();
+  // where the analysed object is on the epoch shown (a moving source moves with it)
+  const ap = analysis?.pos;
+  const analysisAt = useMemo<[number, number] | null>(
+    () => (ap ? propagate({ ra: ap.ra, dec: ap.dec, epoch: ap.ref_epoch ?? 2000, pmra: ap.pmra ?? 0, pmdec: ap.pmdec ?? 0 }, year) : null),
+    [ap, year],
+  );
   const span: [number, number] | null =
     meta && meta.epochs.length > 1 ? [mjdToYear(meta.epochs[0].mjd_mean), mjdToYear(meta.epochs[meta.epochs.length - 1].mjd_mean)] : null;
   // In the long baseline the track runs from the archival positions (where the target is in the field) on.
@@ -1105,7 +1168,7 @@ export default function App() {
         }
       : null;
 
-  const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}` : "";
+  const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}${leadOnly ? ` · ${leadOnly.b} first, loading the rest` : ""}` : "";
   const bandShort = view.mode === "rgb" ? "RGB" : view.band === "all" ? "All" : view.band;
   const openDetails = (tab: DrawerTab = "spectrum") => {
     setHero(false);
@@ -1390,6 +1453,8 @@ export default function App() {
       frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
       label={targetName}
       onMapMode={onMapMode}
+      anchor={analysis && meta ? analysisAt : null}
+      anchorEl={analysisEl}
       mapPick={mapPick}
       onMapPick={(pos) => (pos === null || mapPicking ? setMapPick(pos) : undefined)}
       mapCard={
@@ -1430,6 +1495,7 @@ export default function App() {
         mode={view.mode}
         current={curArch ? -1 : view.epoch}
         available={derived.playable(view.mode === "rgb" ? "rgb" : view.band)}
+        loading={pendingEpochs}
         refEpoch={view.mode === "diff" ? refEpoch : null}
         stackSel={view.stack}
         onSelect={(e) => set({ epoch: e, arch: -1 })}
@@ -1669,20 +1735,22 @@ export default function App() {
         />
       )}
       {analysis && meta && (
-        <Suspense fallback={null}>
-          <AnalysisModal
-            subject={analysis}
-            meta={meta}
-            ylog={view.ylog}
-            onYlog={(ylog) => set({ ylog })}
-            onClose={() => setAnalysis(null)}
-            onOpenCurves={(photometry, label) => {
-              setSource({ key: `an:${analysis.key}`, label, photometry });
-              setAnalysis(null);
-              setDrawer("lightcurve");
-            }}
-          />
-        </Suspense>
+        <div ref={analysisEl} className="am-anchor">
+          <Suspense fallback={null}>
+            <AnalysisModal
+              subject={analysis}
+              meta={meta}
+              ylog={view.ylog}
+              onYlog={(ylog) => set({ ylog })}
+              onClose={() => setAnalysis(null)}
+              onOpenCurves={(photometry, label) => {
+                setSource({ key: `an:${analysis.key}`, label, photometry });
+                setAnalysis(null);
+                setDrawer("lightcurve");
+              }}
+            />
+          </Suspense>
+        </div>
       )}
     </div>
   );

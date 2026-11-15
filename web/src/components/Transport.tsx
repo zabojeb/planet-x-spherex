@@ -28,6 +28,8 @@ interface Props {
   onSelect: (e: number) => void;
   onToggleStack: (e: number) => void;
   exposures: { count: number; index: number; onIndex: (i: number) => void } | null;
+  /** Epochs whose image for the shown detector is still downloading (drawn faint and pulsing). */
+  loading?: number[];
 }
 
 /** Compact floating dock: previous / play / next, the epoch scrubber and the date; `children` holds the mode control. */
@@ -158,7 +160,7 @@ function Scrubber(p: Props) {
         const has = p.available.includes(e.index);
         const isCur = e.index === p.current;
         const inStack = p.mode === "stack" && has && (!p.stackSel || p.stackSel.includes(e.index));
-        const cls = ["scrub-tick", isCur && p.mode !== "stack" ? "cur" : "", has ? "" : "nodata", e.partial ? "partial" : "", p.mode === "stack" ? (inStack ? "box on" : "box") : ""]
+        const cls = ["scrub-tick", isCur && p.mode !== "stack" ? "cur" : "", has ? "" : "nodata", has && p.loading?.includes(e.index) ? "loading" : "", e.partial ? "partial" : "", p.mode === "stack" ? (inStack ? "box on" : "box") : ""]
           .filter(Boolean)
           .join(" ");
         return (
@@ -167,7 +169,7 @@ function Scrubber(p: Props) {
             className={cls}
             style={{ left: x(e.mjd_mean) }}
             disabled={!has}
-            title={`Epoch ${e.index + 1}: ${formatDate(e.mjd_min)} → ${formatDate(e.mjd_max)} · ${e.n} exposures${e.partial ? " · partial visit" : ""}`}
+            title={`Epoch ${e.index + 1}: ${formatDate(e.mjd_min)} → ${formatDate(e.mjd_max)} · ${e.n} exposures${e.partial ? " · partial visit" : ""}${has && p.loading?.includes(e.index) ? " · downloading" : ""}`}
             aria-label={`Epoch ${e.index + 1}`}
             onPointerDown={(ev) => {
               if (p.mode === "stack") {

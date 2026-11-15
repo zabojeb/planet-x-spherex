@@ -87,6 +87,29 @@ export function stackEpochs(d: Derived, v: ViewState): number[] {
  *  without waiting for the overlays. */
 export type PlaneNeeds = { now: PlaneKey[]; after: PlaneKey[]; soon: PlaneKey[] };
 
+/** The single plane fetched before anything else, so a picture is on screen while the rest of the first frame
+ *  downloads: the current epoch on one detector — the one shown, or for "All", RGB and their differences the
+ *  detector with the most exposures in that epoch (the cleanest single image). Null when the first frame is one
+ *  plane anyway (or for single exposures, which come as a stack). */
+export function firstPlane(d: Derived, v: ViewState, now: PlaneKey[]): PlaneKey | null {
+  if (v.mode === "exp") return null;
+  const images = now.filter((k) => k.array === "coadds");
+  if (images.length <= 1) return null;
+  const here = images.filter((k) => k.e === v.epoch);
+  if (!here.length) return null;
+  if (v.band !== "all" && v.mode !== "rgb") return here.find((k) => k.b === v.band) ?? here[0];
+  const bands = d.seq.meta.epochs[v.epoch]?.bands ?? {};
+  return [...here].sort((a, b) => (bands[b.b]?.n ?? 0) - (bands[a.b]?.n ?? 0))[0];
+}
+
+/** The other detectors of the current epoch, fetched last (after the frames the player shows next), so a switch
+ *  of detector is instant. Planes already in `seen` are left out. */
+export function otherDetectors(d: Derived, v: ViewState, seen: PlaneKey[]): PlaneKey[] {
+  if (v.mode === "exp") return [];
+  const have = new Set(seen.map((k) => `${k.array}|${k.e}|${k.b}`));
+  return d.planesFor(v.epoch, "all").filter((k) => !have.has(`${k.array}|${k.e}|${k.b}`));
+}
+
 export function planesNeeded(d: Derived, v: ViewState, playing: boolean, flags: boolean): PlaneNeeds {
   const sel = v.mode === "rgb" ? "rgb" : v.band;
   const now: PlaneKey[] = [];
