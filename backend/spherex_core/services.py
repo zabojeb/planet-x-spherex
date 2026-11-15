@@ -664,3 +664,8 @@ def long_baseline_csv(job_id: str) -> str:
     if job_id.partition("-")[2][:1] != "l":
         raise NotFound("not a long-baseline light-curve job")
     return lightcurve_csv(json.loads(field_result_path(job_id).read_text()))
+
+
+# ---------------------------------------------------------------- solar system (ADR-0060): spherex_core.solar.service
+from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_submit,  # noqa: E402, F401
+                            static_sky_submit, unknown_movers_submit)

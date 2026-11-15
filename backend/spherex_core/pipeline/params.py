@@ -38,6 +38,9 @@ class SequenceParams:
     naif_id: int | None = None  # instead of object_name for names Horizons finds ambiguous
     obs_begin: str | None = None  # YYYY-MM-DD, MOST search window
     obs_end: str | None = None
+    # Co-moving mode only: subtract the static sky behind the object (spherex_core.solar.static_sky) and add
+    # clean co-adds/exposures to the result. Enters the key only when set.
+    static_sky: bool = False
 
     @property
     def is_moving_object(self) -> bool:
@@ -68,4 +71,8 @@ class SequenceParams:
             d["bands"] = sorted(self.bands)
         if self.is_moving_object:
             d["obj"] = [self.object_name, self.object_type, self.naif_id, self.obs_begin, self.obs_end]
+        if self.static_sky:
+            from ..solar.static_sky import STATIC_SKY_VERSION
+
+            d["ss"] = STATIC_SKY_VERSION
         return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()[:20]

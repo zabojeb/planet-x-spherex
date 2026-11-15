@@ -179,6 +179,76 @@ Command-line tools: `scripts/build_archival.py <sequence id> [--fov 12]` builds 
 prints the target's centroid offset in every frame; `scripts/build_moving.py <name> [--begin --end --type]`
 runs the MOST search and builds the co-moving sequence.
 
+### Static sky, comets, asteroids, unknown movers (ADR-0060)
+
+**Static sky ("different background, same comet").** A co-moving build with `static_sky` gives every exposure a
+template made of SPHEREx's own images of the same patch: same detector, wavelength within 1.5 resolution elements
+(from the footprint corners and the detector's wavelength map, re-measured after alignment), taken while the object
+was more than the grid half-diagonal plus a coma margin away (ephemeris interpolated inside a visit, extrapolated
+up to 30 days along it). Up to four candidates are read; the template is their median (two or more within
+0.5 dλ), a linear interpolation in wavelength, or the nearest one. The clean exposure is aligned − template − outer
+offset; pixels where the template is bright enough that the measured residual fraction ε would leave more than
+3σ (template > max(3, 3/ε) σ) are masked. The clean stacks are the normal co-adds of the clean exposures.
+
+| Sequence | Exposures with a template | Templates read | p99 \|pixel\|/σ before → after | Masked | Static-sky time |
+|---|---|---|---|---|---|
+| 3I/ATLAS Aug 2025, 6′ | 160/160 | 576 (1.2 GB) | 31.7 → 1.6 (3σ mask) | 22 % | 205 s (177 s MOST searches) |
+| 3I/ATLAS Aug 2025, 16′ | 160/160 | 576 (2.9 GB) | 35.2 → 2.1 | 8.5 % | 75 s; 29 s with cached searches |
+| C/2025 A6 (Lemmon), 10′, 2 visits | 228/228 | 653 (2.1 GB) | 43.3 → 2.4 | 11 % | 352 s (314 s searches) |
+| 433 Eros, 6′, 6 visits | 952/954 (1 of 109 searches failed) | 2,399 (5.1 GB) | 21.3 → 2.2 | 6.3 % | 436 s |
+| 16 Psyche, 6′, 2 visits | 295/295 | 670 (1.4 GB) | 32.7 → 2.2 | 8.0 % | 70 s |
+
+Searches ran on IRSA MOST (fixed-point pseudo-orbit) because IRSA TAP answered 502 during these runs; TAP takes
+seconds when it is up. In the 3I/ATLAS D5 clean stack the CO2 coma is visible to ~3′ where the plain stack shows
+star trails.
+
+**Comets.** Apertures of fixed radius in km (θ″ = ρ / (725.27 Δ_au), Δ from SPHEREx) on the clean exposures,
+masked pixels filled with their ring mean; Afρ = (2Δr_h)²/ρ · F/F_sun with the CALSPEC Sun averaged over each
+channel, A(0)fρ with the Halley–Marcus phase function; gas and ice bands from a linear continuum through
+sidebands (emission: integrated flux from the channel response; absorption: depth), Monte Carlo errors;
+Q = 2vN/(πρ), N = 4πΔ²F/(g hν), v = 0.85 r_h^−0.5 km/s, g(CO2) = 2.86·10⁻³, g(CO) = 2.6·10⁻⁴,
+g(H2O 2.7 µm) = 2.8·10⁻⁴ s⁻¹ at 1 au (× r_h⁻²); 3σ upper limits when not detected.
+
+| | Measured (ρ = 2·10⁴ / 5·10⁴ km) | Published |
+|---|---|---|
+| 3I/ATLAS Aug 2025, r_h 3.22 au, Δ 2.71 au, α 17° | Q(CO2) 8.7·10²⁶ / 1.1·10²⁷ s⁻¹ (53σ, 56σ) | 9.4·10²⁶–1.6·10²⁷ (SPHEREx team, arXiv 2508.15469, 2512.07318) |
+| | Q(H2O) 3.3 / 4.0·10²⁶ s⁻¹ (3.4σ, 4.3σ) | ~3.2·10²⁶ (ibid.) |
+| | CO not detected: Q < 5.1·10²⁶ (3σ) | < 2.8·10²⁶ (ibid.) |
+| | water-ice 3 µm band depth 0.75 ± 0.07 (10.5σ) | ice absorption reported (ibid.) |
+| | Afρ (D1) 204 cm, A(0)fρ 379 cm; dust colour −1.5 ± 0.3 %/100 nm | Afρ ~ 300 cm (r band, Aug 2025; arXiv 2509.01647, 2507.13409) |
+| C/2025 A6 (Lemmon) Feb 2026, r_h 2.12 au, Δ 1.95 au | Q(CO2) 2.0 / 2.2·10²⁷, Q(CO) 1.4 / 1.2·10²⁷ s⁻¹ (61σ, 11σ); Afρ (D1) 723 cm | — |
+| C/2025 A6 May 2026, r_h 3.33 au, Δ 2.87 au | Q(CO2) 2.0 / 2.4·10²⁶, Q(CO) 7.9 / 9.3·10²⁶, Q(H2O) 5.0 / 5.5·10²⁶; Afρ 179 cm | — |
+| C/2025 A6 activity | A(0)fρ ∝ r_h^(−3.7 ± 0.2) (1683 → 319 cm), CO2 down 10×, CO down < 2× | — |
+
+The Afρ of 3I/ATLAS falls with ρ (178, 204, 109, 62 cm at 1, 2, 5, 10·10⁴ km): its profile is steeper than ρ⁻¹
+beyond ~5·10⁴ km. One Lemmon visit has no channel inside the H2O 2.7 µm window, so that band is not measured there.
+
+**Asteroids.** Fluxes from the ePSF photometry, or clean apertures (2 FWHM) scaled to it per detector;
+saturated detectors re-measured in their ring on the clean exposures (relative, light curve only). Reduced
+reflectance magnitudes at light-time corrected times; per visit a quadratic in wavelength per detector, a phase
+slope and a Fourier series; Δχ² summed over visits and zoomed at the peak. One brightness maximum per periodogram
+cycle (topographic prominence ≥ 10 %) means the peak is the second harmonic: P = 2 × peak, confirmed when the odd
+harmonics are significant. `period.confidence` is high when two or more visits peak on the joint period and it is
+not within 3 % of a harmonic of SPHEREx's 98.6-min orbit.
+
+| | Result | Known |
+|---|---|---|
+| 433 Eros (308 ePSF points, 3 visits used) | P = 5.27029 ± 0.00019 h, peak at 2.6351 h doubled (odd harmonics p = 4·10⁻¹²), confidence high, amplitude 1.2 mag at α ≈ 60° | 5.27026 h |
+| 433 Eros, clean apertures (348 points) | P = 5.27054 ± 0.00019 h | |
+| Eros spectrum (visit at α 60°, r 1.14 au) | 1 µm band depth 0.220 ± 0.014 at 0.958 µm, slope 43 %/µm, thermal tail 330 K (12 % at 3 µm) → S | S (Sq) |
+| 16 Psyche (82 ePSF + 143 clean-ring points) | P = 3.46 h, confidence low (one visit peaks at the 1.62 h orbital alias) — **not recovered** | 4.196 h |
+
+Psyche (V ≈ 11) saturates D1–D3, its amplitude is ~0.1 mag, and ring photometry scatters by ~5 % per exposure
+(Known limitations), so its light curve is below what SPHEREx's sampling and these fluxes can resolve; no
+spectrum class either (no unsaturated 1 µm channels).
+
+**Unknown movers.** Fixed-position sequences only: the field analysis' moving-object detection and JPL
+identification (or a finished field job), then every tracklet without a JPL match listed with its evidence and a
+tier (strong: high quality, ≥ 4 detections, detector pair confirmed ≥ 50 %, real/bogus ≥ 0.6), one step lower
+when a tracklet of another visit lies within 6″ (a real mover is elsewhere months later). Identification
+failures make tracklets "unverified". The ADES export (station 288) writes the strong ones; it is follow-up data
+for MPChecker / NEOCP checks, not a discovery claim.
+
 ## Spectral analysis
 
 Code: `spherex_core/spectral/` (ADRs 0040–0044); endpoints in [api](api.md#spectral-analysis).

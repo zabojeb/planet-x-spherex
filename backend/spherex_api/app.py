@@ -23,6 +23,7 @@ from .routes import archival, moving
 from .routes import spectral
 from .routes import field
 from .routes import point
+from .routes import solar
 from .routes import status
 from .routes import longbaseline
 
@@ -94,6 +95,7 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(targets.router)
     app.include_router(archival.router)  # before sequences: its /{array}.bin catch-all would take archival.bin
     app.include_router(field.router)  # before sequences for the same reason (trackstack.bin)
+    app.include_router(solar.router)  # before sequences for the same reason (clean_exposures.bin)
     app.include_router(sequences.router)
     app.include_router(moving.router)
     app.include_router(catalogs.router)

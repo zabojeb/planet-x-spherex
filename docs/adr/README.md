@@ -74,3 +74,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0057](0057-data-access-mirror-and-fallbacks.md) | Local SPHEREx file-catalogue mirror, interchangeable sources with latency tracking and hedging, popular-field prewarm and an R2 tier | Accepted (builds on 0037–0039, 0056) | 2026-11-15 |
 | [0058](0058-sky-map-aladin-lite.md) | Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both | Accepted | 2026-11-15 |
 | [0059](0059-long-baseline-light-curves.md) | Measure 2MASS, AllWISE and NEOWISE frames like the target and tie SPHEREx to them with field stars | Accepted (extends 0020, 0023) | 2026-11-15 |
+| [0060](0060-solar-system-science-on-comoving-sequences.md) | Subtract the static sky from co-moving sequences with SPHEREx's own other visits; comet, asteroid and unknown-mover analyses as jobs | Accepted (extends 0045, 0048, 0049, 0052) | 2026-11-15 |
