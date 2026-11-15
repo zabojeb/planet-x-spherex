@@ -124,17 +124,25 @@ def _ssh_args() -> list[str]:
             "-p", env.get("DEPLOY_PORT", "22"), env["DEPLOY_HOST"]]
 
 
-def push(seq_id: str, remote_tier: str) -> dict:
+def push(seq_id: str, remote_tier: str, skip: int = 0) -> dict:
     """Stream each part from the server into R2 with wrangler (uses this machine's `wrangler login`)."""
     ssh = _ssh_args()
     manifest = json.loads(subprocess.run(ssh + [f"cat {remote_tier}/{seq_id}/manifest.json"], check=True,
                                          capture_output=True).stdout)
-    for part in manifest["parts"] + [{"name": "manifest.json"}]:
-        src = subprocess.Popen(ssh + [f"cat {remote_tier}/{seq_id}/{part['name']}"], stdout=subprocess.PIPE)
-        subprocess.run(["wrangler", "r2", "object", "put", f"{BUCKET}/tier/{seq_id}/{part['name']}", "--pipe",
-                        "--remote"], stdin=src.stdout, check=True, capture_output=True)
-        src.wait()
-        print(f"  pushed {seq_id}/{part['name']}", flush=True)
+    names = [p["name"] for p in manifest["parts"]] + ["manifest.json"]  # the manifest last: it marks completion
+    for name in names[skip:]:
+        for attempt in range(3):  # a 240 MB put through a home connection does fail now and then
+            src = subprocess.Popen(ssh + [f"cat {remote_tier}/{seq_id}/{name}"], stdout=subprocess.PIPE)
+            r = subprocess.run(["wrangler", "r2", "object", "put", f"{BUCKET}/tier/{seq_id}/{name}", "--pipe",
+                                "--remote"], stdin=src.stdout, capture_output=True, text=True)
+            src.wait()
+            if r.returncode == 0:
+                break
+            print(f"  {seq_id}/{name} attempt {attempt + 1} failed: {(r.stderr or r.stdout).strip()[-300:]}",
+                  flush=True)
+        else:
+            raise RuntimeError(f"could not push {seq_id}/{name}")
+        print(f"  pushed {seq_id}/{name}", flush=True)
     return manifest
 
 
@@ -217,6 +225,7 @@ def main() -> None:
     ap.add_argument("--popular", action="store_true")
     ap.add_argument("--remote-tier", default="/workspace/cache/tier")
     ap.add_argument("--base", default=os.environ.get("SPHEREX_TIER_BASE", ""))
+    ap.add_argument("--skip-parts", type=int, default=0, help="push: resume after this many parts of one sequence")
     a = ap.parse_args()
     ids = a.ids
     if a.popular and a.cmd in ("bundle", "list"):
@@ -229,7 +238,7 @@ def main() -> None:
         if a.cmd == "bundle":
             m = bundle(sid)
         elif a.cmd == "push":
-            m = push(sid, a.remote_tier)
+            m = push(sid, a.remote_tier, a.skip_parts)
         elif a.cmd == "fetch":
             m = fetch(sid, a.base or "/workspace/cache/tier_in")
         else:

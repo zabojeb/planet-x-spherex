@@ -33,13 +33,16 @@ from ..timeutil import mjd_to_year
 from .common import SequenceContext
 
 log = logging.getLogger(__name__)
-POINT_VERSION = 1
+POINT_VERSION = 2  # 2: catalogue rows matched at the point's own epoch position (fast movers)
 CATALOGS = ("gaia", "catwise", "2mass", "simbad")
 SEARCH_RADIUS = 15.0  # arcsec around the point for catalogue matches
 MATCH_RADIUS = 4.0  # arcsec: a catalogue source this close at the sequence's epochs is "the" counterpart
 # Cone radii at each catalogue's own epoch, wide enough for fast movers (Barnard's Star is 95" from its Gaia
 # 2016 position and 4.5' from its SIMBAD J2000 one by 2026); 2MASS has no motions, so only nearby rows count.
 CONE_RADIUS = {"gaia": 180.0, "catwise": 180.0, "2mass": 30.0, "simbad": 300.0}
+MAX_CONE_ROWS = 3000  # catalogs.common.MAX_ROWS: cones are returned brightest first, cut at this many rows
+# Epoch of each catalogue's positions: its cone is centred on where the point was then.
+CAT_EPOCH = {"gaia": 2016.0, "catwise": 2015.4, "2mass": 2000.0, "simbad": 2000.0}
 KNOWN_RADIUS = 30.0  # arcsec: known solar-system object this close at an epoch
 TRACKLET_RADIUS = 20.0  # arcsec: field-analysis candidates this close to the point
 MAX_KNOWN_EPOCHS = 8
@@ -88,6 +91,31 @@ def _propagate(src: dict, year: float) -> tuple[float, float]:
     return (ra + pmra * dt / 3.6e6 / math.cos(math.radians(dec2))) % 360.0, dec2
 
 
+def _point_at(req: "PointRequest", year: float) -> tuple[float, float]:
+    """Where the requested point is at `year`: moved with the request's proper motion when it has one, else fixed."""
+    if req.pmra is None or req.pmdec is None:
+        return req.ra % 360.0, req.dec
+    return _propagate({"ra": req.ra, "dec": req.dec, "pmra": req.pmra, "pmdec": req.pmdec,
+                       "epoch": req.ref_epoch}, year)
+
+
+def _match_sep(src: dict, req: "PointRequest", year: float) -> float:
+    """Separation in arcsec between a catalogue source and the point, compared at one common epoch.
+
+    A source with a proper motion and the point are both moved to `year` (the sequence's mean epoch). A source
+    without one (2MASS, some SIMBAD rows) is compared at its own epoch, where the point is moved instead, so a fast
+    mover still matches its old 2MASS detection. Comparing a source moved to ~2026 with a request given at J2000
+    was the bug that hid ε Indi B's Gaia entry (about 122″ apart)."""
+    if src.get("pmra") is not None and src.get("pmdec") is not None:
+        ra_s, dec_s = _propagate(src, year)
+        ra_p, dec_p = _point_at(req, year)
+    else:
+        y_src = float(src.get("epoch") or year)
+        ra_s, dec_s = float(src["ra"]), float(src["dec"])
+        ra_p, dec_p = _point_at(req, y_src)
+    return _sep(ra_s, dec_s, ra_p, dec_p)
+
+
 # ------------------------------------------------------------------------------------------------- steps
 def identification(ctx: SequenceContext, req: PointRequest, years: list[float]) -> dict:
     """Nearest catalogue sources (at the sequence's mean epoch) with positions at every epoch."""
@@ -102,8 +130,13 @@ def identification(ctx: SequenceContext, req: PointRequest, years: list[float]) 
     # field reuses one cached answer per catalogue instead of a new remote query.
     # The bucket centre is at most 0.005·√2 ≈ 0.0071° from the point (less in RA away from the equator), so a fixed
     # 0.0075° margin keeps the cache key (and the answer) identical for every click in the bucket.
-    bra, bdec = round(req.ra, 2) % 360.0, round(req.dec, 2)
-    futures = {name: ex.submit(netpolicy.run_in_context(catalogs.cone), name, bra, bdec,
+    # Each cone is centred on where the point was at that catalogue's epoch: a request given at J2000 for a fast
+    # mover is minutes of arc from its Gaia 2016 position.
+    def centre(name: str) -> tuple[float, float]:
+        ra_c, dec_c = _point_at(req, CAT_EPOCH[name])
+        return round(ra_c, 2) % 360.0, round(dec_c, 2)
+
+    futures = {name: ex.submit(netpolicy.run_in_context(catalogs.cone), name, *centre(name),
                                CONE_RADIUS[name] / 3600.0 + 0.0075)
                for name in CATALOGS}
     wait(futures.values(), timeout=CATALOG_BUDGET_S)
@@ -122,8 +155,7 @@ def identification(ctx: SequenceContext, req: PointRequest, years: list[float]) 
         for s in rows:
             if s.get("ra") is None or s.get("dec") is None:
                 continue
-            ra_m, dec_m = _propagate(s, y_mid)
-            sep = _sep(ra_m, dec_m, req.ra, req.dec)
+            sep = _match_sep(s, req, y_mid)
             if sep <= SEARCH_RADIUS:
                 found.append((sep, s))
         found.sort(key=lambda t: t[0])
@@ -142,7 +174,9 @@ def identification(ctx: SequenceContext, req: PointRequest, years: list[float]) 
             m["track"] = track
             matches.append(m)
         out[name] = {"matches": matches, "n_in_radius": len(found),
-                     "counterpart": bool(matches and matches[0]["sep_arcsec"] <= MATCH_RADIUS)}
+                     "counterpart": bool(matches and matches[0]["sep_arcsec"] <= MATCH_RADIUS),
+                     # the cone hit the row limit (brightest first): a faint source may be missing from it
+                     "truncated": len(rows) >= MAX_CONE_ROWS}
     return out
 
 
@@ -204,7 +238,9 @@ def known_objects(ctx: SequenceContext, req: PointRequest, budget_s: float = KNO
     from ..field import known, observer
 
     epochs = ctx.meta["epochs"][:MAX_KNOWN_EPOCHS]
-    bra, bdec = round(req.ra, 2) % 360.0, round(req.dec, 2)
+    y_mid = float(np.mean([mjd_to_year(e["mjd_mean"]) for e in epochs])) if epochs else 2026.0
+    ra_c, dec_c = _point_at(req, y_mid)
+    bra, bdec = round(ra_c, 2) % 360.0, round(dec_c, 2)
     half = (KNOWN_RADIUS + 60.0) / 3600.0
     out = {"radius_arcsec": KNOWN_RADIUS, "observer": "SPHEREx (Horizons -163182)", "epochs": [],
            "matches": [], "skipped_epochs": []}
@@ -230,8 +266,9 @@ def known_objects(ctx: SequenceContext, req: PointRequest, budget_s: float = KNO
             out["epochs"].append({"epoch": e["index"], "mjd": e["mjd_mean"], "error": _err(ex)["error"]})
             continue
         near = []
+        ra_p, dec_p = _point_at(req, float(mjd_to_year(e["mjd_mean"])))
         for o in objs:
-            sep = _sep(o["ra"], o["dec"], req.ra, req.dec)
+            sep = _sep(o["ra"], o["dec"], ra_p, dec_p)
             if sep <= KNOWN_RADIUS:
                 near.append({"name": o["name"], "kind": o["kind"], "vmag": o.get("vmag"), "sep_arcsec": sep,
                              "ra": o["ra"], "dec": o["dec"]})
@@ -248,13 +285,15 @@ def tracklets(ctx: SequenceContext, req: PointRequest) -> dict:
         return {"available": False, "reason": "no field analysis of this sequence yet (POST /field)",
                 "candidates": []}
     data = json.loads(max(files, key=lambda p: p.stat().st_mtime).read_text())
+    eps = ctx.meta.get("epochs") or []
+    pt_ra, pt_dec = _point_at(req, float(np.mean([mjd_to_year(e["mjd_mean"]) for e in eps])) if eps else 2026.0)
     near = []
     near_tracklets: list[dict] = []
 
     def visit(obj, category: str) -> None:
         if isinstance(obj, dict):
             if "detections" in obj and "rate_arcsec_per_hr" in obj:
-                seps = [_sep(d["ra"], d["dec"], req.ra, req.dec) for d in obj["detections"]]
+                seps = [_sep(d["ra"], d["dec"], pt_ra, pt_dec) for d in obj["detections"]]
                 if seps and min(seps) <= TRACKLET_RADIUS:
                     if not obj.get("known") and len(near_tracklets) < 2:
                         near_tracklets.append(obj)
@@ -265,7 +304,7 @@ def tracklets(ctx: SequenceContext, req: PointRequest) -> dict:
                                  "known": (obj.get("known") or {}).get("name") if obj.get("known") else None})
                 return
             if obj.get("ra") is not None and obj.get("dec") is not None and isinstance(obj.get("ra"), (int, float)):
-                sep = _sep(obj["ra"], obj["dec"], req.ra, req.dec)
+                sep = _sep(obj["ra"], obj["dec"], pt_ra, pt_dec)
                 if sep <= TRACKLET_RADIUS:
                     near.append({"category": category, "kind": "source", "id": obj.get("id"), "sep_arcsec": sep,
                                  **{k: obj[k] for k in ("score", "pm_total", "ratio", "chi2_red", "amplitude",
@@ -314,6 +353,10 @@ def verdict(r: dict) -> dict:
     has_gaia = bool(gaia.get("counterpart"))
     has_catwise = bool((ident.get("catwise") or {}).get("counterpart"))
     has_2mass = bool((ident.get("2mass") or {}).get("counterpart"))
+    # "No Gaia counterpart" is a claim only when Gaia answered, completely, around the right place: not on an error,
+    # a timeout, or a cone cut off at the row limit (a dense field could have dropped a faint target).
+    gaia_checked = (not ident.get("error") and not gaia.get("error") and not gaia.get("truncated")
+                    and "matches" in gaia)
 
     if simbad and simbad[0]["sep_arcsec"] <= MATCH_RADIUS * 1.5:
         s = simbad[0]
@@ -322,10 +365,13 @@ def verdict(r: dict) -> dict:
     elif has_gaia:
         out.append(_f("identity", f"Matches {gaia_m['id']} (G={gaia_m.get('mag'):.1f})" if gaia_m.get("mag") else
                       f"Matches {gaia_m['id']}", 0.85, -0.15, gaia=gaia_m["id"], sep_arcsec=gaia_m["sep_arcsec"]))
-    elif not ident.get("error") and not gaia.get("error"):
+    elif gaia_checked:
         out.append(_f("identity", "No Gaia DR3 counterpart within 4″ at the SPHEREx epochs", 0.6,
                       0.0 if mover_near else 0.2, catwise=has_catwise, twomass=has_2mass))
-    elif gaia.get("error"):
+    elif gaia.get("truncated"):
+        out.append(_f("data", "Gaia DR3 checked only partly (dense field, row limit reached); identity unknown",
+                      0.8, 0.0))
+    elif gaia.get("error") or ident.get("error"):
         out.append(_f("data", "Gaia DR3 could not be checked (service unavailable); identity unknown", 0.9, 0.0))
 
     mo = (r.get("motion") or {}).get("combined")
@@ -342,7 +388,7 @@ def verdict(r: dict) -> dict:
             elif mover_near:
                 out.append(_f("motion", f"Centroid shifts {arcsec:.2f}″/yr, but an intra-visit mover passes here, so "
                               "the shift is not a proper motion", 0.5, 0.0, pm_mas_yr=pm, err=err))
-            elif gaia.get("error"):  # Gaia unreachable: report the motion, claim nothing about novelty
+            elif not gaia_checked:  # Gaia unreachable or incomplete: report the motion, claim nothing about novelty
                 out.append(_f("motion", f"Moves {arcsec:.2f}″/yr toward PA {mo['pa_deg']:.0f}° (Gaia not checked)",
                               0.6, 0.1, pm_mas_yr=pm, err=err))
             elif pm / err >= 5:
@@ -470,10 +516,13 @@ def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_
     t0 = time.monotonic()
     years = [float(mjd_to_year(e["mjd_mean"])) for e in ctx.meta["epochs"]]
     mjd_mid = float(np.mean([e["mjd_mean"] for e in ctx.meta["epochs"]]))
-    x, y = ctx.grid.world_to_pixel(req.ra, req.dec)
+    y_mid = float(np.mean(years))
+    ra_mid, dec_mid = _point_at(req, y_mid)  # a request with a motion (e.g. given at J2000) is drawn where it is now
+    x, y = ctx.grid.world_to_pixel(ra_mid, dec_mid)
     result: dict = {"sequence": ctx.seq_id, "version": POINT_VERSION, "request": asdict(req),
                     "point": {"ra": req.ra, "dec": req.dec, "x": float(x), "y": float(y),
-                              "inside": bool(0 <= x < ctx.grid.n and 0 <= y < ctx.grid.n)}}
+                              "inside": bool(0 <= x < ctx.grid.n and 0 <= y < ctx.grid.n),
+                              "epoch_position": {"ra": ra_mid, "dec": dec_mid, "year": y_mid}}}
     state = {name: "pending" for name in STEPS}
     seconds: dict[str, float] = {}
     lock = threading.Lock()
