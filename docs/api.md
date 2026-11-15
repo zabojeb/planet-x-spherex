@@ -76,10 +76,12 @@ Rows are sorted by `refs` (SIMBAD bibliography count). `ra`/`dec` are degrees IC
 The response is the job:
 
 ```json
-{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "elapsed": 9.4}
+{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "preview": "48006f61db3e73e6ae51p1", "elapsed": 9.4}
 ```
 
 `status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+
+`preview` is the id of the latest preview while the build runs, else `null` (ADR-0039). A preview is a complete result of the epochs read so far: the epoch the viewer opens on first, then more at 1/3 and 2/3 of the exposures. Builds of fewer than 40 exposures, or with one epoch, have none. Read it like any finished result (`GET /api/sequences/{preview}` or `/lite`, its planes and tables). Its `meta.json` has `preview: {"of": <build id>, "n": <1, 2, …>, "frames": <exposures in it>, "total": <exposures in the build>}`. Previews are deleted once the full result is written, so a client should drop a preview's data when the build finishes.
 
 Builds go through the job queue (ADR-0033): `SPHEREX_JOBS_PER_WORKER` builds run at once per worker (default 2; `SPHEREX_MAX_JOBS` is accepted as an alias), the rest wait by priority and submission order, and a queued job reports `position` (builds that start before it). Each POST and each poll is a heartbeat keyed by `X-Client-Id`; `DELETE` withdraws the caller. A build is cancelled when every client has withdrawn, or when nobody polled it for `SPHEREX_INTEREST_TIMEOUT` seconds (default 30; alias `SPHEREX_JOB_IDLE`); a cancelled job answers 410. A build that runs longer than `SPHEREX_MAX_RUNTIME` seconds (default 900; alias `SPHEREX_JOB_TIMEOUT`) fails with an error. Limits answer 429 with `Retry-After`.
 

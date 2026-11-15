@@ -14,7 +14,7 @@ import type { Progress } from "../api";
 import { SERIES } from "../colors";
 import type { Display } from "../display";
 import { heightField, paintDisplay, sliceAlpha, type Cmap, type Display3D, type Stretch } from "../render";
-import { loaderText } from "./SkyView";
+import { LoadChip } from "./Progress";
 
 export interface Layer {
   key: string;
@@ -50,6 +50,9 @@ export interface Sky3DProps {
   dateLabel: string;
   subLabel?: string;
   progress: Progress | null;
+  /** The scene shows another place than the one loading: faded until the new one arrives. */
+  dim?: boolean;
+  chipNote?: string | null;
   error: string | null;
   onRetry: () => void;
   lockKey: string;
@@ -512,12 +515,11 @@ export default function Sky3D(p: Sky3DProps) {
   };
   const [hover, setHover] = useState(false);
 
-  const loader = p.progress ? loaderText(p.progress) : null;
   const empty = cube ? (!p.layers.length ? "No layers to stack for this selection" : null) : p.display?.kind === "empty" ? p.display.message : null;
 
   return (
     <div
-      className={`sky sky3d${hover ? " pointing" : ""}${p.progress ? " dim" : ""}`}
+      className={`sky sky3d${hover ? " pointing" : ""}${p.dim ? " dim" : ""}`}
       ref={host}
       onPointerDown={(e) => {
         down.current = { x: e.clientX, y: e.clientY };
@@ -546,17 +548,7 @@ export default function Sky3D(p: Sky3DProps) {
           <span className="muted hud-hint">Drag to orbit · right-drag to pan · scroll to zoom · double-click to reset{cube ? " · click a label to show it" : ""}</span>
         </div>
       </div>
-      {loader && (
-        <div className="hud-loader" role="status" aria-live="polite">
-          <div className="hud-loader-text">
-            {loader.text}
-            {loader.pct != null && <span> — {loader.pct}%</span>}
-          </div>
-          <div className={`hud-loader-bar${loader.pct == null ? " indeterminate" : ""}`}>
-            <span style={loader.pct == null ? undefined : { width: `${Math.max(2, loader.pct)}%` }} />
-          </div>
-        </div>
-      )}
+      {p.progress && <LoadChip progress={p.progress} note={p.chipNote} />}
       {(failed || (empty && !p.progress)) && <div className="sky-note glass">{failed ?? empty}</div>}
       {p.error && !p.progress && (
         <div className="sky-note glass error" role="alert" onPointerDown={(e) => e.stopPropagation()}>

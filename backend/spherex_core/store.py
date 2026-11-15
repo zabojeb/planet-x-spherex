@@ -126,6 +126,18 @@ class ResultStore:
         self._misses.pop(seq_id, None)
         log.info("result %s published to bucket (%d files)", seq_id, len(files))
 
+    def remove(self, seq_id: str) -> None:
+        """Delete a result from the bucket: the previews of a build once its full result is out (ADR-0039).
+        No-op without a bucket."""
+        if not self.enabled:
+            return
+        s3 = self.client()
+        resp = s3.list_objects_v2(Bucket=self.bucket, Prefix=self._key(seq_id, ""))
+        keys = [{"Key": o["Key"]} for o in resp.get("Contents", [])]
+        if keys:
+            s3.delete_objects(Bucket=self.bucket, Delete={"Objects": keys, "Quiet": True})
+        log.info("result %s removed from bucket (%d files)", seq_id, len(keys))
+
     def ping(self) -> bool:
         if not self.enabled:
             return True

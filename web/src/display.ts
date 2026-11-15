@@ -68,32 +68,41 @@ export function stackEpochs(d: Derived, v: ViewState): number[] {
 
 /** Planes the current view needs: `now` for the frame on screen, `soon` for the frames likely next
  *  (neighbouring epochs while paused, every playable epoch while playing). */
-export function planesNeeded(d: Derived, v: ViewState, playing: boolean, flags: boolean): { now: PlaneKey[]; soon: PlaneKey[] } {
+/** Planes the view needs, by urgency: `now` is the image on screen, `after` what is drawn over it (the flag
+ *  overlay), `soon` the frames the player or a step will show next. The image is fetched first, so it shows up
+ *  without waiting for the overlays. */
+export type PlaneNeeds = { now: PlaneKey[]; after: PlaneKey[]; soon: PlaneKey[] };
+
+export function planesNeeded(d: Derived, v: ViewState, playing: boolean, flags: boolean): PlaneNeeds {
   const sel = v.mode === "rgb" ? "rgb" : v.band;
   const now: PlaneKey[] = [];
+  const after: PlaneKey[] = [];
   const soon: PlaneKey[] = [];
-  const frame = (e: number, out: PlaneKey[]) => {
+  const frame = (e: number, out: PlaneKey[], over: PlaneKey[]) => {
     out.push(...d.planesFor(e, sel));
     if (v.mode === "diff") out.push(...d.planesFor(effectiveRef(d, v), sel));
-    if (flags) out.push(...d.planesFor(e, sel, "flags"));
+    if (flags) over.push(...d.planesFor(e, sel, "flags"));
   };
-  if (v.mode === "exp") return { now, soon };
+  if (v.mode === "exp") return { now, after, soon };
   if (v.mode === "stack") {
     for (const e of stackEpochs(d, v)) {
       now.push(...d.planesFor(e, v.band));
       if (v.band !== "all") now.push(...d.planesFor(e, v.band, "coverage"));
     }
-    if (flags) now.push(...d.planesFor(v.epoch, v.band, "flags"));
-    return { now, soon };
+    if (flags) after.push(...d.planesFor(v.epoch, v.band, "flags"));
+    return { now, after, soon };
   }
-  frame(v.epoch, now);
+  frame(v.epoch, now, after);
   const list = playableEpochs(d, v);
   const i = list.indexOf(v.epoch);
   const next = playing ? list : [list[i + 1], list[i - 1]].filter((e): e is number => e !== undefined);
-  for (const e of next) if (e !== v.epoch) frame(e, soon);
-  const seen = new Set(now.map((k) => `${k.array}|${k.e}|${k.b}`));
+  const soonOver: PlaneKey[] = [];
+  for (const e of next) if (e !== v.epoch) frame(e, soon, soonOver);
+  soon.push(...soonOver); // the next images before their flag maps
+  const seen = new Set([...now, ...after].map((k) => `${k.array}|${k.e}|${k.b}`));
   return {
     now,
+    after,
     soon: soon.filter((k) => {
       const id = `${k.array}|${k.e}|${k.b}`;
       if (seen.has(id)) return false;
@@ -145,7 +154,7 @@ export function slices3d(d: Derived, v: ViewState): Slice[] {
 }
 
 /** Planes for a cube: every layer now; while playing the λ cube, the other epochs' layers next. */
-export function planesNeeded3d(d: Derived, v: ViewState, playing: boolean): { now: PlaneKey[]; soon: PlaneKey[] } {
+export function planesNeeded3d(d: Derived, v: ViewState, playing: boolean): PlaneNeeds {
   const seen = new Set<string>();
   const collect = (views: ViewState[]) => {
     const out: PlaneKey[] = [];
@@ -156,13 +165,13 @@ export function planesNeeded3d(d: Derived, v: ViewState, playing: boolean): { no
       }
     return out;
   };
-  if (v.view3d === "time" && v.mode === "exp" && v.band !== "all") return { now: [], soon: [] }; // single exposures, not planes
+  if (v.view3d === "time" && v.mode === "exp" && v.band !== "all") return { now: [], after: [], soon: [] }; // single exposures, not planes
   const now = collect(slices3d(d, v).map((s) => s.view));
-  if (v.view3d !== "bands" || v.mode === "stack") return { now, soon: [] };
+  if (v.view3d !== "bands" || v.mode === "stack") return { now, after: [], soon: [] };
   const list = playableEpochs(d, v);
   const i = list.indexOf(v.epoch);
   const next = playing ? list : [list[i + 1], list[i - 1]].filter((e): e is number => e !== undefined);
-  return { now, soon: collect(next.filter((e) => e !== v.epoch).flatMap((e) => slices3d(d, { ...v, epoch: e }).map((s) => s.view))) };
+  return { now, after: [], soon: collect(next.filter((e) => e !== v.epoch).flatMap((e) => slices3d(d, { ...v, epoch: e }).map((s) => s.view))) };
 }
 
 /** What to draw, or null while the planes of the current frame are still downloading. Stretch limits
@@ -200,8 +209,10 @@ export function computeDisplay(d: Derived, v: ViewState, exp: ExposureView): Dis
   }
   if (!d.has(v.epoch, sel)) return { kind: "empty", message: `No ${sel === "all" ? "" : sel + " "}data in this epoch` };
   if (!d.ready(v.epoch, sel)) return null;
-  if (v.mode === "diff") {
-    const ref = effectiveRef(d, v);
+  // Difference needs a second visit: with one (a preview of the first visit, or a single-visit field) the visit
+  // itself is shown until another arrives.
+  const ref = v.mode === "diff" ? effectiveRef(d, v) : -1;
+  if (v.mode === "diff" && !(ref === v.epoch && d.playable(sel).length < 2)) {
     if (!d.ready(ref, sel)) return null;
     const others = d.playable(sel).filter((e) => e !== ref && d.ready(e, sel));
     const [a, b] = d.limits(`diff|${sel}|${ref}|${others.join(",")}`, () => (others.length ? others : [ref]).map((e) => d.diff(sel, e, ref)),

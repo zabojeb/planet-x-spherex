@@ -4,7 +4,8 @@ Layout under settings.cache_dir. It is stable on purpose: changing a key formula
 caches warmed on the server.
 
     tap/<sha1[:16]>.json               IRSA TAP search results
-    cutouts/<k[:2]>/<sha1>.npz         native cutouts (image, variance, flags, slim header, flag defs)
+    chunks/<k[:2]>/<sha1(url)>.npz     per Level 2 file: slim header, byte layout, the rows read so far (ADR-0037)
+    cutouts/<k[:2]>/<sha1>.npz         old per-request cutouts, read once and turned into chunks (no longer written)
     wave/D<n>.npz                      per-detector wavelength lookup tables
     epsf/D<n>.npz                      per-detector effective PSF tables (441 zones)
     catalogs/<name>_<sha1[:16]>.json   catalog cone searches
@@ -34,7 +35,12 @@ class CacheLayout:
         key = _sha1(f"{ra:.5f},{dec:.5f},{','.join(collections)}")[:16]
         return self.root / "tap" / f"{key}.json"
 
+    def chunk(self, url: str) -> Path:
+        key = _sha1(url)
+        return self.root / "chunks" / key[:2] / f"{key}.npz"
+
     def cutout(self, url: str, ra: float, dec: float, half: int) -> Path:
+        """Old per-request cutout cache: only read, to reuse what servers warmed before ADR-0037."""
         key = _sha1(f"{url}|{ra:.7f}|{dec:.7f}|{half}")
         return self.root / "cutouts" / key[:2] / f"{key}.npz"
 

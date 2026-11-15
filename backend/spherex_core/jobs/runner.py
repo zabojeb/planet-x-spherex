@@ -20,8 +20,24 @@ BuildFn = Callable[[SequenceParams, "object", Progress], Awaitable[object]]
 CHECK_INTERVAL = 1.0
 
 
+async def _publish_preview(preview_id: str) -> None:
+    """With a shared bucket, API replicas other than this worker can only serve a preview from there."""
+    if store().enabled:
+        await asyncio.to_thread(store().publish, preview_id)
+
+
 async def _default_build(params: SequenceParams, out_dir, progress: Progress) -> object:
-    return await build_sequence(params, out_dir, progress, max_frames=queue_settings().max_frames)
+    shown: list[str] = []
+
+    async def on_preview(preview_id: str) -> None:
+        shown.append(preview_id)
+        await _publish_preview(preview_id)
+
+    meta = await build_sequence(params, out_dir, progress, max_frames=queue_settings().max_frames,
+                                on_preview=on_preview)
+    if shown and store().enabled:  # the full result replaces them (build_sequence removed the local copies)
+        await asyncio.to_thread(lambda: [store().remove(pid) for pid in shown])
+    return meta
 
 
 async def run_build(job_id: str, params: SequenceParams, progress: Progress, should_cancel: CancelCheck,
