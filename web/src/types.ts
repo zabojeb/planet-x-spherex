@@ -235,6 +235,15 @@ export interface PeriodogramResult {
   model: { phase: number[]; rel?: number[]; rel_by_band?: Record<string, number[]> };
 }
 
+/** GET /api/sequences/{id}/motion: a straight-line motion through per-epoch, per-detector co-add centroids. */
+export interface MotionFit {
+  start: { x: number; y: number; ra: number; dec: number };
+  reference_year: number;
+  combined: { pmra: number; pmdec: number; pmra_err: number; pmdec_err: number; pm_total: number; pm_total_err: number | null; pa_deg: number; n_points: number; n_epochs: number; bands: string[]; chi2_red_ra?: number; chi2_red_dec?: number };
+  points: { epoch: number; band: string; year: number; x: number; y: number; ra: number; dec: number; snr: number; sigma_arcsec: number; dra_arcsec: number; ddec_arcsec: number }[];
+  track: { epoch: number; year: number; ra: number; dec: number; x: number; y: number }[];
+}
+
 export interface SourcePhotometry {
   sequence: string;
   target: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number; name?: string | null };
@@ -420,21 +429,37 @@ export interface CatalogMatch {
   sep_arcsec?: number | null;
   pmra?: number | null;
   pmdec?: number | null;
+  /** Optional extras shown when present (SIMBAD, Gaia, 2MASS, CatWISE columns). */
+  otype?: string | null;
+  sp_type?: string | null;
+  parallax?: number | null;
+  color?: number | null;
+  j?: number | null;
+  h?: number | null;
+  w1?: number | null;
+  refs?: number | null;
 }
 
 export interface PointAnalysis {
   id?: string;
-  point?: { ra: number; dec: number; x?: number; y?: number; name?: string | null };
+  /** "client": assembled in the browser from the older endpoints because the server has no /analyze yet. */
+  mode?: "server" | "client";
+  notes?: string[];
+  /** The analysed position: the source's centre when the server located it (offset from the request). */
+  point?: { ra: number; dec: number; x?: number; y?: number; name?: string | null; offset_arcsec?: number | null; snr?: number | null; sigma_arcsec?: number | null; found?: boolean | null };
   verdict?: Slot<{ summary?: string; findings: Finding[]; novelty?: number | string | null; novelty_note?: string | null }>;
-  identification?: Slot<{ matches?: CatalogMatch[]; simbad?: CatalogMatch[]; solar_system?: { name: string; kind?: string; vmag?: number | null; sep_arcsec?: number | null }[] }>;
+  /** matches: one counterpart per catalogue; nearby: other sources close by that are not the counterpart. */
+  identification?: Slot<{ matches?: CatalogMatch[]; simbad?: CatalogMatch[]; nearby?: CatalogMatch[]; solar_system?: { name: string; kind?: string; vmag?: number | null; sep_arcsec?: number | null }[]; errors?: Record<string, string> }>;
   photometry?: Slot<{ n?: number; records?: Photometry[]; summary?: Record<string, unknown> }>;
   spectrum?: Slot<SpectrumResult>;
   classification?: Slot<ClassifyResult>;
   variability?: Slot<VariabilityResult>;
-  motion?: Slot<{ pmra: number; pmdec: number; pmra_err?: number; pmdec_err?: number; pm_total?: number; significance?: number; catalog?: { catalog: string; pmra: number; pmdec: number } | null; discrepancy_sigma?: number | null }>;
+  motion?: Slot<{ pmra: number; pmdec: number; pmra_err?: number; pmdec_err?: number; pm_total?: number; pm_total_err?: number | null; significance?: number; n_epochs?: number; catalog?: { catalog: string; pmra: number; pmdec: number } | null; discrepancy_sigma?: number | null }>;
   periodogram?: Slot<PeriodogramResult>;
   red_excess?: Slot<{ ratio_long_short?: number; excess_snr?: number; note?: string }>;
   tracklets?: Slot<{ items?: { id: string; epoch: number; n: number; rate_arcsec_per_hr: number; pa_deg: number; sep_arcsec?: number; known?: string | null }[] }>;
+  /** How the server's run went (ADR-0056): steps cut off at its deadline and services it could not reach. */
+  timings?: { total_s?: number; steps_s?: Record<string, number>; timed_out?: string[]; services_unavailable?: Record<string, { retry_in_s?: number; error?: string }> } | null;
 }
 
 // ------------------------------------------------------------------ field analysis
