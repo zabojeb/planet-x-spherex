@@ -477,19 +477,24 @@ def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_
     state = {name: "pending" for name in STEPS}
     seconds: dict[str, float] = {}
     lock = threading.Lock()
+    closed = False  # set under the lock at the deadline: from then on the step threads change and report nothing
 
     def report() -> None:
-        with lock:
+        with lock:  # progress inside the lock (it only sets the job's fields), so none lands after the deadline
+            if closed:
+                return
             running = [n for n, s in state.items() if s == "running"]
             done = sum(s in ("done", "error") for s in state.values())
             steps = dict(state)
-        try:
-            progress(", ".join(running) or "verdict", done, len(STEPS), steps=steps)
-        except TypeError:  # a runner without per-step reporting
-            progress(", ".join(running) or "verdict", done, len(STEPS))
+            try:
+                progress(", ".join(running) or "verdict", done, len(STEPS), steps=steps)
+            except TypeError:  # a runner without per-step reporting
+                progress(", ".join(running) or "verdict", done, len(STEPS))
 
     def run(name: str, fn) -> None:
         with lock:
+            if closed or state[name] != "pending":  # past the deadline nothing starts (a late photometry's followers)
+                return
             state[name] = "running"
         report()
         t = time.monotonic()
@@ -499,10 +504,11 @@ def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_
             log.warning("point analysis %s: %s failed: %r", ctx.seq_id, name, e)
             value, ok = _err(e), False
         with lock:
-            if state[name] == "running":  # not already given up on at the deadline
-                result[name] = value
-                state[name] = "done" if ok else "error"
-                seconds[name] = round(time.monotonic() - t, 2)
+            if closed:  # given up on at the deadline: the result was handed back and its slot says so
+                return
+            result[name] = value
+            state[name] = "done" if ok else "error"
+            seconds[name] = round(time.monotonic() - t, 2)
         report()
 
     pool = ThreadPoolExecutor(6, thread_name_prefix="point")
@@ -510,54 +516,59 @@ def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_
     def submit(name: str, fn):
         return pool.submit(netpolicy.run_in_context(lambda: run(name, fn)))
 
-    futures = {"identification": submit("identification", lambda: identification(ctx, req, years)),
-               "known_objects": submit("known_objects", lambda: known_objects(ctx, req)),
-               "tracklets": submit("tracklets", lambda: tracklets(ctx, req))}
+    try:
+        futures = {"identification": submit("identification", lambda: identification(ctx, req, years)),
+                   "known_objects": submit("known_objects", lambda: known_objects(ctx, req)),
+                   "tracklets": submit("tracklets", lambda: tracklets(ctx, req))}
 
-    def wait_for(names: list[str], until: float) -> None:
-        while time.monotonic() < until:
-            check()
-            pending = [futures[n] for n in names if n in futures and not futures[n].done()]
-            if not pending:
-                return
-            wait(pending, timeout=0.25)
+        def wait_for(names: list[str], until: float) -> None:
+            while time.monotonic() < until:
+                check()
+                pending = [futures[n] for n in names if n in futures and not futures[n].done()]
+                if not pending:
+                    return
+                wait(pending, timeout=0.25)
 
-    wait_for(["identification"], t0 + IDENT_WAIT_S)
-    ident = result.get("identification") if isinstance(result.get("identification"), dict) else {}
-    target, pm_source = _choose_target(req, ident or {}, years)
-    if state["identification"] in ("pending", "running"):
-        pm_source += f"; catalogue identification still running after {IDENT_WAIT_S:.0f} s"
-    result["point"]["motion_used"] = {"pmra": target.pmra, "pmdec": target.pmdec, "ref_epoch": target.ref_epoch,
-                                      "source": pm_source}
+        wait_for(["identification"], t0 + IDENT_WAIT_S)
+        ident = result.get("identification") if isinstance(result.get("identification"), dict) else {}
+        target, pm_source = _choose_target(req, ident or {}, years)
+        if state["identification"] in ("pending", "running"):
+            pm_source += f"; catalogue identification still running after {IDENT_WAIT_S:.0f} s"
+        result["point"]["motion_used"] = {"pmra": target.pmra, "pmdec": target.pmdec, "ref_epoch": target.ref_epoch,
+                                          "source": pm_source}
 
-    def chain() -> None:
-        """Photometry, then the steps that need its records."""
-        run("photometry", lambda: photometry(ctx, target))
-        records = (result.get("photometry") or {}).get("photometry") or []
+        def chain() -> None:
+            """Photometry, then the steps that need its records."""
+            run("photometry", lambda: photometry(ctx, target))
+            records = (result.get("photometry") or {}).get("photometry") or []
 
-        def spec():
-            if not records:
-                raise ValueError("no photometry")
-            s = spectral.analyze(records, target=target, catalogs=False)
-            return {"spectrum": s["spectrum"], "classification": s["classification"], "variability": s["variability"]}
+            def spec():
+                if not records:
+                    raise ValueError("no photometry")
+                s = spectral.analyze(records, target=target, catalogs=False)
+                return {"spectrum": s["spectrum"], "classification": s["classification"],
+                        "variability": s["variability"]}
 
-        run("spectrum", spec)
-        run("periodogram", lambda: _trim_periodogram(periodogram(records)))
-        run("colours", lambda: colours(records))
+            run("spectrum", spec)
+            run("periodogram", lambda: _trim_periodogram(periodogram(records)))
+            run("colours", lambda: colours(records))
 
-    def motion():
-        # Start where the measured target is at the sequence's mean epoch: a request given at a catalogue epoch
-        # (ε Indi B at J2000 is 2′ from where SPHEREx sees it) would otherwise centroid the wrong place.
-        ra_m, dec_m = target.position_at(mjd_mid)
-        mx, my = ctx.grid.world_to_pixel(ra_m, dec_m)
-        prior = (target.pmra, target.pmdec) if (target.pmra or target.pmdec) else (None, None)
-        coadds = results.read_array(ctx.dir, ctx.meta, "coadds")
-        return fit_motion(ctx.meta, coadds, ctx.grid, float(mx), float(my), pmra=prior[0], pmdec=prior[1])
+        def motion():
+            # Start where the measured target is at the sequence's mean epoch: a request given at a catalogue epoch
+            # (ε Indi B at J2000 is 2′ from where SPHEREx sees it) would otherwise centroid the wrong place.
+            ra_m, dec_m = target.position_at(mjd_mid)
+            mx, my = ctx.grid.world_to_pixel(ra_m, dec_m)
+            prior = (target.pmra, target.pmdec) if (target.pmra or target.pmdec) else (None, None)
+            coadds = results.read_array(ctx.dir, ctx.meta, "coadds")
+            return fit_motion(ctx.meta, coadds, ctx.grid, float(mx), float(my), pmra=prior[0], pmdec=prior[1])
 
-    futures["photometry"] = pool.submit(netpolicy.run_in_context(chain))
-    futures["motion"] = submit("motion", motion)
-    wait_for(list(futures), t0 + deadline_s)
-    pool.shutdown(wait=False, cancel_futures=True)  # steps still running finish in the background
+        futures["photometry"] = pool.submit(netpolicy.run_in_context(chain))
+        futures["motion"] = submit("motion", motion)
+        wait_for(list(futures), t0 + deadline_s)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)  # steps still running finish in the background, unheard
+        with lock:
+            closed = True
 
     late = []
     with lock:
@@ -567,10 +578,11 @@ def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_
                                          "(finished downloads and catalogue answers are cached)"}
                 state[name] = "error"
                 late.append(name)
+        steps_s = dict(seconds)
     check()
     progress("verdict", len(STEPS), len(STEPS))
     result["verdict"] = verdict(result)
-    result["timings"] = {"total_s": round(time.monotonic() - t0, 2), "steps_s": seconds, "timed_out": late,
+    result["timings"] = {"total_s": round(time.monotonic() - t0, 2), "steps_s": steps_s, "timed_out": late,
                          "services_unavailable": netpolicy.status()}
     return result
 

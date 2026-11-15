@@ -1,5 +1,8 @@
 """'Click a point -> Analyze' on the synthetic field of test_field (offline; catalogues and JPL stubbed)."""
 
+import copy
+import json
+import threading
 import time
 
 import pytest
@@ -95,6 +98,39 @@ def test_slow_step_times_out_without_blocking(seq, monkeypatch):
     assert time.monotonic() - t0 < 4.0
     assert "known_objects" in r["timings"]["timed_out"] and "TimeoutError" in r["known_objects"]["error"]
     assert "photometry" in r and "error" not in r["photometry"] and "verdict" in r
+
+
+def test_late_steps_do_not_touch_the_returned_result(seq, monkeypatch):
+    """A step still running at the deadline keeps running in the background; when it ends it must not rewrite the
+    result the job is serialising, start the steps that follow it, or report progress for a finished job."""
+    release, ran = threading.Event(), []
+    slow = point.photometry
+
+    def held_photometry(ctx_, target):
+        release.wait(10)
+        return slow(ctx_, target)
+
+    def counted(fn, name):
+        return lambda *a, **k: ran.append(name) or fn(*a, **k)
+
+    monkeypatch.setattr(point, "photometry", held_photometry)
+    monkeypatch.setattr(point, "colours", counted(point.colours, "colours"))
+    calls, returned = [], threading.Event()
+    progress = lambda *a, **k: calls.append(returned.is_set())  # noqa: E731
+    ra, dec = (float(v) for v in seq.grid.wcs.all_pix2world(20.0, 20.0, 0))
+    r = point.analyze_point(seq, point.PointRequest(ra=ra, dec=dec), progress, lambda: None, deadline_s=1.0)
+    returned.set()
+    before = copy.deepcopy(r)
+    assert {"photometry", "spectrum", "periodogram", "colours"} <= set(r["timings"]["timed_out"])
+
+    release.set()  # photometry now finishes in the background
+    for t in threading.enumerate():
+        if t.name.startswith("point"):
+            t.join(5)
+    assert r == before and r["timings"]["steps_s"] == before["timings"]["steps_s"]
+    assert "TimeoutError" in r["spectrum"]["error"] and "TimeoutError" in r["colours"]["error"]
+    assert not ran and not any(calls)  # nothing after the deadline: no late steps, no late progress
+    json.dumps(results.clean_json(r))
 
 
 def test_verdict_known_asteroid_and_saturation():
