@@ -100,6 +100,19 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 .s3 .shot img { height: auto; }
 .s3 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
 .s3 .pair .shot { aspect-ratio: 1 / 1; }
+.s3 .film { display: grid; grid-template-columns: 764px 1fr; gap: 44px; align-items: start; }
+.s3 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.s3 .tile { position: relative; aspect-ratio: 1 / 1; border: 1px solid var(--hair-2); background: #000; }
+.s3 .tile img { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.s3 .tile .lab { position: absolute; left: 14px; top: 12px; font-family: var(--mono); font-size: 15px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-1); }
+.s3 .tile .lab span { color: var(--text-3); }
+.s3 .tile.diff { border-color: rgba(255,200,69,.45); }
+.s3 .tcap p { font-size: 22px; line-height: 1.5; color: var(--text-2); }
+.s3 .tcap p + p { margin-top: 22px; }
+.s3 .tcap b { color: var(--text-1); font-weight: 500; }
+.s3 .tcap .x { color: var(--accent); }
+.s3 .tcap .r { color: #f0665a; } .s3 .tcap .bl { color: #5ea2f2; }
+.s3 .tcap .small { font-family: var(--mono); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); line-height: 1.6; }
 .s3 .pair .shot img { height: 100%; }
 .s3 .pair .cap { text-transform: none; letter-spacing: 0; font-family: var(--ui); font-size: 20px; line-height: 1.45; color: var(--text-2); }
 .s3 h2 { font-size: 80px; }
@@ -233,11 +246,19 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       </ol>
     </div>
     <div class="right">
-      <div class="pair">
-        <div><div class="shot"><img src="img/barnard-diff.png" alt="Difference of two SPHEREx visits of Barnard's Star"></div>
-          <div class="cap"><b>Difference</b>, Aug 2026 minus Aug 2025: blue is the earlier position, red the later one</div></div>
-        <div><div class="shot"><img src="img/browser.jpg" alt="The Seek In Space web app showing Barnard's Star in Difference mode"></div>
-          <div class="cap"><b>In the browser</b>: Difference mode with the visit timeline (Aug 2025 → Aug 2026) and the Play button below</div></div>
+      <div class="film">
+        <div class="tiles">
+          <div class="tile"><img src="img/barnard-visit1.png" alt="Barnard's Star in the August 2025 visit"><div class="lab">Visit 1 <span>· Aug 2025</span></div></div>
+          <div class="tile"><img src="img/barnard-visit2.png" alt="Barnard's Star in the March 2026 visit"><div class="lab">Visit 2 <span>· Mar 2026</span></div></div>
+          <div class="tile"><img src="img/barnard-visit3.png" alt="Barnard's Star in the August 2026 visit"><div class="lab">Visit 3 <span>· Aug 2026</span></div></div>
+          <div class="tile diff"><img src="img/barnard-difference.png" alt="Difference of visits 3 and 1"><div class="lab">Difference <span>· 3 − 1</span></div></div>
+        </div>
+        <div class="tcap">
+          <p><b>Barnard's Star in three SPHEREx visits</b>, all six detectors combined, as the app plays them.</p>
+          <p>The <span class="x">amber cross</span> marks where the star was in August 2025. A year later it sits about 10″, 1.6 pixels, further north.</p>
+          <p>In the difference, <span class="bl">blue</span> is the earlier position and <span class="r">red</span> the later one.</p>
+          <p class="small">Drawn from the sequence's co-adds · 6.15″ pixels · north up</p>
+        </div>
       </div>
     </div>
   </div>
