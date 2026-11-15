@@ -98,6 +98,12 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 .s3 li b { color: var(--text-1); font-weight: 500; }
 .s3 .right { position: absolute; left: 648px; right: 0; top: 10px; }
 .s3 .shot img { height: auto; }
+.s3 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+.s3 .pair .shot { aspect-ratio: 1 / 1; }
+.s3 .pair .shot img { height: 100%; }
+.s3 .pair .cap { text-transform: none; letter-spacing: 0; font-family: var(--ui); font-size: 20px; line-height: 1.45; color: var(--text-2); }
+.s3 h2 { font-size: 80px; }
+.s5 .chart { display: block; width: 100%; height: auto; font-family: var(--ui); }
 
 /* 4 — pipeline */
 .s4 h2 { font-size: 92px; width: 1500px; margin-top: 26px; }
@@ -127,7 +133,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 .s5 .r p b { color: var(--text-1); font-weight: 500; }
 .s5 .r p .y { color: var(--accent); font-weight: 500; }
 .s5 .foot { position: absolute; left: 0; bottom: 0; font-size: 19px; color: var(--text-3); width: 840px; }
-.s5 .charts { position: absolute; left: 884px; right: 0; top: 150px; }
+.s5 .charts { position: absolute; left: 884px; right: 0; top: 178px; }
 .s5 .charts .shot img { height: auto; }
 .s5 .charts .shot + .cap + .shot { margin-top: 48px; }
 
@@ -180,8 +186,8 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="title">
     <div class="micro">Challenge · <span class="n">Planet X and SPHEREx</span></div>
     <h1 class="display" style="margin-top:34px">Seek <span class="x">In</span> Space</h1>
-    <div class="tag">Watch the infrared sky move.</div>
-    <p class="lead">A public time machine for NASA's SPHEREx all-sky survey. Name a star or click anywhere on the sky, and watch that patch change across every visit, with spectra and measurements one click away.</p>
+    <div class="tag">See what moves in the infrared sky.</div>
+    <p class="lead">A web tool for NASA's SPHEREx survey. Name a star or click anywhere on the sky, and see every visit of that spot aligned, played in order and measured.</p>
   </div>
   <div class="links">
     <div><div class="k">Live</div><div class="v a">seekin.space</div></div>
@@ -196,17 +202,17 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="frame"><i></i><i></i><i></i><i></i></div>
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>The opportunity<span class="sep">/</span>02 — 07</span></div>
   <div class="content">
-    <div class="micro"><span class="n">01</span> — Why this matters</div>
-    <h2 class="display">SPHEREx photographs the entire sky every six months. Now anyone can <em>watch it change.</em></h2>
+    <div class="micro"><span class="n">01</span> — Why SPHEREx</div>
+    <h2 class="display">SPHEREx maps the whole sky every six months. Comparing the visits shows <em>what moves or changes.</em></h2>
     <div class="stats">
-      <div><div class="big">102</div><p>colours, 0.75–5 µm, one spectrum for every point on the sky</p></div>
-      <div><div class="big">6<small>mo</small></div><p>between all-sky visits since May 2025, so moving and changing objects pile up</p></div>
-      <div><div class="big">1.6<small>M</small></div><p>Level 2 images of 64 MB each, sitting in NASA's open cloud bucket</p></div>
+      <div><div class="big">102</div><p>infrared colours from 0.75 to 5 µm</p></div>
+      <div><div class="big">6<small>mo</small></div><p>between visits to every part of the sky, since May 2025</p></div>
+      <div><div class="big">1.6<small>M</small></div><p>images of 64 MB each in NASA's open archive</p></div>
       <div class="zero"><div class="big">3–4</div><p>visits of each showcase field so far, and two more every year</p></div>
     </div>
     <div class="row">
-      <div><div class="yr">1930 → 2017</div><p>Pluto was found by <b>blinking</b> two photographic plates. On WISE data, Backyard Worlds volunteers blinking images in WiseView found <b>hundreds of brown dwarfs</b>. Blinking works, if someone builds the comparator.</p></div>
-      <div><div class="yr">The obstacle</div><p>SPHEREx images are big multi-extension files, and IRSA's cutout service answered <b>503s and ~95 s per cutout</b> during the hackathon. A usable tool has to fetch, align and measure on its own, in seconds.</p></div>
+      <div><div class="yr">The idea</div><p>Pluto was found by <b>blinking</b> two photographic plates, and volunteers still find <b>brown dwarfs</b> by blinking WISE images. We bring the same method to SPHEREx.</p></div>
+      <div><div class="yr">The difficulty</div><p>Each image is a <b>64 MB</b> multi-extension file, and IRSA's cutout service was overloaded during the hackathon (<b>~95 s per cutout</b>). The tool has to fetch, align and measure by itself, in seconds.</p></div>
     </div>
   </div>
   <div class="bar bottom"><span>Data: NASA / IRSA SPHEREx DR1 + QR3</span><span>seekin.space</span></div>
@@ -219,18 +225,22 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="content">
     <div class="left">
       <div class="micro"><span class="n">02</span> — What it does</div>
-      <h2 class="display">Any point in the sky becomes a <em>movie.</em></h2>
+      <h2 class="display">Enter coordinates, press play, see what <em>moved.</em></h2>
       <ol>
-        <li><span><b>Search</b> 4,500 named objects, type RA/Dec, or click the all-sky map</span></li>
-        <li><span><b>Every SPHEREx visit</b>, aligned north-up and co-added per detector</span></li>
-        <li><span><b>Blink, difference, stack, RGB</b>, single exposures, a 3D time cube</span></li>
-        <li><span><b>Gaia and CatWISE</b> moved to each visit's date, plus 2MASS and known asteroids</span></li>
+        <li><span><b>Type</b> a name or RA/Dec, or click the all-sky map</span></li>
+        <li><span><b>Every SPHEREx visit</b> of that spot is fetched and aligned</span></li>
+        <li><span><b>Blink, subtract or stack</b> the visits; RGB, single exposures, 3D</span></li>
+        <li><span><b>Field 2′–30′</b>, quality flags, Gaia and CatWISE at each visit's date</span></li>
         <li><span><b>Every view is a link</b>, shareable and embeddable</span></li>
       </ol>
     </div>
     <div class="right">
-      <div class="shot"><img src="img/cube-ui.jpg" alt="Time cube of Barnard's Star in the web app"></div>
-      <div class="cap"><b>Barnard's Star · time cube</b> · Aug 2025 → Aug 2026 · the star's track climbs through three visits</div>
+      <div class="pair">
+        <div><div class="shot"><img src="img/barnard-diff.png" alt="Difference of two SPHEREx visits of Barnard's Star"></div>
+          <div class="cap"><b>Difference</b> of two visits a year apart: blue where Barnard's Star was in Aug 2025, red where it was in Aug 2026</div></div>
+        <div><div class="shot"><img src="img/cube.jpg" alt="Time cube of Barnard's Star"></div>
+          <div class="cap"><b>Time cube</b>: each layer is one visit, so the star's track climbs north through Aug 2025, Mar 2026 and Aug 2026</div></div>
+      </div>
     </div>
   </div>
   <div class="bar bottom"><span>Live at seekin.space · no install, no account</span><span>seekin.space</span></div>
@@ -242,7 +252,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>Under the hood<span class="sep">/</span>04 — 07</span></div>
   <div class="content">
     <div class="micro"><span class="n">03</span> — How it works</div>
-    <h2 class="display">Only the pixels that matter, straight from NASA's <em>open bucket.</em></h2>
+    <h2 class="display">It reads only what it needs from NASA's <em>open archive.</em></h2>
     <div class="pipe">
       <div class="step"><div class="n">01</div><h3>Find</h3><p>Our own index of all 1.6 M DR1 + QR3 files; IRSA TAP and SIA as fallbacks</p><div class="m">~90 ms</div></div>
       <div class="step"><div class="n">02</div><h3>Read</h3><p>HTTP range requests to the public S3 copy, matching astropy exactly in tests</p><div class="m">2 of 64 MB</div></div>
@@ -254,8 +264,8 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <div class="strip">
       <div><div class="v">~5 s</div><div class="k">358 exposures of Barnard's Star, cached</div></div>
       <div><div class="v">6–13 s</div><div class="k">a field never requested before, ~200 exposures</div></div>
-      <div><div class="v">334</div><div class="k">tests passing today: 321 backend, 13 web</div></div>
-      <div><div class="v">63</div><div class="k">architecture decision records in the repo</div></div>
+      <div><div class="v">1.6 M</div><div class="k">SPHEREx files in our own index</div></div>
+      <div><div class="v">1 h</div><div class="k">for new SPHEREx data to reach the index</div></div>
     </div>
   </div>
   <div class="bar bottom"><span>Python · astropy · photutils · FastAPI · React · TypeScript · Aladin Lite · MCP</span><span>seekin.space</span></div>
@@ -266,21 +276,249 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="frame"><i></i><i></i><i></i><i></i></div>
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>Science<span class="sep">/</span>05 — 07</span></div>
   <div class="content">
-    <div class="micro"><span class="n">04</span> — Tested on all five challenge targets</div>
-    <h2 class="display">It measures what it <em>shows.</em></h2>
+    <div class="micro"><span class="n">04</span> — Science checks</div>
+    <h2 class="display">Tested on the five challenge <em>targets.</em></h2>
     <div class="tbl">
-      <div class="r"><div class="t">Barnard's Star<span>Fastest-moving star</span></div><p>3 visit centroids within <span class="y">0.5″</span> of the Gaia-motion prediction; <b>~4.4′</b> moved since 2MASS (2000)</p></div>
-      <div class="r"><div class="t">ε Indi B<span>Brown dwarf binary</span></div><p><b>T-dwarf-like</b> (closest standard T3), strong 3.3 µm methane; <span class="y">4.42 ± 0.29″/yr</span> vs 4.68″/yr (Gaia)</p></div>
-      <div class="r"><div class="t">WISE 0855−0714<span>Coldest known brown dwarf</span></div><p>A <b>moving 3.8–5 µm excess</b>, as a ~285 K object should show; a star 8″ away dominates bluer bands</p></div>
-      <div class="r"><div class="t">R Draconis<span>Mira variable</span></div><p>Periods of <span class="y">235.7 d and 246.9 d</span> from two models, against ~246 d in the catalogue</p></div>
-      <div class="r"><div class="t">RW Aurigae<span>Young T Tauri star</span></div><p>Faded about <b>1.9×</b> at 4–5 µm in a year (relative photometry: saturated)</p></div>
+      <div class="r"><div class="t">Barnard's Star<span>Fastest-moving star</span></div><p>Moves <b>10″ a year</b>; three visit positions within <span class="y">0.5″</span> of the Gaia prediction</p></div>
+      <div class="r"><div class="t">ε Indi B<span>Brown dwarf binary</span></div><p><b>T-dwarf-like</b> spectrum with strong 3.3 µm methane; moves <span class="y">4.42 ± 0.29″/yr</span> (Gaia: 4.68)</p></div>
+      <div class="r"><div class="t">WISE 0855−0714<span>Coldest known brown dwarf</span></div><p>A <b>moving source seen only at 3.8–5 µm</b>, as a ~285 K object should be, next to a brighter star</p></div>
+      <div class="r"><div class="t">R Draconis<span>Mira variable</span></div><p>Period <span class="y">236 or 247 days</span> by two methods; catalogue value 246 days</p></div>
+      <div class="r"><div class="t">RW Aurigae<span>Young T Tauri star</span></div><p>Faded about <b>1.9×</b> at 4–5 µm in one year</p></div>
     </div>
     <p class="foot">Synthetic J/H/Ks photometry of a comparison star agrees with 2MASS to ~2 %. Saturated stars get relative photometry, and the app says so.</p>
     <div class="charts">
-      <div class="shot"><img src="img/spectrum.jpg" alt="Spectrum of epsilon Indi B with water, methane and CO bands"></div>
-      <div class="cap"><b><span style="text-transform:none">ε</span> Indi B</b> · 102-band spectrum · H₂O, CH₄, CO features found automatically</div>
-      <div class="shot"><img src="img/lightcurve.jpg" alt="Light curve of R Draconis"></div>
-      <div class="cap"><b>R Draconis</b> · 2,452 measurements · Apr 2025 → Sep 2026</div>
+      <div class="shot" style="padding:18px 10px 6px">
+<!--CHART-->
+<svg class="chart" viewBox="0 0 844 540" xmlns="http://www.w3.org/2000/svg">
+<rect x="186.7" y="56" width="22.6" height="412" fill="rgba(236,232,223,.07)"/>
+<text x="198.0" y="40" fill="#b8b3a7" font-size="22" text-anchor="middle">H₂O</text>
+<rect x="270.3" y="56" width="26.1" height="412" fill="rgba(236,232,223,.07)"/>
+<text x="283.4" y="40" fill="#b8b3a7" font-size="22" text-anchor="middle">H₂O</text>
+<rect x="336.5" y="56" width="26.1" height="412" fill="rgba(255,200,69,.16)"/>
+<text x="349.5" y="40" fill="#ffc845" font-size="22" text-anchor="middle">CH₄</text>
+<rect x="397.4" y="56" width="52.2" height="412" fill="rgba(236,232,223,.07)"/>
+<text x="423.5" y="40" fill="#b8b3a7" font-size="22" text-anchor="middle">H₂O</text>
+<rect x="501.9" y="56" width="52.2" height="412" fill="rgba(255,200,69,.16)"/>
+<text x="528.0" y="40" fill="#ffc845" font-size="22" text-anchor="middle">CH₄</text>
+<rect x="745.6" y="56" width="34.8" height="412" fill="rgba(236,232,223,.07)"/>
+<text x="763.1" y="40" fill="#b8b3a7" font-size="22" text-anchor="middle">CO</text>
+<line x1="84" x2="824" y1="468.0" y2="468.0" stroke="rgba(236,232,223,.10)"/>
+<text x="70" y="475.0" fill="#858074" font-size="20" text-anchor="end">0.1</text>
+<line x1="84" x2="824" y1="330.7" y2="330.7" stroke="rgba(236,232,223,.10)"/>
+<text x="70" y="337.7" fill="#858074" font-size="20" text-anchor="end">1</text>
+<line x1="84" x2="824" y1="193.3" y2="193.3" stroke="rgba(236,232,223,.10)"/>
+<text x="70" y="200.3" fill="#858074" font-size="20" text-anchor="end">10</text>
+<line x1="84" x2="824" y1="56.0" y2="56.0" stroke="rgba(236,232,223,.10)"/>
+<text x="70" y="63.0" fill="#858074" font-size="20" text-anchor="end">100</text>
+<text x="127.5" y="502" fill="#858074" font-size="20" text-anchor="middle">1</text>
+<text x="301.6" y="502" fill="#858074" font-size="20" text-anchor="middle">2</text>
+<text x="475.8" y="502" fill="#858074" font-size="20" text-anchor="middle">3</text>
+<text x="649.9" y="502" fill="#858074" font-size="20" text-anchor="middle">4</text>
+<text x="824.0" y="502" fill="#858074" font-size="20" text-anchor="middle">5</text>
+<text x="454.0" y="532" fill="#858074" font-size="20" text-anchor="middle">wavelength, µm</text>
+<text transform="translate(22 262.0) rotate(-90)" fill="#858074" font-size="20" text-anchor="middle">flux, mJy</text>
+<line x1="91.6" x2="91.6" y1="429.7" y2="457.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="91.6" cy="442.1" r="5" fill="#3987e5"/>
+<line x1="94.8" x2="94.8" y1="391.8" y2="403.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="94.8" cy="397.2" r="5" fill="#3987e5"/>
+<line x1="98.2" x2="98.2" y1="346.7" y2="352.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="98.2" cy="349.5" r="5" fill="#3987e5"/>
+<line x1="101.7" x2="101.7" y1="315.9" y2="319.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="101.7" cy="317.7" r="5" fill="#3987e5"/>
+<line x1="105.0" x2="105.0" y1="287.2" y2="291.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="105.0" cy="289.0" r="5" fill="#3987e5"/>
+<line x1="108.7" x2="108.7" y1="263.7" y2="267.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="108.7" cy="265.4" r="5" fill="#3987e5"/>
+<line x1="112.4" x2="112.4" y1="242.0" y2="245.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="112.4" cy="243.5" r="5" fill="#3987e5"/>
+<line x1="116.2" x2="116.2" y1="232.3" y2="235.3" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="116.2" cy="233.8" r="5" fill="#3987e5"/>
+<line x1="120.0" x2="120.0" y1="216.5" y2="219.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="120.0" cy="217.9" r="5" fill="#3987e5"/>
+<line x1="124.0" x2="124.0" y1="199.9" y2="202.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="124.0" cy="201.2" r="5" fill="#3987e5"/>
+<line x1="128.1" x2="128.1" y1="186.2" y2="188.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="128.1" cy="187.5" r="5" fill="#3987e5"/>
+<line x1="132.3" x2="132.3" y1="169.0" y2="171.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="132.3" cy="170.3" r="5" fill="#3987e5"/>
+<line x1="137.6" x2="137.6" y1="152.3" y2="156.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="137.6" cy="154.3" r="5" fill="#3987e5"/>
+<line x1="142.8" x2="142.8" y1="151.3" y2="153.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="142.8" cy="152.4" r="5" fill="#3987e5"/>
+<line x1="145.7" x2="145.7" y1="165.1" y2="168.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="145.7" cy="166.9" r="5" fill="#3987e5"/>
+<line x1="146.7" x2="146.7" y1="174.2" y2="176.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="146.7" cy="175.2" r="5" fill="#3987e5"/>
+<line x1="151.5" x2="151.5" y1="177.1" y2="178.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="151.5" cy="177.8" r="5" fill="#3987e5"/>
+<line x1="155.8" x2="155.8" y1="173.4" y2="175.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="155.8" cy="174.3" r="5" fill="#3987e5"/>
+<line x1="160.2" x2="160.2" y1="155.2" y2="157.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="160.2" cy="156.3" r="5" fill="#3987e5"/>
+<line x1="165.6" x2="165.6" y1="131.5" y2="136.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="165.6" cy="133.8" r="5" fill="#3987e5"/>
+<line x1="170.7" x2="170.7" y1="127.6" y2="139.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="170.7" cy="133.4" r="5" fill="#3987e5"/>
+<line x1="176.2" x2="176.2" y1="110.9" y2="112.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="176.2" cy="111.8" r="5" fill="#3987e5"/>
+<line x1="180.7" x2="180.7" y1="115.5" y2="117.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="180.7" cy="116.6" r="5" fill="#3987e5"/>
+<line x1="186.1" x2="186.1" y1="177.5" y2="181.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="186.1" cy="179.3" r="5" fill="#3987e5"/>
+<line x1="192.2" x2="192.2" y1="223.3" y2="225.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="192.2" cy="224.6" r="5" fill="#3987e5"/>
+<line x1="197.4" x2="197.4" y1="223.9" y2="235.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="197.4" cy="229.4" r="5" fill="#3987e5"/>
+<line x1="204.2" x2="204.2" y1="193.5" y2="216.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="204.2" cy="204.1" r="5" fill="#3987e5"/>
+<line x1="209.9" x2="209.9" y1="175.3" y2="180.3" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="209.9" cy="177.8" r="5" fill="#3987e5"/>
+<line x1="216.9" x2="216.9" y1="140.4" y2="154.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="216.9" cy="147.2" r="5" fill="#3987e5"/>
+<line x1="225.2" x2="225.2" y1="115.3" y2="119.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="225.2" cy="117.6" r="5" fill="#3987e5"/>
+<line x1="231.6" x2="231.6" y1="114.2" y2="115.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="231.6" cy="114.9" r="5" fill="#3987e5"/>
+<line x1="238.8" x2="238.8" y1="122.0" y2="123.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="238.8" cy="122.9" r="5" fill="#3987e5"/>
+<line x1="240.1" x2="240.1" y1="124.2" y2="125.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="240.1" cy="125.0" r="5" fill="#3987e5"/>
+<line x1="246.8" x2="246.8" y1="127.3" y2="128.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="246.8" cy="128.1" r="5" fill="#3987e5"/>
+<line x1="254.2" x2="254.2" y1="137.7" y2="141.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="254.2" cy="139.6" r="5" fill="#3987e5"/>
+<line x1="261.6" x2="261.6" y1="162.8" y2="167.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="261.6" cy="165.2" r="5" fill="#3987e5"/>
+<line x1="268.2" x2="268.2" y1="183.3" y2="185.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="268.2" cy="184.5" r="5" fill="#3987e5"/>
+<line x1="276.0" x2="276.0" y1="195.5" y2="197.3" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="276.0" cy="196.4" r="5" fill="#3987e5"/>
+<line x1="283.6" x2="283.6" y1="179.9" y2="182.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="283.6" cy="181.2" r="5" fill="#3987e5"/>
+<line x1="290.6" x2="290.6" y1="179.8" y2="181.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="290.6" cy="180.7" r="5" fill="#3987e5"/>
+<line x1="298.4" x2="298.4" y1="169.0" y2="174.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="298.4" cy="171.5" r="5" fill="#3987e5"/>
+<line x1="306.3" x2="306.3" y1="147.8" y2="149.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="306.3" cy="148.7" r="5" fill="#3987e5"/>
+<line x1="316.1" x2="316.1" y1="131.8" y2="133.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="316.1" cy="132.7" r="5" fill="#3987e5"/>
+<line x1="324.9" x2="324.9" y1="131.5" y2="135.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="324.9" cy="133.3" r="5" fill="#3987e5"/>
+<line x1="335.4" x2="335.4" y1="143.8" y2="149.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="335.4" cy="146.4" r="5" fill="#3987e5"/>
+<line x1="348.2" x2="348.2" y1="166.5" y2="168.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="348.2" cy="167.5" r="5" fill="#3987e5"/>
+<line x1="357.3" x2="357.3" y1="181.5" y2="183.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="357.3" cy="182.5" r="5" fill="#3987e5"/>
+<line x1="365.8" x2="365.8" y1="182.6" y2="184.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="365.8" cy="183.4" r="5" fill="#3987e5"/>
+<line x1="372.7" x2="372.7" y1="172.4" y2="181.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="372.7" cy="176.9" r="5" fill="#3987e5"/>
+<line x1="378.7" x2="378.7" y1="173.4" y2="178.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="378.7" cy="176.0" r="5" fill="#3987e5"/>
+<line x1="391.3" x2="391.3" y1="193.9" y2="199.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="391.3" cy="196.7" r="5" fill="#3987e5"/>
+<line x1="405.6" x2="405.6" y1="199.8" y2="202.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="405.6" cy="200.9" r="5" fill="#3987e5"/>
+<line x1="417.7" x2="417.7" y1="197.4" y2="201.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="417.7" cy="199.5" r="5" fill="#3987e5"/>
+<line x1="430.2" x2="430.2" y1="200.1" y2="202.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="430.2" cy="201.5" r="5" fill="#3987e5"/>
+<line x1="443.4" x2="443.4" y1="191.1" y2="193.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="443.4" cy="192.1" r="5" fill="#3987e5"/>
+<line x1="456.4" x2="456.4" y1="175.4" y2="178.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="456.4" cy="176.7" r="5" fill="#3987e5"/>
+<line x1="470.3" x2="470.3" y1="159.4" y2="162.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="470.3" cy="160.7" r="5" fill="#3987e5"/>
+<line x1="484.5" x2="484.5" y1="154.2" y2="156.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="484.5" cy="155.5" r="5" fill="#3987e5"/>
+<line x1="499.2" x2="499.2" y1="176.5" y2="181.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="499.2" cy="179.1" r="5" fill="#3987e5"/>
+<line x1="514.0" x2="514.0" y1="192.0" y2="196.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="514.0" cy="194.0" r="5" fill="#3987e5"/>
+<line x1="529.3" x2="529.3" y1="187.5" y2="191.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="529.3" cy="189.3" r="5" fill="#3987e5"/>
+<line x1="544.9" x2="544.9" y1="182.4" y2="185.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="544.9" cy="183.7" r="5" fill="#3987e5"/>
+<line x1="560.8" x2="560.8" y1="173.0" y2="176.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="560.8" cy="174.5" r="5" fill="#3987e5"/>
+<line x1="587.6" x2="587.6" y1="129.8" y2="131.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="587.6" cy="130.8" r="5" fill="#3987e5"/>
+<line x1="604.7" x2="604.7" y1="107.3" y2="109.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="604.7" cy="108.6" r="5" fill="#3987e5"/>
+<line x1="612.8" x2="612.8" y1="100.9" y2="104.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="612.8" cy="102.7" r="5" fill="#3987e5"/>
+<line x1="617.4" x2="617.4" y1="102.0" y2="105.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="617.4" cy="103.9" r="5" fill="#3987e5"/>
+<line x1="621.0" x2="621.0" y1="98.5" y2="100.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="621.0" cy="99.5" r="5" fill="#3987e5"/>
+<line x1="626.9" x2="626.9" y1="96.3" y2="97.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="626.9" cy="97.0" r="5" fill="#3987e5"/>
+<line x1="634.4" x2="634.4" y1="92.4" y2="94.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="634.4" cy="93.2" r="5" fill="#3987e5"/>
+<line x1="643.2" x2="643.2" y1="89.5" y2="91.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="643.2" cy="90.2" r="5" fill="#3987e5"/>
+<line x1="649.0" x2="649.0" y1="87.8" y2="89.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="649.0" cy="88.8" r="5" fill="#3987e5"/>
+<line x1="655.0" x2="655.0" y1="86.9" y2="88.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="655.0" cy="87.8" r="5" fill="#3987e5"/>
+<line x1="662.0" x2="662.0" y1="87.1" y2="88.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="662.0" cy="88.0" r="5" fill="#3987e5"/>
+<line x1="668.7" x2="668.7" y1="88.8" y2="90.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="668.7" cy="89.6" r="5" fill="#3987e5"/>
+<line x1="675.1" x2="675.1" y1="90.5" y2="92.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="675.1" cy="91.5" r="5" fill="#3987e5"/>
+<line x1="680.5" x2="680.5" y1="95.3" y2="97.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="680.5" cy="96.6" r="5" fill="#3987e5"/>
+<line x1="691.0" x2="691.0" y1="115.1" y2="118.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="691.0" cy="116.8" r="5" fill="#3987e5"/>
+<line x1="698.3" x2="698.3" y1="115.3" y2="118.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="698.3" cy="116.6" r="5" fill="#3987e5"/>
+<line x1="704.8" x2="704.8" y1="117.4" y2="119.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="704.8" cy="118.4" r="5" fill="#3987e5"/>
+<line x1="711.8" x2="711.8" y1="122.7" y2="124.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="711.8" cy="123.4" r="5" fill="#3987e5"/>
+<line x1="719.4" x2="719.4" y1="128.9" y2="131.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="719.4" cy="130.4" r="5" fill="#3987e5"/>
+<line x1="720.9" x2="720.9" y1="129.0" y2="132.9" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="720.9" cy="130.9" r="5" fill="#3987e5"/>
+<line x1="723.6" x2="723.6" y1="134.4" y2="137.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="723.6" cy="135.7" r="5" fill="#3987e5"/>
+<line x1="724.9" x2="724.9" y1="138.0" y2="140.6" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="724.9" cy="139.3" r="5" fill="#3987e5"/>
+<line x1="731.3" x2="731.3" y1="147.0" y2="149.5" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="731.3" cy="148.2" r="5" fill="#3987e5"/>
+<line x1="737.1" x2="737.1" y1="155.9" y2="157.3" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="737.1" cy="156.6" r="5" fill="#3987e5"/>
+<line x1="744.5" x2="744.5" y1="162.2" y2="163.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="744.5" cy="162.9" r="5" fill="#3987e5"/>
+<line x1="752.4" x2="752.4" y1="159.6" y2="162.3" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="752.4" cy="160.9" r="5" fill="#3987e5"/>
+<line x1="759.1" x2="759.1" y1="156.1" y2="158.7" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="759.1" cy="157.4" r="5" fill="#3987e5"/>
+<line x1="765.3" x2="765.3" y1="143.6" y2="145.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="765.3" cy="144.5" r="5" fill="#3987e5"/>
+<line x1="771.2" x2="771.2" y1="146.2" y2="148.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="771.2" cy="147.2" r="5" fill="#3987e5"/>
+<line x1="777.9" x2="777.9" y1="154.3" y2="156.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="777.9" cy="155.1" r="5" fill="#3987e5"/>
+<line x1="786.3" x2="786.3" y1="155.3" y2="159.2" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="786.3" cy="157.2" r="5" fill="#3987e5"/>
+<line x1="794.1" x2="794.1" y1="152.3" y2="154.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="794.1" cy="153.1" r="5" fill="#3987e5"/>
+<line x1="800.4" x2="800.4" y1="149.9" y2="151.8" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="800.4" cy="150.8" r="5" fill="#3987e5"/>
+<line x1="807.6" x2="807.6" y1="146.9" y2="149.0" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="807.6" cy="147.9" r="5" fill="#3987e5"/>
+<line x1="813.8" x2="813.8" y1="150.3" y2="152.4" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="813.8" cy="151.3" r="5" fill="#3987e5"/>
+<line x1="821.0" x2="821.0" y1="142.2" y2="144.1" stroke="rgba(57,135,229,.55)" stroke-width="2"/>
+<circle cx="821.0" cy="143.2" r="5" fill="#3987e5"/>
+</svg>
+<!--/CHART-->
+      </div>
+      <div class="cap"><b><span style="text-transform:none">ε</span> Indi B</b> · its 102-band spectrum from SPHEREx · water, methane and CO bands found automatically</div>
     </div>
   </div>
   <div class="bar bottom"><span>Methods and full validation report in the repository</span><span>seekin.space</span></div>
@@ -292,20 +530,20 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>Discovery<span class="sep">/</span>06 — 07</span></div>
   <div class="content">
     <div class="micro"><span class="n">05</span> — Beyond blinking</div>
-    <h2 class="display">Built to <em>find</em> things, not just show them.</h2>
+    <h2 class="display">Tools for finding <em>candidates.</em></h2>
     <div class="cols">
       <div class="col">
         <h3>Comets &amp; asteroids</h3>
-        <p>Sequences that move with a comet keep it centred while stars trail. Coma, tail and CO₂-band tests give a heuristic comet-likeness score (not a probability).</p>
+        <p>Follow a known object across visits while the stars trail. Coma, tail and CO₂ tests give a comet-likeness score out of 100 (a ranking, not a probability).</p>
         <div class="kv">
-          <div><span class="v a">99.9</span><span class="k">3I/ATLAS, the interstellar comet: strong CO₂ excess</span></div>
-          <div><span class="v">100</span><span class="k">C/2025 A6 Lemmon, tail pointing away from the Sun</span></div>
-          <div><span class="v">≤ 1</span><span class="k">asteroid controls 433 Eros and 16 Psyche</span></div>
+          <div><span class="v a">99.9</span><span class="k">the interstellar comet 3I/ATLAS, strong CO₂</span></div>
+          <div><span class="v">100</span><span class="k">comet C/2025 A6 Lemmon, tail away from the Sun</span></div>
+          <div><span class="v">≤ 1</span><span class="k">asteroids 433 Eros and 16 Psyche, as expected</span></div>
         </div>
       </div>
       <div class="col">
         <h3>Whole-field search</h3>
-        <p>Every field is scanned for movers, tracklets, variables and red, cold brown-dwarf candidates; a classifier trained on injected sources filters out artefacts.</p>
+        <p>Scan a field for moving sources, variable stars and very red objects, then open each candidate to check it.</p>
         <div class="kv">
           <div><span class="v">26 yr</span><span class="k">baseline with 2MASS, AllWISE and NEOWISE on the same grid</span></div>
           <div><span class="v">ADES</span><span class="k">export, the Minor Planet Center's format</span></div>
@@ -333,12 +571,12 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="frame"><i></i><i></i><i></i><i></i></div>
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>Try it<span class="sep">/</span>07 — 07</span></div>
   <div class="content">
-    <div class="micro"><span class="n">06</span> — For everyone</div>
-    <h2 class="display">A WiseView for SPHEREx, open to <em>anyone</em> with a browser.</h2>
+    <div class="micro"><span class="n">06</span> — Try it</div>
+    <h2 class="display">Open seekin.space and start with <em>Barnard's Star.</em></h2>
     <div class="aud">
-      <div><h3>Explore</h3><p>Plain-language hints, a guided tour of the five targets and a find-it-yourself game for newcomers.</p></div>
-      <div><h3>Research</h3><p>Fluxes with errors, flags, χ² and wavelengths; FITS, CSV, VOTable and ADES exports.</p></div>
-      <div><h3>Agents</h3><p>An MCP server at seekin.space/mcp, so an AI assistant can run discovery loops itself.</p></div>
+      <div><h3>Start here</h3><p>Press Play, then switch to Difference: the red–blue pair is the star moving in one year.</p></div>
+      <div><h3>Explore</h3><p>Plain-language hints, a guided tour of the five targets and a find-it-yourself game.</p></div>
+      <div><h3>Research</h3><p>Errors, flags and χ²; FITS, CSV, VOTable and ADES exports; an MCP server for AI agents.</p></div>
     </div>
     <div class="next">
       <div><h4>Where it stands</h4><p>No confirmed discovery yet, only candidates. Our showcase fields have 3–4 visits so far, and the file index picks up new data every hour.</p></div>
