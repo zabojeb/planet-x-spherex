@@ -45,6 +45,12 @@ def seq(tmp_path, monkeypatch):
 
     monkeypatch.setattr(catalogs, "cone", fake_cone)
     monkeypatch.setattr(known, "query", lambda *a, **k: [])
+    from spherex_core.spectral import synphot
+
+    def no_filters(band):  # offline: no SVO filter curves (synthetic photometry reports them unavailable)
+        raise RuntimeError("offline test")
+
+    monkeypatch.setattr(synphot, "curve", no_filters)
     monkeypatch.setattr(point, "photometry", fake_photometry)
     yield ctx
     services.configure(None)
@@ -55,8 +61,9 @@ def test_analyze_point_on_mover(seq):
     ra, dec = (float(v) for v in seq.grid.wcs.all_pix2world(20.0, 20.0, 0))
     req = point.PointRequest(ra=ra, dec=dec)
     stages = []
-    r = point.analyze_point(seq, req, lambda s, d, t: stages.append(s), lambda: None)
-    assert stages[0] == "identification" and stages[-1] == "verdict"
+    r = point.analyze_point(seq, req, lambda s, d, t, steps=None: stages.append(s), lambda: None, deadline_s=600)
+    assert "identification" in stages[0] and stages[-1] == "verdict"
+    assert set(r["timings"]["steps_s"]) == set(point.STEPS) and not r["timings"]["timed_out"]
     for slot in point.STEPS:
         assert slot in r
     assert "error" in r["identification"]["catwise"] and r["identification"]["gaia"]["counterpart"] is False
@@ -72,8 +79,22 @@ def test_analyze_point_on_mover(seq):
 def test_step_failure_is_isolated(seq, monkeypatch):
     monkeypatch.setattr(point, "colours", lambda recs: 1 / 0)
     ra, dec = (float(v) for v in seq.grid.wcs.all_pix2world(10.0, 10.0, 0))
-    r = point.analyze_point(seq, point.PointRequest(ra=ra, dec=dec), lambda *a: None, lambda: None)
+    r = point.analyze_point(seq, point.PointRequest(ra=ra, dec=dec), lambda *a, **k: None, lambda: None,
+                            deadline_s=600)
     assert r["colours"]["error"].startswith("ZeroDivisionError") and "verdict" in r
+
+
+def test_slow_step_times_out_without_blocking(seq, monkeypatch):
+    """A hanging service (here: sb_ident) becomes a timed-out slot; the rest of the analysis still returns."""
+    monkeypatch.setattr(known, "query", lambda *a, **k: time.sleep(5) or [])
+    monkeypatch.setattr(point, "KNOWN_BUDGET_S", 30.0)
+    ra, dec = (float(v) for v in seq.grid.wcs.all_pix2world(20.0, 20.0, 0))
+    t0 = time.monotonic()
+    r = point.analyze_point(seq, point.PointRequest(ra=ra, dec=dec), lambda *a, **k: None, lambda: None,
+                            deadline_s=2.0)
+    assert time.monotonic() - t0 < 4.0
+    assert "known_objects" in r["timings"]["timed_out"] and "TimeoutError" in r["known_objects"]["error"]
+    assert "photometry" in r and "error" not in r["photometry"] and "verdict" in r
 
 
 def test_verdict_known_asteroid_and_saturation():

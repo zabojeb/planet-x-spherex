@@ -34,7 +34,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from .. import cache
+from .. import cache, netpolicy
 from ..logs import timed
 from . import observer
 from .common import FieldData
@@ -100,17 +100,27 @@ def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 
             "fov-ra-hwidth": f"{half_deg:.4f}", "fov-dec-hwidth": f"{half_deg:.4f}", "two-pass": "true",
             "suppress-first-pass": "true", "vmag-lim": f"{vmag_lim:g}"}
 
+    service = urllib.parse.urlsplit(SB_IDENT).netloc
+    netpolicy.check(service)
+    timeout, retries = netpolicy.timeouts(timeout, retries)
+
     def fetch(kind: str) -> tuple[str, dict]:
         url = SB_IDENT + "?" + urllib.parse.urlencode({**base, "sb-kind": kind}, safe="-_:,")
         for attempt in range(retries):
             try:
                 with urllib.request.urlopen(url, timeout=timeout) as r:
-                    return kind, json.loads(r.read())
+                    out = kind, json.loads(r.read())
+                netpolicy.succeeded(service)
+                return out
             except urllib.error.HTTPError as e:  # JPL rate-limits (429) and sheds load (503): back off
                 if e.code not in (429, 503) or attempt == retries - 1:
+                    netpolicy.failed(service, e)
                     raise
                 wait = float(e.headers.get("Retry-After") or 0) or 5.0 * 2 ** attempt
-                time.sleep(min(wait, 60.0))
+                time.sleep(netpolicy.pause(min(wait, 60.0)))
+            except Exception as e:  # noqa: BLE001 - timeouts and connection errors open the breaker
+                netpolicy.failed(service, e)
+                raise
         raise RuntimeError("sb_ident retries exhausted")
 
     with timed(log, "sb_ident", mjd=round(mjd, 4)):

@@ -9,6 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 
+from .. import netpolicy
 from ..config import settings
 
 log = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ def tap_csv(adql: str, url: str | None = None, timeout: float = 300, retries: in
     full = (url or settings.tap_url) + "?" + urllib.parse.urlencode(params)
     last: Exception | None = None
     service = urllib.parse.urlsplit(full).netloc
+    netpolicy.check(service)  # interactive callers skip a service that failed minutes ago
+    timeout, retries = netpolicy.timeouts(timeout, retries)
     for attempt in range(retries):
         t0 = time.perf_counter()
         try:
@@ -31,11 +34,13 @@ def tap_csv(adql: str, url: str | None = None, timeout: float = 300, retries: in
             rows = list(csv.DictReader(io.StringIO(text)))
             log.info("tap query done s=%.2f service=%s rows=%d kb=%.0f attempt=%d", time.perf_counter() - t0,
                      service, len(rows), len(text) / 1e3, attempt + 1)
+            netpolicy.succeeded(service)
             return rows
         except Exception as e:  # noqa: BLE001 - retry any transient failure
             last = e
             log.warning("tap query failed s=%.2f service=%s attempt=%d/%d error=%s", time.perf_counter() - t0,
                         service, attempt + 1, retries, f"{e.__class__.__name__}: {e}".splitlines()[0][:200])
             if attempt < retries - 1:
-                time.sleep(2.0 * (attempt + 1))
+                time.sleep(netpolicy.pause(2.0 * (attempt + 1)))
+    netpolicy.failed(service, last or "failed")
     raise RuntimeError(f"TAP query failed after {retries} attempts: {last}")

@@ -19,7 +19,7 @@ import urllib.request
 
 import numpy as np
 
-from .. import cache
+from .. import cache, netpolicy
 from ..logs import timed
 
 HORIZONS = "https://ssd.jpl.nasa.gov/api/horizons.api"
@@ -57,16 +57,21 @@ def _query(mjds: list[float], timeout: float = 60.0) -> dict[str, list[float]]:
          "TLIST": f"'{jds}'", "TLIST_TYPE": "JD", "OUT_UNITS": "KM-S", "VEC_TABLE": "2", "REF_PLANE": "FRAME",
          "CSV_FORMAT": "YES", "TIME_TYPE": "UT"}
     url = HORIZONS + "?" + urllib.parse.urlencode(q)
-    for attempt in range(4):
+    service = urllib.parse.urlsplit(HORIZONS).netloc
+    netpolicy.check(service)
+    timeout, attempts = netpolicy.timeouts(timeout, 4)
+    for attempt in range(attempts):
         try:
             with timed(log, "horizons spacecraft states", n=len(mjds), attempt=attempt):
                 with urllib.request.urlopen(url, timeout=timeout) as r:
                     text = json.loads(r.read())["result"]
+            netpolicy.succeeded(service)
             break
-        except (OSError, ValueError, KeyError):  # 503s during JPL load are common: back off and retry
-            if attempt == 3:
+        except (OSError, ValueError, KeyError) as e:  # 503s during JPL load are common: back off and retry
+            if attempt == attempts - 1:
+                netpolicy.failed(service, e)
                 raise
-            time.sleep(2.0 * 2 ** attempt)
+            time.sleep(netpolicy.pause(2.0 * 2 ** attempt))
     if "$$SOE" not in text:
         raise RuntimeError("Horizons returned no vectors: " + text[:200])
     body = text.split("$$SOE")[1].split("$$EOE")[0]

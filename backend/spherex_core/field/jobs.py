@@ -30,6 +30,7 @@ from .common import FieldCancelled
 log = logging.getLogger(__name__)
 INTEREST_TIMEOUT = 60.0
 MAX_CONCURRENT = 2
+MAX_POINT_CONCURRENT = 6
 
 
 KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis"}
@@ -76,24 +77,31 @@ class FieldJob:
     last_seen: float = field(default_factory=time.monotonic)
     cancel: threading.Event = field(default_factory=threading.Event)
     reason: str | None = None
+    steps: dict[str, str] | None = None  # per-step state for multi-step jobs (point analysis)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "status": self.status, "stage": self.stage, "done": self.done, "total": self.total,
-                "error": self.error or self.reason, "elapsed": (self.finished or time.time()) - self.started}
+        d = {"id": self.id, "status": self.status, "stage": self.stage, "done": self.done, "total": self.total,
+             "error": self.error or self.reason, "elapsed": (self.finished or time.time()) - self.started}
+        if self.steps is not None:
+            d["steps"] = dict(self.steps)
+        return d
 
 
 class FieldJobs:
     def __init__(self, max_concurrent: int = MAX_CONCURRENT, interest_timeout: float = INTEREST_TIMEOUT):
         self.jobs: dict[str, FieldJob] = {}
         self.interest_timeout = interest_timeout
-        self._sem: asyncio.Semaphore | None = None
+        self._sems: dict[str, asyncio.Semaphore] = {}
         self._max = max_concurrent
         self._tasks: set[asyncio.Task] = set()
 
-    def _semaphore(self) -> asyncio.Semaphore:
-        if self._sem is None:
-            self._sem = asyncio.Semaphore(self._max)
-        return self._sem
+    def _semaphore(self, jid: str = "") -> asyncio.Semaphore:
+        """Point analyses (light, interactive) get their own slots, so a minutes-long field analysis never
+        makes a click wait in the queue."""
+        kind = "p" if jid.partition("-")[2].startswith("p") else "heavy"
+        if kind not in self._sems:
+            self._sems[kind] = asyncio.Semaphore(MAX_POINT_CONCURRENT if kind == "p" else self._max)
+        return self._sems[kind]
 
     async def submit(self, seq_id: str, opts: FieldOptions, client: str | None = None, force: bool = False) -> dict:
         """Start (or join) the full field analysis of a finished sequence."""
@@ -112,6 +120,8 @@ class FieldJobs:
         if job and job.status in ("queued", "running"):
             self._touch(job, client)
             return job.to_dict()
+        if force:  # status() serves the result file first, so a forced re-run must drop the old one
+            result_path(jid).unlink(missing_ok=True)
         job = FieldJob(id=jid)
         self._touch(job, client)
         self.jobs[jid] = job
@@ -160,13 +170,15 @@ class FieldJobs:
     async def _run(self, job: FieldJob, seq_id: str, work) -> None:
         watcher = asyncio.get_running_loop().create_task(self._watch(job))
         try:
-            async with self._semaphore():
+            async with self._semaphore(job.id):
                 if job.cancel.is_set():
                     raise FieldCancelled(job.reason)
                 job.status = "running"
 
-                def progress(stage: str, done: int, total: int) -> None:
+                def progress(stage: str, done: int, total: int, steps: dict | None = None) -> None:
                     job.stage, job.done, job.total = stage, done, total
+                    if steps is not None:
+                        job.steps = steps
 
                 def check() -> None:
                     if job.cancel.is_set():
