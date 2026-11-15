@@ -289,7 +289,7 @@ def test_mcp_summary_and_allwise_rows(monkeypatch, tmp_path):
     monkeypatch.setattr(refcat.cache, "layout", lambda: layout)
     rows = refcat.allwise(10.0, 20.0, 0.01)
     assert rows[0]["w1"] == 10.5 and rows[0]["mag"] == 10.4 and not rows[0]["extended"]
-    assert rows[0]["pmra"] == 0.0 and rows[0]["pmdec"] == 900.0  # noise-level AllWISE motions are dropped
+    assert rows[0]["pmra"] == 0.0 and rows[0]["pmdec"] == 0.0  # AllWISE apparent motions are not used
 
 
 

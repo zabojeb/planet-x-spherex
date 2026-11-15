@@ -4,6 +4,7 @@ Light curves (spherex_core.longbaseline.run, in this process):
   R Dra      Mira, VSX P = 246.12 d                      sequence target
   V1968 Cyg  carbon Mira, VSX P = 395.45 d               a position 40" from the centre of a Cygnus field
   RW Aur     CTTS with optical dimming episodes since 2010 (IR brightening reported during the 2014-2016 dip)
+  Barnard's Star, eps Indi B, WISE 0855-0714   fast movers (constant in the mid-IR for Barnard's Star)
 Field searches (search_field) on fields with cached archival image lists, every source cross-matched with VSX
 (5"): a clean source (no AllWISE contamination flag) flagged variable or periodic that VSX does not list counts as
 a false positive (an upper bound, since VSX is incomplete).
@@ -34,6 +35,10 @@ CASES = [
     {"name": "R Dra", "seq": "c16e0057355ff8f04f32", "period": 246.12},
     {"name": "V1968 Cyg", "seq": "e1c3e2e143890b1de498", "ra": 300.28772, "dec": 40.92750, "period": 395.45},
     {"name": "RW Aur", "seq": "cb983e7485da07d622a4"},
+    # constant (in the mid-IR) and fast-moving targets: Barnard's Star moves 10.4"/yr, 5' over 1997-2026
+    {"name": "Barnard's Star", "seq": "4261e28d6e0c3cb6df94", "constant": True},
+    {"name": "eps Indi B", "seq": "d651cb1431ed20027191"},
+    {"name": "WISE 0855-0714", "seq": "e3fc10babf437ede1d93"},
 ]
 SEARCH_FIELDS = {"R Dra": "c16e0057355ff8f04f32", "RW Aur": "cb983e7485da07d622a4",
                  "eps Indi B": "d651cb1431ed20027191",

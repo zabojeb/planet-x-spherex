@@ -545,8 +545,8 @@ def _lb_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
 
 
 def _lp_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
-    keep = ("id", "ra", "dec", "w1", "w2", "label", "score", "period_days", "period_fap", "range_mag", "chi2_red",
-            "trends", "events", "baseline_years")
+    keep = ("id", "ra", "dec", "w1", "w2", "label", "score", "contamination", "period_days", "period_fap",
+            "cadence_alias", "range_mag", "chi2_red", "trends", "events", "baseline_years")
     return compact({"summary": res.get("summary"),
                     "candidates": [{k: c.get(k) for k in keep} for c in (res.get("candidates") or [])[:limit]],
                     "ensemble": res.get("ensemble"), "notes": res.get("notes")}, max_list=max(limit, 6))

@@ -90,34 +90,26 @@ def _cached(name: str, ra: float, dec: float, radius_deg: float, fetch) -> list[
     return rows
 
 
-def _significant(value: str, error: str, nsigma: float = 3.0) -> float:
-    """An AllWISE motion component (mas/yr) if it is nsigma significant, else 0: faint AllWISE motions are mostly
-    noise of a few hundred mas/yr, which would walk the aperture off the source over 14 years."""
-    v, e = _num(value), _num(error)
-    if v is None:
-        return 0.0
-    return v if e is not None and e > 0 and abs(v) >= nsigma * e else 0.0
-
-
 def allwise(ra: float, dec: float, radius_deg: float) -> list[dict]:
-    """AllWISE sources in the catalogs.cone CatWISE shape (mag = W2, w1 = W1, motions in mas/yr)."""
+    """AllWISE sources in the catalogs.cone CatWISE shape (mag = W2, w1 = W1), at their 2010.3 positions without
+    motion: AllWISE's apparent motions are dominated by systematics (several hundred mas/yr at 5-13 sigma for
+    ordinary field stars), which would walk apertures off the sources over the 14 NEOWISE-era years. Ordinary
+    field stars move < 0.2" over that span; the target's own motion comes from the request or Gaia DR3."""
     def fetch():
         rows = vizier_cone("II/328/allwise", ra, dec, radius_deg,
-                           ["AllWISE", "RAJ2000", "DEJ2000", "W1mag", "W2mag", "pmRA", "e_pmRA", "pmDE", "e_pmDE",
-                            "ccf", "ex"])
+                           ["AllWISE", "RAJ2000", "DEJ2000", "W1mag", "W2mag", "ccf", "ex"])
         out = []
         for x in rows:
             r, d = _num(x.get("RAJ2000", "")), _num(x.get("DEJ2000", ""))
             if r is None or d is None:
                 continue
             out.append({"id": f"AllWISE {x.get('AllWISE', '').strip()}", "ra": r, "dec": d, "epoch": ALLWISE_EPOCH,
-                        "pmra": _significant(x.get("pmRA", ""), x.get("e_pmRA", "")),
-                        "pmdec": _significant(x.get("pmDE", ""), x.get("e_pmDE", "")),
+                        "pmra": 0.0, "pmdec": 0.0,
                         "mag": _num(x.get("W2mag", "")), "mag_band": "W2", "w1": _num(x.get("W1mag", "")),
                         "ccf": x.get("ccf"), "extended": x.get("ex") not in (None, "", "0")})
         return out
 
-    return _cached("allwise-vizier-v2", ra, dec, radius_deg, fetch)
+    return _cached("allwise-vizier-v3", ra, dec, radius_deg, fetch)
 
 
 def twomass_vizier(ra: float, dec: float, radius_deg: float) -> list[dict]:

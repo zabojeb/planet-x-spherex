@@ -32,6 +32,8 @@ POWER_PERIODIC = 0.3
 VARIABLE_CHI2 = 5.0
 VARIABLE_AMPLITUDE = 0.1  # mag, robust 5-95 % range
 VARIABLE_RANGE_NOISE = 5.0  # the range must also exceed this many median errors (pure noise gives ~3.3)
+CONFIRM_CHI2 = 2.0  # a variable in one of W1/W2 needs at least this chi2/dof in the other (when it has the points)
+CONFIRM_MIN_POINTS = 8
 WISE_CADENCE_DAYS = 365.25  # WISE sees a field every ~6 months with the scan direction alternating, so a
 CADENCE_HARMONICS = 7  # systematic of the visit geometry looks periodic at 365.25/k d (k = 1..7 for P >= 50 d)
 EVENT_SIGMA = 3.0
@@ -392,8 +394,9 @@ def classify(res: dict) -> dict:
     """Plain-language verdict from the statistics (explicit rules, reasons listed).
 
     Variable: in one of W1/W2 (all bands when neither is present), chi2/dof of the constant model >= 5 and a
-    5-95 % range >= max(0.1 mag, 5 median errors). Periodic: a significant period on top (FAP < 1e-3, power >= 0.3,
-    not a NEOWISE cadence alias)."""
+    5-95 % range >= max(0.1 mag, 5 median errors), and the other of W1/W2, when it has >= 8 points, not flat
+    (chi2/dof >= 2): stellar variability shows in both bands, single-band excursions are mostly artefacts.
+    Periodic: a significant period on top (FAP < 1e-3, power >= 0.3, not a NEOWISE cadence alias)."""
     reasons = []
     per = res.get("band_stats", {})
     main = [b for b in ("W1", "W2") if b in per] or list(per)
@@ -403,11 +406,17 @@ def classify(res: dict) -> dict:
 
     var_bands = [b for b in main if per[b]["chi2_red_constant"] >= VARIABLE_CHI2
                  and (per[b]["range_5_95_mag"] or 0.0) >= need(b)]
-    variable = bool(var_bands)
     shown = var_bands or main
     reasons.append("; ".join(f"{b}: constant-model chi2/dof {per[b]['chi2_red_constant']:.1f} (variable if >= "
                              f"{VARIABLE_CHI2}), 5-95 % range {per[b]['range_5_95_mag'] or 0.0:.2f} mag "
                              f"(>= {need(b):.2f})" for b in shown))
+    if len(var_bands) == 1 and len(main) == 2:
+        other = main[1] if var_bands[0] == main[0] else main[0]
+        if per[other]["n"] >= CONFIRM_MIN_POINTS and per[other]["chi2_red_constant"] < CONFIRM_CHI2:
+            reasons.append(f"{var_bands[0]} alone: {other} is flat (chi2/dof {per[other]['chi2_red_constant']:.1f} "
+                           f"< {CONFIRM_CHI2} over {per[other]['n']} points), not counted")
+            var_bands = []
+    variable = bool(var_bands)
     p = res.get("period") or {}
     periodic = bool(p.get("significant")) and variable
     label = "constant"
