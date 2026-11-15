@@ -33,9 +33,10 @@
 3. **Concurrent steps with a deadline.** Identification, known objects, tracklets and motion start at once;
    photometry waits at most 8 s for a catalogue counterpart to follow, then spectrum, periodogram and colours run
    on its records. Whatever is not finished after 60 s becomes `{"error": "TimeoutError: not finished within 60 s
-   ..."}` (the thread keeps going and fills the caches for the next try). The job status carries `steps`
-   (`pending | running | done | error` per step) and the result a `timings` block (per-step seconds, timed-out
-   steps, services whose breaker is open).
+   ..."}` (the thread keeps going and fills the caches for the next try, but from the deadline on it changes
+   nothing in the returned result, reports no progress and starts none of the steps that follow it). The job
+   status carries `steps` (`pending | running | done | error` per step) and the result a `timings` block
+   (per-step seconds, timed-out steps, services whose breaker is open).
 4. **JPL in parallel:** spacecraft states for all epochs in one Horizons call, then sb_ident for up to 8 epochs, 4
    at a time, within 40 s; queries are centred on a 0.01° bucket so nearby clicks share the cache. Catalogue cones
    are bucketed the same way.
