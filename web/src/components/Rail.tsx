@@ -32,6 +32,8 @@ export function Rail(p: {
   const research = p.audience === "research";
   return (
     <nav className="rail glass" aria-label="Tools">
+      {/* scrolls on short phone screens; not positioned, so the side panels (placed against .rail) are not clipped */}
+      <div className="rail-scroll">
       <Popover label={<Navigation size={16} />} title="Go to coordinates" align="side" width={330}>
         {p.goTo}
       </Popover>
@@ -103,6 +105,7 @@ export function Rail(p: {
           {p.fullscreen.on ? <Minimize size={16} /> : <Maximize size={16} />}
         </button>
       )}
+      </div>
     </nav>
   );
 }

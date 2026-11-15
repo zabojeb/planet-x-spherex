@@ -1192,3 +1192,26 @@ button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opa
   .tour { top: auto; bottom: calc(196px + env(safe-area-inset-bottom)); }
   .probe-charts { gap: 6px; }
 }
+
+/* the rail's buttons sit in .rail-scroll: no box of its own on larger screens */
+.rail-scroll { display: contents; }
+/* the search pill shows focus with its own border; no second outline around the text field */
+.cmdk-input input:focus-visible { outline: none; }
+
+/* ---- phones: the rail stops above the dock and scrolls when its buttons do not fit (short screens, Research);
+   the HUD keeps clear of the rail; the landing index covers the bottom of the screen, so the rail waits for it */
+@media (max-width: 760px) {
+  .rail-scroll {
+    display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+    max-height: calc(100dvh - var(--row2) - var(--dock-clear, 150px) - var(--gutter) - 10px); /* 10 px: the rail's padding (2 × 4) and border (2 × 1) */
+  }
+  .rail-scroll::-webkit-scrollbar { display: none; }
+  .hud-min { max-width: calc(100vw - 3 * var(--gutter) - var(--rail-w)); }
+  .hud-line { white-space: normal; }
+  .hero-on .rail { display: none; }
+}
+@media (max-width: 760px) {
+  .exports { grid-template-columns: 1fr; }                          /* Share → Download: one column in a phone-wide panel */
+  .hero { bottom: var(--dock-clear, 150px); }                      /* the landing index ends where the dock starts */
+  .hero-title { padding-right: 32px; }                             /* clear of the close button */
+}

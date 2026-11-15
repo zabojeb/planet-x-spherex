@@ -157,6 +157,7 @@ export default function App() {
   const [hudLifted, setHudLifted] = useState(false);
   const downWidth = useRef(0); // the HUD's width when last measured in its unlifted place
   const [hudClear, setHudClear] = useState(0);
+  const [dockClear, setDockClear] = useState(0);
   useEffect(() => {
     let hud: Element | null = null;
     let dock: Element | null = null;
@@ -183,6 +184,7 @@ export default function App() {
         return HUD_LEFT + width + HUD_DOCK_GAP > d.left;
       });
       setHudClear(hero && h && h.height ? Math.ceil(window.innerHeight - h.top) : 0);
+      setDockClear(d && d.height ? Math.ceil(window.innerHeight - d.top) : 0); // room the dock takes at the bottom
     };
     const ro = new ResizeObserver(measure);
     const mo = new MutationObserver(measure); // the HUD and the dock mount once the first sequence is in
@@ -1288,7 +1290,7 @@ export default function App() {
   return (
     <div
       className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}${sel && !hideMarks ? " pick-open" : ""}`}
-      style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
+      style={{ ...(hudClear ? { "--hud-clear": `${hudClear}px` } : null), ...(dockClear ? { "--dock-clear": `${dockClear}px` } : null) } as React.CSSProperties}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
