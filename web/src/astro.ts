@@ -232,8 +232,8 @@ function fromParts(raP: number[], sign: string, decP: number[], raHours: boolean
 // ---------------------------------------------------------------- coordinate grid
 
 /** Grid spacings: Dec in arcseconds of arc, RA in seconds of time. */
-const DEC_STEPS = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200, 18000, 36000];
-const RA_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200];
+const DEC_STEPS = [1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200, 18000, 36000, 54000, 108000];
+const RA_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200, 10800];
 
 /** The finest spacing that keeps at most `maxLines` lines across `spanDeg`. RA steps are in seconds of time. */
 export function gridStep(spanDeg: number, kind: "ra" | "dec", maxLines = 5): number {
