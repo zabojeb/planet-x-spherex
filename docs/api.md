@@ -839,3 +839,32 @@ MCP: `long_baseline_lightcurve(sequence_id, ra?, dec?, pmra?, pmdec?, ref_epoch?
 `long_period_search(sequence_id, limit?)` submit or join the same jobs. They return a compact summary once
 done, the job status while running, and `job_result(job_id)` works too. From the command line:
 `python scripts/long_baseline.py <sequence> [--ra --dec] [--png curve.png] [--out result.json] [--search]`.
+
+## Sky map: HiPS cache, coverage and footprints (ADR-0061)
+
+### `GET /hips/{survey}/{path}`
+
+The SPHEREx DR1 all-sky HiPS cube (`survey` = `spherex-dr1`), served from the server's disk and fetched from IRSA
+the first time a file is asked for. `path` is a HiPS file name: `properties`, `Moc.fits`, `Norder3/Allsky_{frame}.png`
+or `Norder{k}/Dir{d}/Npix{n}_{frame}.png`; anything else is 404.
+
+| Response | When | `Cache-Control` |
+|---|---|---|
+| 200 tile / `Allsky` (PNG) | on disk, or fetched now | `public, max-age=31536000, immutable`, with `ETag` |
+| 200 `properties` / `Moc.fits` | refreshed after an hour; the stale copy when IRSA is down | `public, max-age=3600` |
+| 304 | `If-None-Match` matches | as above |
+| 404 | unknown survey or path, or IRSA has no such file (remembered for a day) | `public, max-age=86400` |
+| 502 | not on disk and every source failed | — |
+
+### `GET /api/coverage?ra=&dec=`
+
+What SPHEREx has at a position, from the local file-catalogue mirror (milliseconds; an IRSA image search when the
+mirror is not built). `{ra, dec, n_exposures, n_visits, per_detector: {D1: n, …}, per_collection, date_min, date_max,
+visits: [{from, to, n, mjd_min, mjd_max}], deep, source, seconds}`; `n_exposures: 0` where there is nothing yet.
+
+### `GET /api/footprints?ra=&dec=&radius=3&limit=600`
+
+Outlines of SPHEREx exposures whose footprint lies within `radius` degrees (at most 12), newest first, one detector of
+each dichroic pair (D1–D3; D4–D6 see the same sky): `{available, total, shown, radius_deg, footprints: [{obs_id, band,
+mjd, collection, corners: [ra1, dec1, … ra4, dec4]}]}`. Without a mirror: `{available: false, reason, footprints: []}`.
+Cached for 10 minutes.

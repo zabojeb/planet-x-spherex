@@ -107,6 +107,22 @@ Network tests (marked `network`) read a real file from S3 and compare against as
 cd backend && python -m pytest -q -m "not network"
 ```
 
+### Sky map tiles (HiPS cache)
+
+The viewer's sky map loads the SPHEREx all-sky HiPS through the API (`/hips/spherex-dr1/…`, ADR-0061), which keeps
+every file it has fetched under `$SPHEREX_CACHE_DIR/hips/`. Fill it once on a new host so the map never waits for IRSA:
+
+```bash
+PYTHONPATH=backend SPHEREX_CACHE_DIR=/workspace/cache python scripts/prewarm_hips.py --plan   # counts and size
+PYTHONPATH=backend SPHEREX_CACHE_DIR=/workspace/cache python scripts/prewarm_hips.py --concurrency 16
+```
+
+The default plan is the six frames the viewer shows (the middle channel of D1–D6) at orders 0–5 plus `Allsky`:
+98,288 files, 7.0 GB, about 15 minutes on the dev server. Files already on disk are skipped, so it can be stopped
+and restarted; low orders come first. Other frames fill lazily as users ask for them. `HIPS_SPHEREX_BASE`,
+`HIPS_MIRROR_BASE` and `HIPS_TIMEOUT` (s) configure the sources; in the web build `VITE_HIPS_BASE` points the map
+elsewhere (a CDN), and it falls back to IRSA when the proxy does not answer.
+
 ### Building sequences from the command line
 
 ```bash

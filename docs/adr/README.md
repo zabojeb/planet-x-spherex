@@ -75,3 +75,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0058](0058-sky-map-aladin-lite.md) | Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both | Accepted | 2026-11-15 |
 | [0059](0059-long-baseline-light-curves.md) | Measure 2MASS, AllWISE and NEOWISE frames like the target and tie SPHEREx to them with field stars | Accepted (extends 0020, 0023) | 2026-11-15 |
 | [0060](0060-solar-system-science-on-comoving-sequences.md) | Subtract the static sky from co-moving sequences with SPHEREx's own other visits; comet, asteroid and unknown-mover analyses as jobs | Accepted (extends 0045, 0048, 0049, 0052) | 2026-11-15 |
+| [0061](0061-sky-map-cache-map-mode-and-pick-anywhere.md) | Serve the sky map from our own HiPS cache, give the zoomed-out map its own tools, and let users pick any point | Accepted (extends 0058) | 2026-11-15 |

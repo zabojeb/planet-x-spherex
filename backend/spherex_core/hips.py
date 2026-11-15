@@ -250,7 +250,11 @@ async def prewarm(paths: list[str], survey: str = "spherex-dr1", concurrency: in
             progress(done)
 
     step = 2000  # bounded task count so a 100k-tile plan does not create 100k coroutines at once
-    for i in range(0, len(paths), step):
-        await asyncio.gather(*(one(x) for x in paths[i:i + step]))
+    try:
+        for i in range(0, len(paths), step):
+            await asyncio.gather(*(one(x) for x in paths[i:i + step]))
+    finally:
+        if _session is not None and _session_loop is asyncio.get_running_loop():
+            await _session.close()  # a script's loop ends here: no "unclosed connector" warnings
     done["seconds"] = round(time.perf_counter() - t0, 1)
     return done
