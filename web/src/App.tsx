@@ -9,9 +9,9 @@ import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames,
 import { ArchivalStrip, LongBaselineControls } from "./components/LongBaseline";
 import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
-import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
+import type { AnalysisSubject } from "./components/AnalysisModal";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
-import { formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { compassPoint, formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, positionAngle, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
@@ -27,6 +27,7 @@ import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
 import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
+import { cutStamp, locateSource } from "./locate";
 import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
 import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
@@ -34,6 +35,8 @@ import type { ArchivalMeta, CatalogSource, ExposureStack, Meta, MovingChoice, Ph
 
 // three.js is a separate chunk, fetched the first time a 3D view opens.
 const Sky3D = lazy(() => import("./components/Sky3D"));
+// The analysis window (and the spectral charts it shows) loads the first time Analyze is pressed.
+const AnalysisModal = lazy(() => import("./components/AnalysisModal").then((m) => ({ default: m.AnalysisModal })));
 
 interface StageHud {
   epoch: string;
@@ -669,17 +672,51 @@ export default function App() {
     if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
     return Promise.resolve();
   };
-  /** Open the automatic analysis of a selection in the drawer. */
+  /** Open the analysis window for a selection. A pin is a hint: the source whose light dominates there is found
+   *  in the S/N image of the shown epoch and its centre is analysed (or the window says there is none). */
   const analyzeSelection = (s: Selection, world: [number, number] | null) => {
-    if (!world) return;
+    if (!world || !meta || !derived) return;
+    const g = meta.grid;
+    const e = Math.max(0, Math.min(view.epoch, meta.epochs.length - 1));
+    const epochYear = mjdToYear(meta.epochs[e]?.mjd_mean ?? meta.epochs[0].mjd_mean);
+    const snr = derived.ready(e, "all") ? derived.all(e) : display?.kind === "scalar" ? display.img : null;
+    const rgb = derived.ready(e, "rgb");
+    const picture = (cx: number, cy: number, click?: [number, number] | null): AnalysisSubject["stamp"] =>
+      snr || rgb ? { stamp: cutStamp(rgb ? derived.rgb(e) : [snr!], g.n, cx, cy, 12), rgb, centre: [cx, cy], click: click ?? null, pixscale: g.pixscale_arcsec } : null;
+    const label = (ra: number, dec: number) => `${ra.toFixed(5)} ${dec >= 0 ? "+" : ""}${dec.toFixed(5)}`;
     let subject: AnalysisSubject;
-    if (s.kind === "target" && target) subject = { key: `target:${meta?.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null } };
-    else if (s.kind === "source") subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) } };
-    else subject = { key: `pt:${world[0].toFixed(6)},${world[1].toFixed(6)}`, label: `${world[0].toFixed(5)} ${world[1] >= 0 ? "+" : ""}${world[1].toFixed(5)}`, pos: { ra: world[0], dec: world[1] } };
+    if (s.kind === "target" && target) {
+      const [x, y] = worldToPixel(g, world[0], world[1]);
+      subject = { key: `target:${meta.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null }, stamp: picture(x, y) };
+    } else if (s.kind === "source") {
+      const [x, y] = worldToPixel(g, world[0], world[1]);
+      subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) }, stamp: picture(x, y) };
+    } else {
+      const [x0, y0] = worldToPixel(g, world[0], world[1]);
+      const loc = snr ? locateSource(snr, g.n, x0, y0) : null;
+      if (loc?.found) {
+        const [ra, dec] = pixelToWorld(g, loc.x, loc.y);
+        const off = loc.offsetPx * g.pixscale_arcsec;
+        subject = {
+          key: `pt:${ra.toFixed(5)},${dec.toFixed(5)}`,
+          label: label(ra, dec),
+          pos: { ra, dec, pmra: 0, pmdec: 0, ref_epoch: epochYear },
+          click: world,
+          located: { found: true, snr: loc.snr, offsetArcsec: off, pa: compassPoint(positionAngle(world[0], world[1], ra, dec)), how: loc.how },
+          stamp: picture(loc.x, loc.y, off >= 1 ? [x0, y0] : null),
+        };
+      } else
+        subject = {
+          key: `pt:${world[0].toFixed(5)},${world[1].toFixed(5)}`,
+          label: label(world[0], world[1]),
+          pos: { ra: world[0], dec: world[1], pmra: 0, pmdec: 0, ref_epoch: epochYear },
+          located: loc ? { found: false, snr: loc.snr } : null,
+          stamp: picture(x0, y0),
+        };
+    }
     setAnalysis(subject);
     setSel(null);
     setHero(false);
-    setDrawer("analysis");
   };
   /** Per-exposure fits at a selection; a field candidate brings its trial motion along. */
   const verifySelection = (world: [number, number] | null, label: string) => {
@@ -1173,7 +1210,6 @@ export default function App() {
           source={source}
           onClearSource={() => setSource(null)}
           onNeedPhotometry={() => setLegacySpectrum(true)}
-          analysis={analysis}
           verify={verify}
           target={target}
           epoch={view.epoch}
@@ -1186,6 +1222,22 @@ export default function App() {
           flagsOn={flagsOn}
           onFlagsOn={setFlagsOn}
         />
+      )}
+      {analysis && meta && (
+        <Suspense fallback={null}>
+          <AnalysisModal
+            subject={analysis}
+            meta={meta}
+            ylog={view.ylog}
+            onYlog={(ylog) => set({ ylog })}
+            onClose={() => setAnalysis(null)}
+            onOpenCurves={(photometry, label) => {
+              setSource({ key: `an:${analysis.key}`, label, photometry });
+              setAnalysis(null);
+              setDrawer("lightcurve");
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );
