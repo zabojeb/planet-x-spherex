@@ -75,7 +75,28 @@ async def submit_sequence(params: SequenceParams, force: bool = False, *, ip: st
     q = jobs()
     if not pinned and not await q.allow_submit(ip):
         raise TooManyJobs("Too many requests from your address; slow down.", retry_after=20)
+    if not pinned:  # count what people ask for: frequent fields get prewarmed (popular.py)
+        import asyncio
+
+        from . import popular
+
+        req = {k: getattr(params, k) for k in ("ra", "dec", "pmra", "pmdec", "ref_epoch", "fov_arcmin")}
+        asyncio.get_running_loop().run_in_executor(None, popular.count_request, params.ra, params.dec,
+                                                   params.fov_arcmin, params.name, req)
     return await q.submit(params, force=force, ip=ip, client=client, priority=priority, pinned=pinned)
+
+
+def upstream_status() -> dict:
+    """Remote sources per kind of data, in the order they are asked now, plus the file-catalogue mirror."""
+    from . import endpoints, netpolicy, upstreams  # noqa: F401 - endpoints registers the sources
+    from .archive import mirror
+
+    m = mirror.get()
+    try:
+        mstats = m.stats() if m is not None else None
+    except Exception as e:  # noqa: BLE001
+        mstats = {"error": str(e)}
+    return {**upstreams.status(), "breakers": netpolicy.status(), "mirror": mstats}
 
 
 async def poll_sequence(seq_id: str, client: str | None = None) -> tuple[str, dict | None]:

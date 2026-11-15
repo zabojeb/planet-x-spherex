@@ -2,8 +2,12 @@
 
 Positions come from the JPL Small-Body Identification API with SPHEREx's own geocentric state (`xobs`, from
 Horizons) and numerical propagation (`two-pass=true`), so they include SPHEREx's parallax (up to ~9.7"/D for
-an object D AU away). SkyBoT with MPC code 288 returns geocentric positions and is not used. Results are
-cached per (field, time, V limit).
+an object D AU away). Results are cached per (field, time, V limit).
+
+When JPL (sb_ident, or Horizons for SPHEREx's state) fails, positions come from IMCCE SkyBoT instead. SkyBoT
+cannot place the observer on SPHEREx (MPC code 288 also answers geocentric), so those objects carry
+`geocentric: true`, a position error widened by the parallax (9.7"/D) and a motion tolerance widened by the
+spacecraft's orbital velocity (37"/h / D); they are cached apart so the next query asks JPL again.
 
 Identification follows Astrometrica's criteria: a known object matches a tracklet when it is within the
 position tolerance at the tracklet's times, its direction of motion agrees within +-15 deg and its speed
@@ -34,12 +38,17 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from .. import cache, netpolicy
+from .. import cache, endpoints, netpolicy, upstreams
 from ..logs import timed
 from . import observer
 from .common import FieldData
 
 SB_IDENT = "https://ssd-api.jpl.nasa.gov/sb_ident.api"
+SKYBOT = "https://ssp.imcce.fr/webservices/skybot/api/conesearch.php"
+SKYBOT_FALLBACK = os.environ.get("SPHEREX_SKYBOT_FALLBACK", "1") != "0"
+PARALLAX_ARCSEC_AU = 9.7  # SPHEREx's ~7,000 km offset from the geocentre, seen from 1 AU
+ORBIT_RATE_ARCSEC_H_AU = 37.2  # its ~7.5 km/s orbital velocity, as an angular rate seen from 1 AU
+GEOCENTRIC_NOTE = 'geocentre (IMCCE SkyBoT; JPL unavailable): off by up to 9.7"/D from SPHEREx'
 PA_TOL = 15.0  # deg
 SPEED_TOL = 0.30  # fraction
 POS_TOL = 30.0  # arcsec floor (two-pass positions are good to a few arcsec for numbered objects)
@@ -85,15 +94,49 @@ def _num(v) -> float | None:
         return None
 
 
+def _write(path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.part")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
 def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 21.0,
           timeout: float = 170.0, retries: int = 5) -> list[dict]:
-    """Asteroids and comets in a box around (ra, dec) at mjd as seen from SPHEREx (cached on disk)."""
+    """Asteroids and comets in a box around (ra, dec) at mjd as seen from SPHEREx (cached on disk); geocentric
+    from SkyBoT, flagged, when JPL fails (see the module notes)."""
     key = hashlib.sha1(f"{ra:.4f}|{dec:.4f}|{half_deg:.3f}|{mjd:.4f}|{vmag_lim}".encode()).hexdigest()[:16]
     path = cache.layout().root / "known_objects" / f"{key}.json"
     try:
         return json.loads(path.read_text())
     except (OSError, ValueError):
         pass
+    t0 = time.perf_counter()
+    try:
+        out = _sb_ident(ra, dec, half_deg, mjd, vmag_lim, timeout, retries)
+    except Exception as e:  # noqa: BLE001 - JPL down, slow or rate-limiting: SkyBoT, if allowed
+        upstreams.record(endpoints.SSO_JPL, time.perf_counter() - t0, False, e, breaker=False)
+        if not SKYBOT_FALLBACK:
+            raise
+        geo = path.with_name(f"{key}.skybot.json")
+        try:
+            return json.loads(geo.read_text())
+        except (OSError, ValueError):
+            pass
+        log.warning("known objects: JPL failed (%s); using SkyBoT geocentric positions", e)
+        try:
+            out = skybot(ra, dec, half_deg, mjd, vmag_lim, timeout=min(timeout, 60.0))
+        except Exception as e2:  # noqa: BLE001
+            raise RuntimeError(f"JPL sb_ident failed ({e}); SkyBoT failed ({e2})") from e2
+        _write(geo, out)
+        return out
+    upstreams.record(endpoints.SSO_JPL, time.perf_counter() - t0, True, breaker=False)
+    _write(path, out)
+    return out
+
+
+def _sb_ident(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float, timeout: float,
+              retries: int) -> list[dict]:
     xobs = ",".join(f"{v:.9E}" for v in observer.state(mjd))
     base = {"obs-time": mjd_to_datetime(mjd).strftime("%Y-%m-%d_%H:%M:%S"), "xobs": xobs,
             "fov-ra-center": _sexa_ra(ra), "fov-dec-center": _sexa_dec(dec),
@@ -148,10 +191,54 @@ def query(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 
             except (ValueError, IndexError):
                 continue
             out.append(o)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.part")
-    tmp.write_text(json.dumps(out))
-    tmp.replace(path)
+    return out
+
+
+def skybot(ra: float, dec: float, half_deg: float, mjd: float, vmag_lim: float = 21.0,
+           timeout: float = 60.0) -> list[dict]:
+    """Known objects in the circle around the box from IMCCE SkyBoT, geocentric (flagged)."""
+    q = {"-ep": f"{mjd + 2400000.5:.6f}", "-ra": f"{ra % 360.0:.6f}", "-dec": f"{dec:.6f}",
+         "-rd": f"{half_deg * 1.4143:.4f}", "-mime": "json", "-output": "all", "-loc": "500", "-filter": "0",
+         "-objFilter": "111", "-refsys": "EQJ2000", "-from": "spherex-viewer"}
+    timeout, _ = netpolicy.timeouts(timeout, 1)
+    netpolicy.check(endpoints.SSO_SKYBOT.service)
+    t0 = time.perf_counter()
+    try:
+        with timed(log, "skybot", mjd=round(mjd, 4)), \
+                urllib.request.urlopen(SKYBOT + "?" + urllib.parse.urlencode(q), timeout=timeout) as r:
+            body = r.read()  # 204 (empty) when nothing is in the cone
+    except Exception as e:
+        upstreams.record(endpoints.SSO_SKYBOT, time.perf_counter() - t0, False, e)
+        raise
+    upstreams.record(endpoints.SSO_SKYBOT, time.perf_counter() - t0, True)
+    return parse_skybot(json.loads(body) if body.strip() else [], mjd, vmag_lim)
+
+
+def parse_skybot(rows: list[dict], mjd: float, vmag_lim: float) -> list[dict]:
+    """SkyBoT conesearch JSON rows (-output=all) -> the objects `query` returns, flagged geocentric."""
+    out = []
+    for rec in rows:
+        try:
+            num, name = rec.get("Num"), str(rec["Name"])
+            h, m, sec = (float(v) for v in str(rec["RA (hms)"]).split())
+            dd, dm, ds = str(rec["DEC (dms)"]).split()
+            sign = -1.0 if dd.startswith("-") else 1.0
+            dec = sign * (abs(float(dd)) + float(dm) / 60 + float(ds) / 3600)
+        except (KeyError, ValueError, TypeError):
+            continue
+        vmag = _num(rec.get("VMag (mag)"))
+        if vmag is not None and vmag > vmag_lim:
+            continue
+        dist = max(_num(rec.get("dg (ua)")) or 1.0, 0.01)
+        err = (_num(rec.get("Err (arcsec)")) or 0.0) + PARALLAX_ARCSEC_AU / dist
+        cls = str(rec.get("Class", ""))
+        out.append({"name": f"{num} {name}" if num not in (None, "", "-") else name,
+                    "kind": "comet" if "comet" in cls.lower() else "asteroid", "class": cls, "mjd": mjd,
+                    "ra": 15.0 * (h + m / 60 + sec / 3600), "dec": dec, "vmag": vmag,
+                    "ra_rate": _num(rec.get("dRA (arcsec/h)")) or 0.0,  # includes cos(dec), like sb_ident
+                    "dec_rate": _num(rec.get("dDEC (arcsec/h)")) or 0.0,
+                    "err_ra": err / 2 ** 0.5, "err_dec": err / 2 ** 0.5, "distance_au": dist,
+                    "geocentric": True})
     return out
 
 
@@ -188,6 +275,8 @@ def overlay(fd: FieldData, times: list[float], vmag_lim: float = 21.0) -> dict:
     out = {"vmag_lim": vmag_lim, "observer": "SPHEREx (Horizons -163182)", "times": []}
     for mjd in times:
         objs = field_objects(fd, mjd, vmag_lim)
+        if any(o.get("geocentric") for o in objs):
+            out["observer"] = GEOCENTRIC_NOTE
         out["times"].append({"mjd": mjd, "objects": [o for o in objs if o["inside"]]})
     return out
 
@@ -244,6 +333,8 @@ def identify(fd: FieldData, tracklets: list[dict], vmag_lim: float = 21.0, **que
                 log.warning("known-object query failed: %r", ex)
                 continue
             stats["queries"] += 1 if t1 - t0 < 1e-4 else 2
+            if any(o.get("geocentric") for o in objs):
+                stats["observer"], stats["positions"] = "geocentre", GEOCENTRIC_NOTE
             stats["objects_in_field"] = max(stats["objects_in_field"], sum(o["inside"] for o in objs))
             t["identification"] = _rank(t, objs)
             t["known"] = t["identification"][0] if t["identification"] else None
@@ -267,13 +358,19 @@ def _rank(t: dict, objs: list[dict]) -> list[dict]:
         if sep > err:
             continue
         dpa = abs((o["pa_deg"] - pa + 180.0) % 360.0 - 180.0) if len(det) >= 2 else 0.0
-        dspeed = abs(o["speed_arcsec_per_hr"] - speed) / max(o["speed_arcsec_per_hr"], 1e-3)
-        motion_ok = len(det) < 2 or (dpa <= PA_TOL and dspeed <= SPEED_TOL)
+        v = max(o["speed_arcsec_per_hr"], 1e-3)
+        dspeed = abs(o["speed_arcsec_per_hr"] - speed) / v
+        speed_tol, pa_tol = SPEED_TOL, PA_TOL
+        if o.get("geocentric"):  # SPHEREx's orbital motion is not in a geocentric rate
+            wobble = ORBIT_RATE_ARCSEC_H_AU / max(o.get("distance_au") or 1.0, 0.05)
+            speed_tol, pa_tol = SPEED_TOL + wobble / v, PA_TOL + float(np.degrees(np.arctan2(wobble, v)))
+        motion_ok = len(det) < 2 or (dpa <= pa_tol and dspeed <= speed_tol)
         out.append({"name": o["name"], "kind": o["kind"], "vmag": o["vmag"], "sep_arcsec": sep,
                     "pos_tolerance_arcsec": err, "dpa_deg": dpa, "dspeed_frac": dspeed, "motion_ok": motion_ok,
                     "speed_arcsec_per_hr": o["speed_arcsec_per_hr"], "pa_deg": o["pa_deg"],
                     "o_minus_c_arcsec": [{"dra": a, "ddec": b} for a, b in oc],
-                    "score": float(sep / err + dpa / PA_TOL + dspeed / SPEED_TOL)})
+                    "geocentric": bool(o.get("geocentric")),
+                    "score": float(sep / err + dpa / pa_tol + dspeed / speed_tol)})
     out = [m for m in out if m["motion_ok"]]
     out.sort(key=lambda m: m["score"])
     return out[:3]

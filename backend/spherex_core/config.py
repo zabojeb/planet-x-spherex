@@ -55,6 +55,27 @@ class Settings:
     slow_frame_s: float = float(_env("SLOW_FRAME", "30"))  # log an exposure slower than this as WARNING
     slow_request_s: float = float(_env("SLOW_REQUEST", "5"))  # log an HTTP request slower than this as WARNING
     tap_cache_hours: float = float(_env("TAP_CACHE_HOURS", "12"))
+    # Local mirror of the SPHEREx file catalogue (archive/mirror.py): image searches in milliseconds, also
+    # while IRSA TAP is down. AUTOSYNC refreshes it hourly from the public bucket; BOOTSTRAP lets that thread
+    # build it from scratch (~1.6 M headers, ~50 GB read once) when no mirror exists yet.
+    mirror_enabled: bool = _env("MIRROR", "1") != "0"
+    mirror_db: str = _env("MIRROR_DB", "")
+    mirror_autosync: bool = _env("MIRROR_AUTOSYNC", "1") != "0"
+    mirror_bootstrap: bool = _env("MIRROR_BOOTSTRAP", "0") != "0"
+    mirror_sync_interval_s: float = float(_env("MIRROR_SYNC_INTERVAL", "3600"))
+    mirror_max_age_hours: float = float(_env("MIRROR_MAX_AGE_HOURS", "26"))
+    # Optional S3-compatible copy of (part of) the SPHEREx files, e.g. Cloudflare R2 behind a public URL; same key
+    # layout as the NASA bucket (dr1/level2/...). Used first when it is the fastest; missing keys fall back to AWS.
+    file_mirror_base: str = _env("FILE_MIRROR_BASE", "")
+    irsa_file_base: str = _env("IRSA_FILE_BASE", "https://irsa.ipac.caltech.edu/ibe/data/spherex/")
+    # Alternative catalogue services (fallbacks behind the defaults)
+    mast_gaia_tap_url: str = _env("MAST_GAIA_TAP_URL", "https://mast.stsci.edu/vo-tap/api/v0.1/gaiadr3/sync")
+    vizier_tap_url: str = _env("VIZIER_TAP_URL", "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync")
+    # VizieR's CfA mirror over plain ASU (no TAP there): 2MASS when IRSA and CDS are both down.
+    vizier_asu_url: str = _env("VIZIER_ASU_URL", "https://vizier.cfa.harvard.edu/viz-bin/asu-tsv")
+    # NOIRLab Astro Data Lab TAP (CatWISE2020, 2MASS; no ADQL geometry functions, so box queries).
+    datalab_tap_url: str = _env("DATALAB_TAP_URL", "https://datalab.noirlab.edu/tap/sync")
+    irsa_sia_url: str = _env("IRSA_SIA_URL", "https://irsa.ipac.caltech.edu/SIA")
 
 
 settings = Settings()

@@ -580,3 +580,33 @@ Result (every step slot is either its object or `{"error": "<Type>: <message>"}`
 curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' \
   -d '{"ra": 269.4462, "dec": 4.7688}' https://<host>/api/sequences/<id>/analyze
 ```
+
+## Data sources and the file-catalogue mirror (ADR-0057)
+
+### `GET /api/status/upstreams`
+
+Every remote source per kind of data, in the order it is asked now, plus the local mirror:
+
+```json
+{"kinds": {"gaia": [{"rank": 0, "name": "mast-gaia", "label": "MAST (STScI)", "service": "mast.stsci.edu", "note": "",
+                     "samples": 12, "success_rate": 1.0, "p50_s": 0.31, "p90_s": 0.6, "last_ok_s_ago": 4,
+                     "last_fail_s_ago": null, "last_error": null, "breaker": null, "state": "ok"},
+                    {"rank": 1, "name": "esa-gaia", "...": "...", "state": "down"}],
+           "spherex-files": ["..."], "spherex-cutouts": ["..."], "spherex-meta": ["..."], "catwise": ["..."],
+           "2mass": ["..."], "simbad": ["..."], "solar-system": ["..."]},
+ "breakers": {"gea.esac.esa.int": {"retry_in_s": 211, "error": "timed out"}},
+ "mirror": {"path": "...", "bytes": 312000000, "files": 1628230, "releases": {"dr1": {"files": 1179406, "complete": true}},
+            "synced_at": "1794739000.1", "age_hours": 0.4, "last_sync": {"...": "..."}},
+ "cluster": {"host:pid": {"aws-s3": {"samples": 50, "success_rate": 1.0, "p50_s": 0.08}}}}
+```
+
+`state` is `ok` (last call succeeded), `degraded` (last call failed), `down` (circuit breaker open, skipped by
+interactive calls) or `unknown` (not used since the process started). `cluster` appears only with Redis: what every
+API/worker process reported in its last 15-s summary. Kinds: `spherex-files` (range reads: AWS S3, IRSA ibe,
+optional `SPHEREX_FILE_MIRROR_BASE`), `spherex-cutouts` (IRSA cutout service vs range reads), `spherex-meta`
+(local mirror, IRSA TAP, IRSA SIA), `gaia` (ESA, MAST, IRSA, VizieR), `catwise`/`2mass` (IRSA, VizieR), `simbad`
+(CDS, Harvard), `solar-system` (JPL, IRSA MOST, SkyBoT — geocentric).
+
+`GET /api/releases` answers from the mirror when it is complete (with `"source": "local mirror (synced … h ago)"`)
+and falls back to it when IRSA TAP fails; `GET /api/catalogs` labels no longer name one archive, since the answer
+may come from any source of that catalogue.
