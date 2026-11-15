@@ -10,6 +10,7 @@ resolve_target, UpstreamError (a RuntimeError, message safe for users) when a re
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -669,3 +670,27 @@ def long_baseline_csv(job_id: str) -> str:
 # ---------------------------------------------------------------- solar system (ADR-0060): spherex_core.solar.service
 from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_submit,  # noqa: E402, F401
                             static_sky_submit, unknown_movers_submit)
+
+
+# ---------------------------------------------------------------- sky map (ADR-0061)
+
+
+async def hips_file(survey: str, path: str):
+    """Local copy of a HiPS file (tile, Allsky, properties, Moc), fetched from the source once."""
+    from . import hips
+
+    return await hips.get(survey, path)
+
+
+async def coverage_at(ra: float, dec: float) -> dict:
+    """SPHEREx exposures and visits covering a position (map pick card)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.at, ra, dec)
+
+
+async def footprints_near(ra: float, dec: float, radius_deg: float, limit: int = 600) -> dict:
+    """Outlines of SPHEREx exposures near a position (map coverage layer)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.footprints, ra, dec, radius_deg, limit)

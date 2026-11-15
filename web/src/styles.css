@@ -1191,3 +1191,44 @@ button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opa
   .tour { top: auto; bottom: calc(196px + env(safe-area-inset-bottom)); }
   .probe-charts { gap: 6px; }
 }
+
+/* ---- sky map mode (ADR-0061): zoomed out, the field's dock and tool rail give way to the map's own rail */
+.floating-bottom { transition: bottom 250ms var(--ease), opacity 220ms var(--ease), translate 220ms var(--ease); }
+.app.map-mode .floating-bottom { opacity: 0; translate: 0 18px; pointer-events: none; }
+.rail.field-rail { transition: opacity 200ms var(--ease), translate 200ms var(--ease); }
+.rail.rail-off { opacity: 0; translate: 14px 0; pointer-events: none; }
+.map-rail { animation: rail-in 220ms var(--ease); }
+@keyframes rail-in { from { opacity: 0; translate: 14px 0; } }
+.app.map-picking .sky-map canvas { cursor: crosshair; }
+.map-panel { display: flex; flex-direction: column; gap: 8px; }
+.map-panel .menu-title { padding: 6px 0 0; }
+.map-panel .menu-title:first-child { padding-top: 0; }
+.map-panel .segmented { display: flex; }
+.map-panel .segmented button { flex: 1 1 0; }
+.pick.map-pick { width: 300px; }
+.map-card { display: flex; flex-direction: column; gap: 6px; }
+.map-card .pick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.map-card-pos { display: flex; gap: 14px; font-size: 13px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.map-card-sub { font-size: 11px; color: var(--text-3); }
+.map-card-cov { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-top: 1px solid var(--hair); padding-top: 6px; min-height: 26px; }
+.map-card-det { width: 100%; font-size: 11px; color: var(--text-3); }
+.map-card-actions { display: flex; gap: 6px; margin-top: 2px; }
+.map-card-actions .btn { flex: 1 1 auto; justify-content: center; gap: 6px; }
+@media (max-width: 760px) {
+  .pick.map-pick { left: 10px !important; right: 10px; top: auto !important; bottom: calc(14px + env(safe-area-inset-bottom)); width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app.map-mode .floating-bottom, .rail.rail-off { translate: none; }
+  .map-rail { animation: none; }
+}
+
+/* ---- full screen: its own button in the top-right corner; on phones (where the top bar spans the width) it
+   stays in the tool rail. The 3D bar, also top right on wide screens, moves one button to the left. */
+.fs-corner { position: absolute; top: var(--gutter); right: var(--gutter); z-index: 32; width: 40px !important; height: 40px; padding: 0; border-radius: 12px; color: var(--text-2); }
+.fs-corner:hover { color: var(--text-1); }
+.fs-corner.active { color: var(--accent); }
+@media (min-width: 1141px) { .app:has(.fs-corner) .bar3d { right: calc(2 * var(--gutter) + 40px); } }
+.map-pin { position: absolute; left: 0; top: 0; z-index: 19; width: 0; height: 0; pointer-events: none; }
+.map-pin::before { content: ""; position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border: 1.5px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.map-pin::after { content: ""; position: absolute; left: -1.5px; top: -1.5px; width: 3px; height: 3px; border-radius: 50%; background: var(--accent); }
+.pick.map-pick { z-index: 31; } /* under the rail (32) and its panels: the card follows the sky, the panels are tools */

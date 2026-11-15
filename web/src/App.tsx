@@ -1,8 +1,8 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Maximize, Minimize } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AmbiguousObject, ApiError, cachedArchivalFrame, cachedTable, ensurePlanes, exportUrl, fetchArchivalFrame, fetchCatalog, fetchExposures, fetchTable, getTargets,
+  AmbiguousObject, ApiError, cachedArchivalFrame, cachedTable, ensurePlanes, exportUrl, fetchArchivalFrame, fetchCatalog, fetchExposures, fetchFootprints, fetchTable, getTargets,
   loadArchival, loadObjectIndex, loadSequence, measureSource, movingRequest, prefetchSequence, searchMoving, type Progress,
 } from "./api";
 import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames, stretchGroup } from "./archival";
@@ -11,17 +11,20 @@ import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
 import type { AnalysisSubject } from "./components/AnalysisModal";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
-import { compassPoint, formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, positionAngle, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { compassPoint, formatDate, formatDec, formatRA, formatRange, fromEcliptic, fromGalactic, mjdToYear, pixelToWorld, positionAngle, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
 import { CoordField } from "./components/CoordField";
 import { Drawer, type DrawerTab } from "./components/Drawer";
-import { GoToPanel, rememberPlace, type Place } from "./components/GoTo";
+import { GoToPanel, readRecent, rememberPlace, type Place } from "./components/GoTo";
+import { MapPickCard } from "./components/MapPickCard";
+import { DEFAULT_MAP_LAYERS, MapRail, type MapLayers } from "./components/MapRail";
+import type { MapCamera, MapLine, MapPlace } from "./skymap";
 import { ObjectsPanel } from "./components/Objects";
 import { PickCard } from "./components/PickCard";
 import { Rail } from "./components/Rail";
-import { HIGH_PM, SkyView, catalogMarkers, markerTip, selectionWorld, sourceKey, valueAt, type Selection, type StepDir } from "./components/SkyView";
+import { HIGH_PM, SkyView, catalogMarkers, markerTip, selectionWorld, sourceKey, valueAt, type Selection, type SkyController, type StepDir } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
@@ -127,6 +130,38 @@ const HUD_DOCK_GAP = 16;
 /** Shown where a tool waits for the full result of a build still running (a preview is on screen). */
 const WAIT_FULL = "Available once the sequence has finished loading";
 
+// ---------------------------------------------------------------- sky map (ADR-0061)
+
+const MAP_LAYERS_KEY = "spherex-map-layers";
+function readMapLayers(): MapLayers {
+  try {
+    return { ...DEFAULT_MAP_LAYERS, ...JSON.parse(safeStorage(MAP_LAYERS_KEY) || "{}") };
+  } catch {
+    return DEFAULT_MAP_LAYERS;
+  }
+}
+/** A closed curve as arcs of 30°, so no straight segment ever spans the edge of the projection. */
+function arcs(f: (t: number) => [number, number], color: string, dash?: boolean): MapLine[] {
+  const out: MapLine[] = [];
+  for (let a = 0; a < 360; a += 30) {
+    const pts: [number, number][] = [];
+    for (let t = a; t <= a + 30; t += 2) pts.push(f(t));
+    out.push({ pts, color, dash });
+  }
+  return out;
+}
+/** SPHEREx deep fields: around the ecliptic poles (≈100 deg² each, so ~5.6° radius; the footprints are exact). */
+const DEEP_R = 5.6;
+const DEEP_PLACES: MapPlace[] = [
+  { key: "deep:n", ra: fromEcliptic(0, 90)[0], dec: fromEcliptic(0, 90)[1], label: "NEP deep field", kind: "deep" },
+  { key: "deep:s", ra: fromEcliptic(0, -90)[0], dec: fromEcliptic(0, -90)[1], label: "SEP deep field", kind: "deep" },
+];
+const NO_POLYS: [number, number][][] = [];
+const NO_LINES: MapLine[] = [];
+const NO_PLACES: MapPlace[] = [];
+const NO_CATS: MapLayers["catalogs"] = [];
+type MapPick = { ra: number; dec: number; name?: string | null; preset?: string | null };
+
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
@@ -227,6 +262,24 @@ export default function App() {
   const [sel, setSel] = useState<Selection | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
+  // ---- the zoomed-out sky map (ADR-0061): its own rail, a picked point, layers
+  const [mapMode, setMapMode] = useState(false);
+  const [mapPick, setMapPick] = useState<MapPick | null>(null);
+  const [mapPicking, setMapPicking] = useState(true);
+  const [mapLayers, setMapLayersState] = useState<MapLayers>(readMapLayers);
+  const setMapLayers = (l: MapLayers) => {
+    setMapLayersState(l);
+    safeStorage(MAP_LAYERS_KEY, JSON.stringify(l));
+  };
+  const [mapView, setMapView] = useState<MapCamera | null>(null);
+  const [footprints, setFootprints] = useState<{ polys: [number, number][][]; note: string | null }>({ polys: NO_POLYS, note: null });
+  const skyCtl = useRef<SkyController | null>(null);
+  /** "Analyze" on the map: analyse this point once its new field has fully loaded. */
+  const pendingAnalyze = useRef<{ ra: number; dec: number } | null>(null);
+  const onMapMode = useCallback((on: boolean) => {
+    setMapMode(on);
+    if (!on) setMapPick(null);
+  }, []);
 
   const set = useCallback((patch: Partial<ViewState>) => setView((v) => ({ ...v, ...patch })), []);
   useEffect(() => {
@@ -809,6 +862,117 @@ export default function App() {
     setSel(null);
     setHero(false);
   };
+  // ---- sky map actions (ADR-0061)
+  /** Open the SPHEREx field at a picked point (a featured target opens as itself), flying the map towards it
+   *  while it builds; the view hands over to the field when it arrives. With analyze, the point is analysed then. */
+  const openAtPick = (pk: MapPick, analyze: boolean) => {
+    const pl: Place = { name: pk.name ?? null, ra: pk.ra, dec: pk.dec, pmra: 0, pmdec: 0, ref_epoch: 2000, preset: pk.preset ?? null };
+    if (!pk.preset) rememberPlace(pl);
+    goTo(pl);
+    pendingAnalyze.current = analyze ? { ra: pk.ra, dec: pk.dec } : null;
+    setMapPick(null);
+    skyCtl.current?.flyTo(pk.ra, pk.dec, Math.max(0.2, (fov * 3) / 60));
+  };
+  /** A place on the map (a featured target, a recent place, a deep field): fly there and show its card. */
+  const showOnMap = (pk: MapPick) => {
+    if (pk.preset) {
+      const t = presets.find((x) => x.id === pk.preset);
+      if (t) [pk.ra, pk.dec] = propagate({ ra: t.ra, dec: t.dec, epoch: t.ref_epoch, pmra: t.pmra, pmdec: t.pmdec }, 1970 + Date.now() / 3.15576e10);
+    }
+    setMapPick(pk);
+    setMapPicking(true);
+    const cur = mapView?.fov ?? 30;
+    skyCtl.current?.flyTo(pk.ra, pk.dec, Math.min(cur, 8));
+  };
+  const onMapPlace = (key: string) => {
+    const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+    if (kind === "p") {
+      const t = presets.find((x) => x.id === id);
+      if (t) showOnMap({ ra: t.ra, dec: t.dec, name: t.name, preset: t.id });
+    } else if (kind === "r") {
+      const r = readRecent()[Number(id)];
+      if (r) showOnMap({ ra: r.ra, dec: r.dec, name: r.name });
+    } else {
+      const d = DEEP_PLACES.find((x) => x.key === key);
+      if (d) showOnMap({ ra: d.ra, dec: d.dec, name: d.label });
+    }
+  };
+  // the analysis asked for on the map, once its field is fully there
+  useEffect(() => {
+    const want = pendingAnalyze.current;
+    if (!want || !meta || !derived || building || frameReady !== gridKey) return;
+    const [x, y] = worldToPixel(meta.grid, want.ra, want.dec);
+    if (x < 0 || y < 0 || x >= meta.grid.n || y >= meta.grid.n) return; // not this field (yet)
+    pendingAnalyze.current = null;
+    analyzeSelection({ kind: "point", ra: want.ra, dec: want.dec }, [want.ra, want.dec]);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+  // footprints of SPHEREx exposures around the map view (the server's file catalogue: milliseconds)
+  useEffect(() => {
+    if (!mapMode || !mapLayers.footprints || !mapView) return setFootprints((f) => (f.polys.length || f.note ? { polys: NO_POLYS, note: null } : f));
+    if (mapView.fov > 40) return setFootprints({ polys: NO_POLYS, note: "Zoom in closer than 40° to see the exposures" });
+    // one SPHEREx exposure is 3.5° across: in a narrower view its outline is only a few lines crossing the screen
+    if (mapView.fov < 3) return setFootprints({ polys: NO_POLYS, note: "Zoom out wider than 3° to see whole exposures" });
+    const ctrl = new AbortController();
+    const radius = Math.min(12, Math.max(0.5, 0.6 * mapView.fov));
+    const t = window.setTimeout(() => {
+      fetchFootprints(mapView.ra, mapView.dec, radius, ctrl.signal)
+        .then((r) => {
+          if (ctrl.signal.aborted) return;
+          if (!r.available) return setFootprints({ polys: NO_POLYS, note: `Not available: ${r.reason ?? "no file catalogue on this server"}` });
+          const polys = r.footprints.map((f) => {
+            const c = f.corners;
+            const pts: [number, number][] = [];
+            for (let i = 0; i + 1 < c.length; i += 2) pts.push([c[i], c[i + 1]]);
+            return pts;
+          });
+          const total = r.total ?? polys.length;
+          setFootprints({ polys, note: total > polys.length ? `${polys.length} newest of ${total} exposures in view` : `${total} exposure${total === 1 ? "" : "s"} in view` });
+        })
+        .catch(() => !ctrl.signal.aborted && setFootprints({ polys: NO_POLYS, note: "Footprints are unavailable right now" }));
+    }, 250);
+    return () => {
+      window.clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [mapMode, mapLayers.footprints, mapView]);
+  const mapLines = useMemo(() => {
+    const out: MapLine[] = [];
+    if (mapLayers.galactic) out.push(...arcs((l) => fromGalactic(l, 0), "rgba(150, 190, 255, 0.75)"));
+    if (mapLayers.ecliptic) out.push(...arcs((lon) => fromEcliptic(lon, 0), "rgba(255, 200, 69, 0.75)", true));
+    if (mapLayers.deep) for (const lat of [90 - DEEP_R, DEEP_R - 90]) out.push(...arcs((lon) => fromEcliptic(lon, lat), "rgba(255, 120, 110, 0.8)", true));
+    return out;
+  }, [mapLayers.galactic, mapLayers.ecliptic, mapLayers.deep]);
+  // places are map things: drawn only while the map has the view (next to a field they would be clutter)
+  const mapPlaces = useMemo(() => {
+    const out: MapPlace[] = [];
+    if (!mapMode) return out;
+    const g = meta?.grid;
+    const here: [number, number, number] | null = g ? [g.ra, g.dec, (g.n * g.pixscale_arcsec) / 3600] : null; // centre, ~diagonal
+    if (mapLayers.places) {
+      const now = 1970 + Date.now() / 3.15576e10;
+      for (const t of presets) {
+        if (!t.id) continue;
+        const [ra, dec] = propagate({ ra: t.ra, dec: t.dec, epoch: t.ref_epoch, pmra: t.pmra, pmdec: t.pmdec }, now); // where it is now
+        if (here && separation(here[0], here[1], ra, dec) < here[2]) continue; // the field on screen labels itself
+        out.push({ key: `p:${t.id}`, ra, dec, label: t.name ?? t.id, kind: "preset" });
+      }
+      readRecent().forEach((r, i) => {
+        if (here && separation(here[0], here[1], r.ra, r.dec) < here[2]) return;
+        if (!presets.some((t) => separation(t.ra, t.dec, r.ra, r.dec) < 0.01)) out.push({ key: `r:${i}`, ra: r.ra, dec: r.dec, label: r.name ?? `${r.ra.toFixed(2)} ${r.dec >= 0 ? "+" : ""}${r.dec.toFixed(2)}`, kind: "recent" });
+      });
+    }
+    if (mapLayers.deep) out.push(...DEEP_PLACES);
+    return out;
+  }, [mapLayers.places, mapLayers.deep, presets, mapMode, gridKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // map layers are drawn only while the map has the view: next to a field they would cover its own overlays
+  const mapLayerProps = useMemo(
+    () =>
+      mapMode
+        ? { grid: mapLayers.grid, lines: mapLines, polygons: mapLayers.footprints ? footprints.polys : NO_POLYS, places: mapPlaces, catalogs: mapLayers.catalogs }
+        : { grid: false, lines: NO_LINES, polygons: NO_POLYS, places: NO_PLACES, catalogs: NO_CATS },
+    [mapMode, mapLayers.grid, mapLines, mapLayers.footprints, footprints.polys, mapPlaces, mapLayers.catalogs],
+  );
+
   /** Per-exposure fits at a selection; a field candidate brings its trial motion along. */
   const verifySelection = (world: [number, number] | null, label: string) => {
     if (!world) return;
@@ -1225,6 +1389,27 @@ export default function App() {
       shiftX={hero && !mobile && presets.length ? 180 : 0}
       frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
       label={targetName}
+      onMapMode={onMapMode}
+      mapPick={mapPick}
+      onMapPick={(pos) => (pos === null || mapPicking ? setMapPick(pos) : undefined)}
+      mapCard={
+        mapPick ? (
+          <MapPickCard
+            ra={mapPick.ra}
+            dec={mapPick.dec}
+            name={mapPick.name}
+            fov={fov}
+            research={research}
+            onOpen={() => openAtPick(mapPick, false)}
+            onAnalyze={() => openAtPick(mapPick, true)}
+            onClose={() => setMapPick(null)}
+          />
+        ) : null
+      }
+      onMapView={setMapView}
+      mapLayers={mapLayerProps}
+      onPlace={onMapPlace}
+      controller={skyCtl}
     />
   );
 
@@ -1287,7 +1472,7 @@ export default function App() {
 
   return (
     <div
-      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}${sel && !hideMarks ? " pick-open" : ""}`}
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}${sel && !hideMarks ? " pick-open" : ""}${mapMode ? " map-mode" : ""}${mapMode && mapPicking ? " map-picking" : ""}`}
       style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
@@ -1309,6 +1494,7 @@ export default function App() {
       {moving && <MovingCard st={moving} onChoose={(c: MovingChoice) => findMoving({ naif_id: c.naif_id }, c.name)} onClose={closeMoving} />}
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
       <Rail
+        off={mapMode}
         bandLabel={bandShort}
         goTo={(close: () => void) => (
           <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} onStep={embed ? undefined : (d) => { stepField(d); close(); }} close={close} />
@@ -1371,7 +1557,7 @@ export default function App() {
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
         on3d={meta ? toggle3d : undefined}
-        fullscreen={fullscreen.supported ? fullscreen : undefined}
+        fullscreen={fullscreen.supported && mobile ? fullscreen : undefined}
         audience={view.ui}
         onAudience={(ui) => {
           set({ ui });
@@ -1387,6 +1573,52 @@ export default function App() {
           setHero(false);
         }}
       />
+      {mapMode && (
+        <MapRail
+          goTo={(close: () => void) => (
+            <GoToPanel
+              current={mapView ? [mapView.ra, mapView.dec] : null}
+              currentName="Map centre"
+              presets={presets}
+              fov={fov}
+              onGo={(pl) => {
+                showOnMap({ ra: pl.ra, dec: pl.dec, name: pl.name, preset: pl.preset });
+                close();
+              }}
+              onPreset={(id) => {
+                const t = presets.find((x) => x.id === id);
+                if (t) showOnMap({ ra: t.ra, dec: t.dec, name: t.name, preset: t.id });
+                close();
+              }}
+              close={close}
+            />
+          )}
+          band={view.band}
+          onBand={(band) => set({ band })}
+          layers={mapLayers}
+          onLayers={setMapLayers}
+          footprintNote={mapLayers.footprints ? footprints.note : null}
+          picking={mapPicking}
+          onPicking={(on) => {
+            setMapPicking(on);
+            if (!on) setMapPick(null);
+          }}
+          onBackToField={meta ? () => skyCtl.current?.backToField() : undefined}
+          onWholeSky={() => skyCtl.current?.wholeSky()}
+          fullscreen={fullscreen.supported && mobile ? fullscreen : undefined}
+        />
+      )}
+      {fullscreen.supported && !mobile && (
+        <button
+          className={`btn ghost icon fs-corner glass${fullscreen.on ? " active" : ""}`}
+          onClick={fullscreen.toggle}
+          title={fullscreen.on ? "Exit full screen (F, or hold Esc)" : "Full screen (F)"}
+          aria-label={fullscreen.on ? "Exit full screen" : "Full screen"}
+          aria-pressed={fullscreen.on}
+        >
+          {fullscreen.on ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
+      )}
       {tourOn && !research && presets.length > 0 && (
         <TourCard
           presets={presets}
