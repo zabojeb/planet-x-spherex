@@ -4,7 +4,9 @@ import { ArrowUpRight, Check, Copy, Footprints, Loader2, LocateFixed, ScanEye, S
 import { useEffect, useState } from "react";
 import { compassPoint, formatAngle, formatDec, formatDeg, formatDistance, formatPm, formatRA, positionAngle, separation, toEcliptic, toGalactic, totalPm } from "../astro";
 import { CATALOG_STYLE } from "../colors";
-import type { CatalogSource, Target } from "../types";
+import { abMag, flagNames, PROBE_R, type Hint, type ProbeResult } from "../probe";
+import type { CatalogSource, FlagBit, Target } from "../types";
+import { ProbeCharts } from "./chart/ProbeCharts";
 import type { Selection } from "./SkyView";
 
 /** Other tools at the same position. SIMBAD links use the official CfA mirror (the CDS site was down on
@@ -96,6 +98,78 @@ interface Props {
   onCentre?: () => void;
   /** A new field that follows this source's proper motion. */
   onFollow?: () => void;
+  /** Instant quick-look photometry from the planes already loaded (null when outside the field). */
+  probe?: ProbeResult | null;
+  /** Some planes the probe wants are still downloading. */
+  probeLoading?: boolean;
+  hints?: Hint[];
+  flagDefs?: FlagBit[];
+  audience?: "explore" | "research";
+}
+
+const f2 = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
+
+/** The instant probe: a quick estimate here, as plain language (Explore) or numbers with errors (Research). */
+function ProbeBlock({ r, loading, hints, flagDefs, research }: { r: ProbeResult; loading: boolean; hints: Hint[]; flagDefs: FlagBit[]; research: boolean }) {
+  const c = r.current;
+  const flags = flagNames(c?.flags ?? null, flagDefs).filter((f) => f !== "SOURCE");
+  const mag = c ? abMag(c.flux) : null;
+  return (
+    <div className="probe">
+      <div className="micro probe-head">
+        <span>{research ? `Quick estimate · ${PROBE_R} px aperture` : "Brightness here"}</span>
+        {loading && <Loader2 size={11} className="spin" aria-label="Loading more epochs and detectors" />}
+      </div>
+      {c ? (
+        research ? (
+          <>
+            <div className="probe-main mono">
+              {f2(c.flux)} ± {Number.isFinite(c.err) ? f2(c.err) : "?"} mJy <span className="muted">· S/N {Number.isFinite(c.snr) ? c.snr.toFixed(1) : "?"}{mag != null ? ` · AB ${mag.toFixed(2)}` : ""}</span>
+            </div>
+            <div className="probe-sub mono small muted">
+              {c.band} {c.wlLo.toFixed(2)}–{c.wlHi.toFixed(2)} µm · px {r.x.toFixed(1)}, {r.y.toFixed(1)}
+              {c.coverage != null ? ` · ${c.coverage} exp` : ""}
+              {flags.length ? ` · flagged in some exposure: ${flags.join(", ")}` : c.flags != null ? " · no flags" : ""}
+            </div>
+          </>
+        ) : (
+          <div className="probe-main">
+            {mag != null && c.snr >= 3 ? (
+              <>≈ magnitude {mag.toFixed(1)} <span className="muted small">at {c.wlLo.toFixed(1)}–{c.wlHi.toFixed(1)} µm</span></>
+            ) : (
+              <span className="muted">Too faint to measure at {c.wlLo.toFixed(1)}–{c.wlHi.toFixed(1)} µm</span>
+            )}
+          </div>
+        )
+      ) : (
+        <div className="small muted">{loading ? "Measuring…" : "No data at this position in the shown detector."}</div>
+      )}
+      {hints.length > 0 && (
+        <ul className="probe-hints">
+          {hints.map((h) => (
+            <li key={h.kind} className={`hint-${h.kind}`}>{h.text}</li>
+          ))}
+        </ul>
+      )}
+      <ProbeCharts spectrum={r.spectrum} lightCurve={r.lightCurve} epoch={c?.epoch ?? -1} band={r.lcBand} />
+      {research && r.lightCurve.length > 1 && (
+        <details className="probe-table">
+          <summary className="micro">Per visit · {r.lcBand}</summary>
+          <table className="mono small">
+            <tbody>
+              {r.lightCurve.map((pt) => (
+                <tr key={pt.epoch} className={pt.epoch === c?.epoch ? "on" : undefined}>
+                  <td>{pt.date}</td>
+                  <td>{f2(pt.flux)} ± {Number.isFinite(pt.err) ? f2(pt.err) : "?"}</td>
+                  <td className="muted">S/N {Number.isFinite(pt.snr) ? pt.snr.toFixed(0) : "?"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </div>
+  );
 }
 
 export function PickCard(p: Props) {
@@ -162,7 +236,14 @@ export function PickCard(p: Props) {
         </div>
       )}
 
-      {w && <CoordBlock ra={w[0]} dec={w[1]} />}
+      {p.probe && p.probe.inside && <ProbeBlock r={p.probe} loading={!!p.probeLoading} hints={p.hints ?? []} flagDefs={p.flagDefs ?? []} research={p.audience === "research"} />}
+
+      {w && (p.audience === "research" ? <CoordBlock ra={w[0]} dec={w[1]} /> : (
+        <div className="coords-row coords-compact">
+          <span className="coords-v">{formatRA(w[0])} {formatDec(w[1])}</span>
+          <CopyButton text={`${formatRA(w[0])} ${formatDec(w[1])}`} label="coordinates" />
+        </div>
+      ))}
       <div className="small muted">
         {sep != null && p.targetWorld && w && sep > 1e-5 ? `${formatAngle(sep)} ${compassPoint(positionAngle(...p.targetWorld, ...w))} of the target · ` : ""}
         {p.sel.kind === "source" ? `at ${p.year.toFixed(2)} (catalogue epoch ${p.sel.src.epoch.toFixed(1)})` : p.sel.kind === "target" ? `at ${p.year.toFixed(2)}` : "fixed position"}
@@ -190,7 +271,7 @@ export function PickCard(p: Props) {
         {p.sel.kind === "target" ? (
           <button className="btn pick-cta" onClick={p.onDetails}>Spectrum &amp; light curve</button>
         ) : (
-          p.onMeasure && (
+          p.onMeasure && p.audience === "research" && (
             <button className="btn pick-cta" disabled={measure.state === "busy"} onClick={runMeasure} title="Forced photometry at this position in every exposure">
               {measure.state === "busy" ? <><Loader2 size={13} className="spin" /> Measuring every exposure…</> : "Measure spectrum & light curve"}
             </button>
@@ -202,12 +283,12 @@ export function PickCard(p: Props) {
               <LocateFixed size={13} /> Centre field here
             </button>
           )}
-          {p.onVerify && (
+          {p.onVerify && p.audience === "research" && (
             <button className="btn ghost small-btn" onClick={p.onVerify} title="PSF fit and cutout in every exposure: is it real?">
               <ScanEye size={13} /> Verify
             </button>
           )}
-          {p.onFollow && (
+          {p.onFollow && p.audience === "research" && (
             <button className="btn ghost small-btn" onClick={p.onFollow} title="Build a new field that moves with this source, so it stays centred in every epoch">
               <Footprints size={13} /> Follow its motion
             </button>

@@ -1,6 +1,6 @@
 /** Slim vertical tool rail on the right edge; each button opens a compact panel beside it. "Go to" is there
  *  even before a field has loaded; the rest need a sequence. */
-import { Box, Info, Layers, ListTree, Maximize, Minimize, Navigation, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
+import { Box, Compass, FlaskConical, Info, Layers, ListTree, Maximize, Minimize, Navigation, Route, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
 import type { ReactNode } from "react";
 import { Popover } from "./ui/primitives";
 
@@ -22,7 +22,14 @@ export function Rail(p: {
   on3d?: () => void;
   /** Omitted where the browser can't go fullscreen (iPhone Safari). */
   fullscreen?: { on: boolean; toggle: () => void };
+  /** Explore (plain language, fewer controls) or Research (numbers, flags, exports, all tools). */
+  audience?: "explore" | "research";
+  onAudience?: (a: "explore" | "research") => void;
+  /** Guided tour of the five targets (Explore only). */
+  onTour?: () => void;
+  tourOn?: boolean;
 }) {
+  const research = p.audience === "research";
   return (
     <nav className="rail glass" aria-label="Tools">
       <Popover label={<Navigation size={16} />} title="Go to coordinates" align="side" width={330}>
@@ -68,6 +75,23 @@ export function Rail(p: {
         <Popover label={<Share2 size={16} />} title="Share" align="side" width={330}>
           {p.share}
         </Popover>
+      )}
+      {p.onTour && (
+        <button className={`btn ghost icon rail-btn${p.tourOn ? " active" : ""}`} onClick={p.onTour} title="Guided tour of the five challenge targets, with a find-it-yourself game" aria-pressed={!!p.tourOn}>
+          <Route size={16} />
+          <span className="rail-tag">Tour</span>
+        </button>
+      )}
+      {p.onAudience && (
+        <button
+          className="btn ghost icon rail-btn rail-audience"
+          onClick={() => p.onAudience!(research ? "explore" : "research")}
+          title={research ? "Research mode: fluxes with errors, flags, exports and every tool. Switch to Explore for plain language" : "Explore mode: plain language and fewer controls. Switch to Research for fluxes with errors, flags and exports"}
+          aria-label={research ? "Switch to Explore mode" : "Switch to Research mode"}
+        >
+          {research ? <FlaskConical size={16} /> : <Compass size={16} />}
+          <span className="rail-tag">{research ? "Res" : "Expl"}</span>
+        </button>
       )}
       {p.fullscreen && (
         <button
