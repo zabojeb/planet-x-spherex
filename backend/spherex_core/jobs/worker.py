@@ -20,7 +20,7 @@ import time
 from .. import logs
 from ..pipeline.params import SequenceParams
 from ..runtime import setup_logging
-from .model import ACTIVE, JobCancelled, queue_settings
+from .model import ACTIVE, PREVIEW_STAGE, JobCancelled, queue_settings
 from .queue import K_CLIENTS, K_IP, K_JOB, K_QUEUE, K_WORKERS, worker_id
 from .runner import run_build
 
@@ -101,6 +101,12 @@ class Worker:
         pending: set[asyncio.Task] = set()
 
         def progress(stage: str, done: int, total: int) -> None:
+            if stage.startswith(PREVIEW_STAGE):  # a preview result is ready (published by run_build)
+                t = asyncio.get_running_loop().create_task(
+                    self.r.hset(jk, mapping={"preview": stage[len(PREVIEW_STAGE):]}))
+                pending.add(t)
+                t.add_done_callback(pending.discard)
+                return
             now = time.monotonic()
             if now - last[0] >= PROGRESS_EVERY or done == total:
                 last[0] = now
@@ -147,6 +153,8 @@ class Worker:
 
 async def amain() -> None:
     setup_logging()
+    from ..pipeline.sequence import warm_pool
+    warm_pool()  # spawn the build workers now rather than during the first build
     w = Worker()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):

@@ -189,12 +189,12 @@ def catalog_cone(name: str, ra: float, dec: float, radius_arcmin: float) -> list
 async def position_photometry(seq_id: str, ra: float, dec: float, pmra: float = 0.0, pmdec: float = 0.0,
                               ref_epoch: float = 2000.0, name: str | None = None) -> dict:
     """Forced photometry of any position in every exposure of a built sequence (seconds; cached cutouts)."""
-    from .analysis import load_context
+    from .analysis import full_context
     from .analysis.remeasure import measure_position
     from .targets import Target
 
     target = Target(ra=ra, dec=dec, name=name, pmra=pmra, pmdec=pmdec, ref_epoch=ref_epoch)
-    return await measure_position(load_context(seq_id), target)
+    return await measure_position(full_context(seq_id), target)
 
 
 def motion_fit(seq_id: str, x: float, y: float, bands: list[str] | None = None, pmra: float | None = None,
@@ -231,27 +231,27 @@ def points_periodogram(photometry: list[dict], **options) -> dict:
 
 def export_coadds_fits(seq_id: str, epoch: int | None = None, band: str | None = None,
                        coverage: bool = False) -> bytes:
-    from .analysis import load_context
+    from .analysis import full_context
     from .exports import coadds_fits
 
-    ctx = load_context(seq_id)
+    ctx = full_context(seq_id)
     return coadds_fits(ctx.dir, ctx.meta, epoch, band, coverage)
 
 
 def export_photometry(seq_id: str, fmt: str) -> bytes:
     """'csv' or 'vot' (VOTable)."""
-    from .analysis import load_context
+    from .analysis import full_context
     from .exports import photometry_csv, photometry_votable
 
-    meta = load_context(seq_id).meta
+    meta = full_context(seq_id).meta
     return photometry_csv(meta) if fmt == "csv" else photometry_votable(meta)
 
 
 def export_download_script(seq_id: str, kind: str = "full", source: str = "irsa") -> str:
-    from .analysis import load_context, sequence_frames
+    from .analysis import full_context, sequence_frames
     from .exports import download_script
 
-    ctx = load_context(seq_id)
+    ctx = full_context(seq_id)
     try:
         frames = sequence_frames(ctx)
     except RuntimeError as e:
@@ -294,6 +294,10 @@ async def archival_status(seq_id: str, fov_arcmin: float | None = None) -> tuple
     from .archival import store as archival_store
 
     meta = load_sequence(seq_id)
+    if meta.get("preview"):  # its archival build would be stored with it and deleted with it
+        from .analysis.common import PREVIEW_NOT_ANALYSED
+
+        raise NotFound(PREVIEW_NOT_ANALYSED)
     if meta["target"].get("ephemeris"):
         raise NotFound("Archival epochs are for fixed or proper-motion targets, not solar-system objects.")
     d = archival.archival_dir(seq_id, meta, fov_arcmin)
@@ -456,10 +460,10 @@ def spectral_reference() -> dict:
 
 # ---------------------------------------------------------------- field analysis, moving objects, track & stack
 def _field_data(seq_id: str):
-    from .analysis.common import load_context
+    from .analysis.common import full_context
     from .field.common import load_field
 
-    ctx = load_context(seq_id)
+    ctx = full_context(seq_id)
     return ctx, load_field(ctx)
 
 

@@ -16,7 +16,7 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted | 2026-11-14 |
-| [0002](0002-s3-range-reads.md) | Read Level 2 files straight from S3 with HTTP range requests | Accepted | 2026-11-14 |
+| [0002](0002-s3-range-reads.md) | Read Level 2 files straight from S3 with HTTP range requests | Accepted, extended by ADR-0037 and ADR-0038 | 2026-11-14 |
 | [0003](0003-tap-image-discovery.md) | Discover images with IRSA TAP, not SIA | Accepted | 2026-11-14 |
 | [0004](0004-modular-monolith.md) | Modular monolith first, microservice seams prepared | Accepted | 2026-11-14 |
 | [0005](0005-server-side-alignment-client-side-display.md) | Align and co-add on the server, display on the client | Accepted | 2026-11-14 |
@@ -26,8 +26,8 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0009](0009-forced-aperture-photometry.md) | Forced aperture photometry for spectra and light curves | Superseded by ADR-0016 | 2026-11-14 |
 | [0010](0010-proper-motion-aware-targets.md) | Proper-motion-aware targets | Accepted | 2026-11-14 |
 | [0011](0011-name-resolution-and-catalogs.md) | Name resolution and reference catalogs | Accepted, extended by ADR-0021 | 2026-11-14 |
-| [0012](0012-caching.md) | Caching layers and cache keys | Accepted | 2026-11-14 |
-| [0013](0013-process-pool-and-slim-headers.md) | Process pool and slim FITS headers for per-frame work | Accepted | 2026-11-14 |
+| [0012](0012-caching.md) | Caching layers and cache keys | Accepted; the cutout layer superseded by ADR-0037 | 2026-11-14 |
+| [0013](0013-process-pool-and-slim-headers.md) | Process pool and slim FITS headers for per-frame work | Accepted, extended by ADR-0039 | 2026-11-14 |
 | [0014](0014-dev-compute-on-vast-ai.md) | Development compute on a vast.ai instance next to S3 | Accepted | 2026-11-14 |
 | [0015](0015-frontend-stack.md) | Frontend stack and URL-addressable views | Accepted | 2026-11-14 |
 | [0016](0016-epsf-psf-photometry.md) | Fit the detector's effective PSF for photometry, skipping saturated pixels | Accepted, extended by ADR-0020 | 2026-11-14 |
@@ -51,6 +51,9 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0034](0034-immutable-http-caching-and-light-endpoints.md) | Immutable HTTP caching, precompressed metadata and lightweight result endpoints | Accepted | 2026-11-14 |
 | [0035](0035-packaging-docker-and-railway-config.md) | One multi-stage image, docker compose for local runs, Railway config as code | Accepted | 2026-11-14 |
 | [0036](0036-cpu-quota-sizing.md) | Size pools and server workers from the cgroup CPU quota | Accepted | 2026-11-14 |
+| [0037](0037-per-file-chunk-cache.md) | Cache rows per Level 2 file and read VARIANCE only near the target | Accepted | 2026-11-14 |
+| [0038](0038-irsa-cutouts.md) | Ask IRSA's cutout service first and read from S3 when it is busy | Accepted | 2026-11-14 |
+| [0039](0039-batched-fetch-and-previews.md) | Read exposures in batches on the process pool, opening epoch first, and show previews while the rest loads | Accepted | 2026-11-14 |
 | [0040](0040-spectral-bin-grid.md) | Build spectra on one fixed grid of 17 geometric bins per detector | Accepted | 2026-11-14 |
 | [0041](0041-spectral-features-and-indices.md) | Measure curated features against power-law side windows, plus automatic detections | Accepted | 2026-11-14 |
 | [0042](0042-template-classification.md) | Classify with Pickles and SpeX standards on the bin grid, below 2.45 µm | Accepted | 2026-11-14 |

@@ -1,6 +1,6 @@
 # ADR-0002: Read Level 2 files straight from S3 with HTTP range requests
 
-- **Status:** Accepted
+- **Status:** Accepted, extended by [ADR-0037](0037-per-file-chunk-cache.md) (per-file chunks, VARIANCE near the target) and [ADR-0038](0038-irsa-cutouts.md) (IRSA cutouts first)
 - **Date:** 2026-11-14
 
 ## Context

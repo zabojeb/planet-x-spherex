@@ -40,6 +40,8 @@ interface Props {
   onNeedPhotometry?: () => void;
   /** Per-exposure verification of a position (Verify tab). The analysis of a source opens in its own window. */
   verify?: VerifySubject | null;
+  /** Set while a preview is on screen: the Analysis and Verify jobs start once the full result is in. */
+  waitFull?: string | null;
 }
 
 export function Drawer(p: Props) {
@@ -91,7 +93,8 @@ export function Drawer(p: Props) {
       </header>
       <div className="drawer-body">
         <Suspense fallback={<div className="skeleton" style={{ height: 260 }} />}>
-          {p.tab === "verify" && p.verify && <VerifyPanel seqId={p.meta.id} subject={p.verify} />}
+          {p.tab === "verify" && p.waitFull && <p className="small muted">{p.waitFull}</p>}
+          {p.tab === "verify" && p.verify && !p.waitFull && <VerifyPanel seqId={p.meta.id} subject={p.verify} />}
           {p.tab === "periodogram" && <PeriodogramChart id={p.meta.id} source={p.source} />}
           {p.tab === "spectrum" && (
             <SpectralPanel meta={p.meta} epoch={p.epoch} ylog={p.ylog} target={p.target} source={p.source} photometryReady={p.tablesReady} onNeedPhotometry={p.onNeedPhotometry} />

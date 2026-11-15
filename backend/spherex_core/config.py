@@ -34,6 +34,17 @@ class Settings:
     cache_dir: Path = Path(_env("CACHE_DIR", str(Path.home() / ".cache" / "spherex")))
     max_connections: int = int(_env("MAX_CONNECTIONS", "96"))
     max_frames_in_flight: int = int(_env("MAX_FRAMES_IN_FLIGHT", "64"))
+    # Cached rows of a Level 2 file keep enough columns for this field of view (arcmin), so widening the field up
+    # to it reads only the new rows (ADR-0037). Rows arrive full-width anyway; this costs disk, not network.
+    cutout_cache_fov: float = float(_env("CUTOUT_CACHE_FOV", "30"))
+    # Where cutouts come from: "irsa" asks IRSA's cutout service first (one request, ~160 KB at 6') and reads from S3
+    # when it is busy or fails; "s3" reads byte ranges from S3 only (ADR-0038).
+    cutout_source: str = _env("CUTOUT_SOURCE", "irsa")
+    irsa_max_in_flight: int = int(_env("IRSA_IN_FLIGHT", "8"))  # the service answers 503 to most requests above ~8
+    irsa_timeout_s: float = float(_env("IRSA_TIMEOUT", "15"))  # then the exposure is read from S3
+    # Read and process exposures in batches in the process pool, every core at work (ADR-0039); 0 keeps everything
+    # in the API's event loop (one core), as before.
+    fetch_workers: bool = _env("FETCH_WORKERS", "1") not in ("0", "false", "no")
     cpu_workers: int = int(_env("CPU_WORKERS", str(max(1, cpu_quota() - 1))))  # process pool size
     max_jobs: int = int(_env("MAX_JOBS", "3"))  # sequence builds running at once; the rest queue
     job_timeout_s: float = float(_env("JOB_TIMEOUT", "900"))  # stop a build after this long (0: never)

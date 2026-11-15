@@ -334,11 +334,16 @@ async function poll(id: string, signal?: AbortSignal): Promise<Poll> {
  * Start (or reuse) a server-side build, keep it alive with heartbeats, then fetch the (lite) metadata.
  * Images are fetched separately, per plane, with ensurePlanes. Aborting the signal stops everything and
  * withdraws this tab's interest in an unfinished job.
+ *
+ * While the build runs, each preview it announces (job.preview: the visit the viewer opens on first, then more
+ * finished visits) is fetched and handed to onPreview, so the sky shows up long before the build is done.
+ * Previews are not cached: the server removes them once the full result is written.
  */
 export async function loadSequence(
   req: SequenceRequest,
   onProgress: (p: Progress) => void,
   signal?: AbortSignal,
+  onPreview?: (data: SequenceData) => void,
 ): Promise<SequenceData> {
   const known = idForRequest.get(JSON.stringify(req));
   const hit = known ? metaGet(known) : undefined;
@@ -352,6 +357,15 @@ export async function loadSequence(
 
   let finished = job.status === "done";
   const id = job.id;
+  let asked: string | null = null; // latest preview asked for; an older one that arrives late is dropped
+  const preview = (j: Job) => {
+    if (!onPreview || !j.preview || j.preview === asked) return;
+    const pid = (asked = j.preview);
+    fetchMeta(pid, signal).then(
+      (d) => !finished && asked === pid && onPreview(d),
+      () => undefined, // gone already (the full result replaced it) or the tab moved on
+    );
+  };
   const onHide = () => !finished && withdraw(id);
   window.addEventListener("pagehide", onHide);
   const onAbort = () => !finished && withdraw(id);
@@ -359,6 +373,7 @@ export async function loadSequence(
   try {
     if (!finished) {
       onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
+      preview(job);
       for (;;) {
         const res = await withBackoff(() => poll(id, signal), onProgress, signal);
         if (res.state === "done") break;
@@ -367,7 +382,10 @@ export async function loadSequence(
           job = await withBackoff(() => postSequence(req, signal), onProgress, signal);
           if (job.status === "done") break;
           onProgress({ stage: job.stage, done: job.done, total: job.total, elapsed: job.elapsed, ahead: job.position });
-        } else onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed, ahead: res.job.position });
+        } else {
+          onProgress({ stage: res.job.stage, done: res.job.done, total: res.job.total, elapsed: res.job.elapsed, ahead: res.job.position });
+          preview(res.job);
+        }
         await heartbeat(signal);
       }
     }

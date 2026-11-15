@@ -204,3 +204,28 @@ def test_routes(field):
     assert r.status_code == 200 and r.headers["x-array-shape"] == f"{N},{N}" and len(r.content) == N * N * 4
     assert c.get("/api/sequences/fld1/trackstack.bin", params={"epoch": 0, "rate": 5, "bands": "D9"}).status_code == 422
     assert c.post("/api/sequences/unknown/field", json={}).status_code == 404
+
+
+def test_previews_are_not_analysed(tmp_path):
+    """A preview (ADR-0039) holds some epochs only and is deleted with the build: no jobs, measurements or
+    exports on it, while quick reads still work."""
+    services.configure(cache_root=tmp_path)
+    try:
+        meta, arrays = make_field()
+        meta["preview"] = {"of": "fld2", "n": 1, "frames": 10, "total": 30}
+        results.write_result(cache.layout().sequence("fld2p1"), meta, arrays)
+        c = TestClient(create_app(web_dist=None))
+        r = c.post("/api/sequences/fld2p1/field", json={})
+        assert r.status_code == 404 and "preview" in r.json()["detail"]
+        assert c.get("/api/sequences/fld2p1/trackstack.bin", params={"epoch": 0, "rate": 5, "pa": 270}).status_code == 404
+        with pytest.raises(services.NotFound, match="preview"):
+            asyncio.run(services.point_analysis_submit("fld2p1", 10.0, 20.0))
+        with pytest.raises(services.NotFound, match="preview"):
+            asyncio.run(services.position_photometry("fld2p1", 10.0, 20.0))
+        with pytest.raises(services.NotFound, match="preview"):
+            services.export_photometry("fld2p1", "csv")
+        with pytest.raises(services.NotFound, match="preview"):
+            asyncio.run(services.archival_status("fld2p1"))
+        assert load_context("fld2p1").meta["preview"]["of"] == "fld2"  # quick reads (motion, periodogram) still work
+    finally:
+        services.configure(None)
