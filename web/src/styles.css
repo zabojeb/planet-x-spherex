@@ -553,17 +553,15 @@ canvas.smooth { image-rendering: auto; }
 .pin circle, .pin line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; }
 .pin circle.halo { stroke: rgba(0, 0, 0, 0.7); stroke-width: 3.5; }
 
-.hud-nav { display: flex; align-items: flex-end; gap: 8px; }
 .nav-pad { pointer-events: auto; display: grid; grid-template-columns: repeat(3, 22px); grid-template-rows: repeat(3, 22px); gap: 2px; text-shadow: none; }
 .nav-btn { display: grid; place-items: center; padding: 0; border: 1px solid var(--hair-2); border-radius: 6px; background: rgba(10, 10, 10, 0.58); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: var(--text-2); font-family: var(--mono); font-size: 10px; transition: color var(--t) var(--ease), border-color var(--t) var(--ease), background-color var(--t); }
 .nav-btn:hover { color: var(--accent); border-color: var(--accent-ring); background: rgba(20, 16, 4, 0.8); }
 .nav-N { grid-area: 1 / 2; } .nav-E { grid-area: 2 / 1; } .nav-C { grid-area: 2 / 2; } .nav-W { grid-area: 2 / 3; } .nav-S { grid-area: 3 / 2; }
-.readout { display: flex; flex-direction: column; gap: 1px; min-width: 214px; }
+.readout { display: flex; gap: 14px; align-items: baseline; font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.readout .muted { color: var(--text-3); font-size: 11px; }
+.hud-row { display: flex; align-items: flex-end; gap: 8px; }
+.hud-fit { pointer-events: auto; width: 22px; height: 22px; text-shadow: none; }
 .readout i { font-style: normal; color: var(--text-3); margin-right: 5px; }
-.readout-head { display: flex; justify-content: space-between; gap: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
-.readout-head .muted { text-transform: none; letter-spacing: 0.02em; }
-.readout-main { display: flex; gap: 14px; font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
-.readout-sub { display: flex; gap: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 .pick { width: 288px; padding: 12px 14px 10px; max-height: calc(100vh - 90px); overflow: auto; }
 .pick-card { display: flex; flex-direction: column; gap: 6px; }
@@ -661,7 +659,6 @@ canvas.smooth { image-rendering: auto; }
 
 @media (max-width: 760px) {
   .readout { min-width: 0; }
-  .readout-sub:nth-of-type(n + 4) { display: none; }
   .pick { left: 10px !important; right: 10px; top: auto !important; bottom: 150px; width: auto; max-height: 52vh; }
 }
 /* the dock is centred and up to 760px wide: below ~1260px it would cover the readout, so lift the HUD above it */
@@ -671,7 +668,7 @@ canvas.smooth { image-rendering: auto; }
 /* with the drawer open the HUD sits above it, reduced to the date and α δ */
 @media (min-width: 761px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 28px); }
-  .drawer-open .nav-pad, .drawer-open .readout-sub, .drawer-open .hud-compass { display: none; }
+  .drawer-open .hud-fit, .drawer-open .hud-compass { display: none; }
 }
 @media (min-width: 761px) and (max-width: 1260px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 92px); }
@@ -1008,3 +1005,11 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 @media (prefers-reduced-motion: reduce) {
   .egg, .egg * { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Go to → Here: current position, copy, step the field */
+.goto-here { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--hair-1, rgba(255,255,255,0.08)); }
+.goto-here-head { display: flex; justify-content: space-between; align-items: center; }
+.goto-here-body { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.goto-here-body .muted { font-size: 11px; }
+.goto-step { display: flex; align-items: center; gap: 12px; }
+.goto-step .nav-pad { display: grid; }
