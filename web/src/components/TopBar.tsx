@@ -1,6 +1,6 @@
 /** Floating top-left cluster: serif wordmark, the search pill, the field of view and Random. Plus the share panel. */
 import { Check, ChevronDown, Code2, Dices, Download, Link2 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { ExportKind } from "../api";
 import { useDismiss } from "../hooks";
 import { FACETS, type Facet, type Pick, type Recent, type SkyObject } from "../search";
@@ -26,14 +26,17 @@ export function TopLeft(p: {
   onPick: (pick: Pick, recent: Recent) => void;
   onRandom: (what: Facet | "field" | null) => void;
   onWarm: () => void;
+  onMoving?: (name: string) => void;
   onFov: (fov: number) => void;
+  /** The editable field-centre coordinates, under the search row. */
+  coords?: ReactNode;
 }) {
   const fovs = FOVS.includes(p.fov) ? FOVS : [...FOVS, p.fov].sort((a, b) => a - b);
   return (
     <div className="topleft">
       <Wordmark />
       <div className="search-row">
-        <CommandSearch space={p.space} indexReady={p.indexReady} current={p.current} recents={p.recents} onPick={p.onPick} onRandom={p.onRandom} onWarm={p.onWarm} />
+        <CommandSearch space={p.space} indexReady={p.indexReady} current={p.current} recents={p.recents} onPick={p.onPick} onRandom={p.onRandom} onWarm={p.onWarm} onMoving={p.onMoving} />
         <label className="fov glass" title="Field of view. Larger fields show faster movers but load more data.">
           <span className="micro">FOV</span>
           <select value={p.fov} onChange={(e) => p.onFov(Number(e.target.value))} aria-label="Field of view in arcminutes">
@@ -46,6 +49,7 @@ export function TopLeft(p: {
         </label>
         <RandomButton compact={p.compact} onRandom={p.onRandom} onWarm={p.onWarm} />
       </div>
+      {p.coords}
     </div>
   );
 }

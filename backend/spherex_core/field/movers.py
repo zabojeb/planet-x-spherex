@@ -11,10 +11,10 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import binary_dilation, shift as nd_shift
+from scipy.ndimage import shift as nd_shift
 
 from ..analysis.motion import fit_motion
-from .common import Check, FieldData, local_peaks, no_check, robust_noise
+from .common import Check, FieldData, local_peaks, no_check, region_mask, robust_noise, saturated_regions
 from .crossmatch import catalog_motion
 
 FIT_MIN_SNR = 8.0
@@ -22,11 +22,14 @@ MAX_FITS = 200
 MOVER_SIGMA = 4.0  # total motion / its error
 MOVER_MIN_PM = 500.0  # mas/yr
 DISCREPANT_SIGMA = 4.0
+BAND_SIGMA = 3.0  # a supporting detector's own fit must be this significant...
+BAND_ANGLE = 35.0  # ...and point within this angle of the combined motion
 MAX_PM = 15000.0  # mas/yr; faster than any known star (Barnard's 10.4"/yr): a centroid jump, not a motion
 STACK_SPEEDS = np.arange(1000.0, 15001.0, 1000.0)  # mas/yr
 STACK_ANGLES = np.arange(0.0, 360.0, 15.0)  # deg, position angle east of north
 STACK_THRESHOLD = 6.0
-STACK_GAIN = 2.0  # the best trial motion must beat zero motion by this much S/N
+STACK_GAIN = 4.0  # the best trial motion must beat zero motion by this much S/N
+STACK_CLEAR = 2.5  # px: a faint mover must not sit on a detected source (static residuals stack too)
 BRIGHT_SNR = 50.0  # residuals of brighter stars are masked out of the search
 BRIGHT_GROW = 4
 
@@ -34,6 +37,7 @@ BRIGHT_GROW = 4
 def fit_all(fd: FieldData, sources: list[dict], check: Check = no_check) -> list[dict]:
     """Motion fits for the brightest sources (stored on each source) and the ranked mover candidates."""
     candidates = []
+    regions = saturated_regions(fd)
     fitted = [s for s in sources if s["snr"] >= FIT_MIN_SNR and not s.get("blended_with")][:MAX_FITS]
     for s in fitted:
         check()
@@ -50,7 +54,12 @@ def fit_all(fd: FieldData, sources: list[dict], check: Check = no_check) -> list
         if c["pm_total"] > MAX_PM:
             s["motion"]["implausible"] = True
             continue
+        support = _band_support(c, fit["per_band"])
+        s["motion"]["supporting_bands"] = support
         if sig < MOVER_SIGMA or c["pm_total"] < MOVER_MIN_PM:
+            continue
+        if len(support) < min(2, len(fit["per_band"])):
+            s["motion"]["rejected"] = "detectors disagree"  # colour blends and halos shift per detector
             continue
         cat = catalog_motion(s)
         if cat is None:
@@ -61,13 +70,32 @@ def fit_all(fd: FieldData, sources: list[dict], check: Check = no_check) -> list
             dsig = float(np.hypot(dra, ddec))
             category = "known_mover" if dsig < DISCREPANT_SIGMA else "discrepant_motion"
         boost = {"unknown_mover": 2.0, "discrepant_motion": 1.5, "known_mover": 1.0}[category]
+        near_sat = any(np.hypot(s["x"] - x, s["y"] - y) <= 2.0 * r for x, y, r in regions
+                       if np.hypot(s["x"] - x, s["y"] - y) > 1.0)
+        if near_sat:
+            boost *= 0.3  # a bright star's halo changes with wavelength and visit; centroids follow it
         candidates.append({"id": f"M{len(candidates) + 1:03d}", "source": s["id"], "x": s["x"], "y": s["y"],
                            "ra": s["ra"], "dec": s["dec"], "category": category,
                            "score": float(sig * boost), "motion": s["motion"], "catalog_motion": cat,
                            "catalog_discrepancy_sigma": dsig, "saturated": s.get("saturated", False),
+                           "near_saturated_star": bool(near_sat),
                            "track": fit["track"]})
     candidates.sort(key=lambda m: -m["score"])
     return candidates
+
+
+def _band_support(c: dict, per_band: dict) -> list[str]:
+    """Detectors whose own motion fit is significant and points the same way as the combined fit."""
+    out = []
+    pa = np.arctan2(c["pmra"], c["pmdec"])
+    for b, f in per_band.items():
+        err = f.get("pm_total_err") or float(np.hypot(f["pmra_err"], f["pmdec_err"]))
+        if not err or f["pm_total"] / err < BAND_SIGMA:
+            continue
+        d = abs((np.degrees(np.arctan2(f["pmra"], f["pmdec"]) - pa) + 180.0) % 360.0 - 180.0)
+        if d <= BAND_ANGLE:
+            out.append(b)
+    return out
 
 
 def _difference_snr(fd: FieldData) -> tuple[list[np.ndarray], np.ndarray]:
@@ -102,13 +130,10 @@ def shift_and_stack(fd: FieldData, sources: list[dict], movers: list[dict], chec
     epochs = [e for e in range(len(z)) if have[e]]
     if len(epochs) < 3:
         return []  # with two epochs every pair of residuals "moves"; the search needs three or more
-    bright = np.zeros((fd.n, fd.n), bool)
-    for s in sources:
-        if s["snr"] >= BRIGHT_SNR or s.get("saturated"):
-            xi, yi = int(round(s["x"])), int(round(s["y"]))
-            if 0 <= xi < fd.n and 0 <= yi < fd.n:
-                bright[yi, xi] = True
-    bright = binary_dilation(bright, iterations=BRIGHT_GROW + 2)
+    regions = saturated_regions(fd)
+    regions += [(s["x"], s["y"], BRIGHT_GROW + 2.0 * np.log10(max(s["snr"], 1.0) / 10.0))
+                for s in sources if s["snr"] >= BRIGHT_SNR]
+    bright = region_mask(fd.n, regions, scale=1.5, extra=1.0)
     z = [np.where(bright, np.nan, zi) for zi in z]
     px_per_mas = 1.0 / 1000.0 / fd.grid.pixscale
 
@@ -140,7 +165,7 @@ def shift_and_stack(fd: FieldData, sources: list[dict], movers: list[dict], chec
     out = []
     for y, x in zip(*local_peaks(snr, STACK_THRESHOLD, size=5, edge=3)):
         gain = float(snr[y, x] - (zero[y, x] if np.isfinite(zero[y, x]) else 0.0))
-        if gain < STACK_GAIN:
+        if gain < STACK_GAIN or any(np.hypot(s["x"] - x, s["y"] - y) <= STACK_CLEAR for s in sources):
             continue
         pmra, pmdec = best_v[y, x]
         ra, dec = fd.sky(x, y)

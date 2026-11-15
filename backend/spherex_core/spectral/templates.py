@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .. import cache
+from ..logs import event, timed
 from .grid import GRID, BinGrid
 
 log = logging.getLogger(__name__)
@@ -102,8 +103,19 @@ def integrate(wl_um: np.ndarray, flam: np.ndarray, grid: BinGrid = GRID) -> np.n
 
 
 def _get(url: str, timeout: float = 60.0) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read()
+    from .. import netpolicy
+
+    service = url.split("/")[2]
+    netpolicy.check(service)
+    timeout, _ = netpolicy.timeouts(timeout, 1)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            data = r.read()
+    except Exception as e:
+        netpolicy.failed(service, e)
+        raise
+    netpolicy.succeeded(service)
+    return data
 
 
 def _download_pickles() -> list[tuple[str, str, str, np.ndarray, np.ndarray]]:
@@ -156,9 +168,12 @@ def library(refresh: bool = False) -> TemplateLibrary:
     entries = []
     for family, fetch in (("star", _download_pickles), ("dwarf_standard", _download_spex_standards)):
         try:
-            entries += [(family, *e) for e in fetch()]
+            with timed(log, "spectral templates download", library=family) as info:
+                got = fetch()
+                info["n"] = len(got)
+            entries += [(family, *e) for e in got]
         except Exception as exc:  # noqa: BLE001 - one library missing still leaves a usable classifier
-            log.warning("template library %s unavailable: %r", family, exc)
+            event(log, logging.WARNING, "spectral templates unavailable", library=family, error=repr(exc)[:200])
     if not entries:
         raise RuntimeError("no template library could be downloaded")
     model = np.stack([integrate(wl, fl) for _, _, _, _, wl, fl in entries])

@@ -54,13 +54,15 @@ src/
                        preview, an all-sky Hammer map (Milky Way, ecliptic, deep fields, presets), recent places
     Objects.tsx        Objects in view: catalogue sources in the field, filter, sort (notable, nearest, brightest,
                        fastest), hover highlights on the sky, click flies there
-    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer
+    Sky3D.tsx          3D views (three.js, lazy chunk): relief of the frame, time cube, λ cube; orbit, pick a layer;
+                       catalogue markers and SIMBAD names, fast movers' paths, hover tips, click opens a source
     TopBar.tsx         floating top-left: serif wordmark, search pill, FOV, Random split button; the share panel
+    CoordField.tsx     field-centre coordinates under the search: click or c to type a position, Enter goes there
     CommandSearch.tsx  ⌘K / Ctrl+K or / search: suggestions as you type, inline completion, recent picks,
                        challenge targets, object types, coordinates with nearby objects, name lookup fallback
     Transport.tsx      floating dock (prev / play / next, epoch scrubber, date) and playback options
     Rail.tsx           right tool rail: Go to, Objects, Detector, Display, Layers, 3D, Details, Share
-    Controls.tsx       mode control, detector panel, Display and Layers panels, the 3D bar
+    Controls.tsx       mode control, detector panel, Display and Layers panels (hover card: what each dataset is), 3D bar
     Drawer.tsx         closed-by-default drawer: Spectrum · Light curve · Data (lazy chunks)
     SidePanel.tsx      the Data tab: Overview · Epoch · Flags · Data
     Progress.tsx       top progress bar and the landing index over the sky
@@ -102,6 +104,40 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   "Measure spectrum & light curve" on a catalogue source calls `POST .../photometry` and shows that source
   in the drawer; Share → Download links the `export/*` files.
 
+## Long baseline, solar system, spectral analysis
+
+- **Long baseline** (Layers → Long baseline, `lb=1`): `GET /api/sequences/{id}/archival` (polled while it
+  builds; a wider concentric grid via `fov_arcmin` when the target moved far since 1999) prepends 2MASS
+  (2000), AllWISE (2010) and NEOWISE (2014–2024) frames to the blink. They sit on their own compressed time
+  axis left of the SPHEREx scrubber (squares = 2MASS, diamonds = WISE, dotted = target outside the field);
+  bands are chosen as a 2MASS/WISE pair (`lbb=Ks,W1`), the frame on screen is `arch=<index>`. SPHEREx frames
+  are embedded in the archival grid (`archival.ts`); frames of one survey and band share a stretch. Only
+  shown/needed frames are fetched (`archival.bin?index=`), never carried over to a new target.
+- **Solar system**: the search box offers "Track … as a solar-system object" (first for designations like
+  3I, C/2025 N1, 2024 YR4, 433 Eros; "comets"/"asteroids" lists examples). `GET /api/moving/search` is polled;
+  409 shows a choice card; the suggested request builds a co-moving sequence (`obj=`, `objtype`, `naif`,
+  `ob`, `oe` in the URL). The HUD says "co-moving: stars trail"; catalogues and the long baseline are off.
+- **Spectral analysis** (drawer → Spectrum, lazy): Spectrum (binned spectrum with errors, continuum,
+  detected features, indices), Classification (label, template probabilities, best template + blackbody
+  over the bins, synthetic vs catalogue magnitudes with suspect marks) and Variability (ratio spectra per
+  epoch, |z| ≥ 3 full strength). A measured catalogue source uses `POST /api/spectrum/analyze`. Without the
+  endpoints the per-exposure spectrum from the photometry table is shown.
+
+## Point analysis and field tools
+
+- **Analyze** (pick card of any pinned point, catalogue source or the target): `POST /api/sequences/{id}/analyze`,
+  polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with DELETE). The Analysis tab shows the
+  verdict first (findings with a confidence bar, novelty badge), then expandable sections: identification,
+  spectrum + classification, motion vs catalogue, light curve + period, red excess, nearby tracklets. Each slot may
+  be `{error}` and says so.
+- **Verify** (pick card): `POST .../verify`, an 11×11 cutout and PSF-fit S/N per exposure, fixed or along a
+  candidate's motion.
+- **Field analysis** (rail → scan icon): `POST .../field` job with candidate lists (movers, tracklets, variables,
+  red excess, anomalies) as marks on the sky and a list; known asteroids and comets (`known-objects`) with labels
+  and 1-hour motion arrows; Track & Stack (`trackstack.bin`, rate/PA sliders, `trackstack/search` results); ADES
+  (`/api/field/{id}/ades.psv`) and CSV exports.
+- **Display → Tools**: invert (`inv=1`), magnifier (11×11 px), ruler (two clicks: distance and PA).
+
 ## Design
 
 Google-Earth model on black: the sky fills the viewport and every control floats over it as small glass
@@ -113,8 +149,9 @@ accent). Blinking is instant; a new target plays a short lock-on animation.
 
 ## 3D views
 
-The rail's 3D button (or `v`) opens one of three views ([ADR-0022](../docs/adr/0022-3d-views.md)). They are
-independent of the mode and use the same stretch, colour map and percentile limits as the flat sky:
+The viewer opens on the time cube; the rail's 3D button (or `v`) toggles the flat sky and the three views
+([ADR-0022](../docs/adr/0022-3d-views.md)). They are independent of the mode and use the same stretch, colour map
+and percentile limits as the flat sky:
 
 - **Relief**: the frame on screen as a height field. Height is signal-to-noise above the sky on a log scale (flat
   within 2σ, 1 at 200σ). Colours follow the stretch and colour map. Stars are peaks. In Difference a mover is a red
@@ -125,6 +162,11 @@ independent of the mode and use the same stretch, colour map and percentile limi
   such as an asteroid, traces a straight diagonal.
 - **λ cube**: every detector of the current epoch, short to long wavelength. A source lights up only in the layers
   where it is bright.
+
+The catalogue layers (Gaia, CatWISE, 2MASS, SIMBAD) are drawn in 3D too, with the flat sky's shapes and colours: on the
+current layer of a cube, on the surface of the relief, with the names of the most-cited SIMBAD objects. In the time
+cube a fast mover (> 0.1″/yr) also gets its path through the layers. Hover a source for its name and type; click it
+to open its card on the flat sky.
 
 Drag to orbit, right-drag to pan, scroll to zoom, double-click to reset. Click a layer's label to show that epoch
 or detector. The bar at the top right switches the view, sets the height, spins the scene and goes back to 2D.
@@ -150,7 +192,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `mode` | `blink` (default), `diff`, `stack`, `rgb`, `exp` |
 | `band` | `D1`…`D6` or `all` (noise-weighted combination) |
 | `epoch` | epoch index shown |
-| `ref` | reference epoch for `diff` |
+| `ref` | reference epoch for `diff` (playback skips it: minus itself it is blank) |
 | `stack` | comma-separated epoch indices for `stack` |
 | `speed` | milliseconds per frame |
 | `ends=1` | blink only the first and last epoch |
@@ -163,7 +205,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ov` | overlays: `target,track,gaia,catwise,2mass,simbad,flags,grid,compass` |
 | `flags` | flag bit numbers drawn by the flags overlay |
 | `ylog=0` | linear flux axis in the spectrum |
-| `v3d` | 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
+| `v3d` | `off` for the flat sky (the default), or the 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
 | `h3d` | vertical exaggeration of the 3D view (default 1) |
 | `embed=1` | viewer and its controls only, for iframes |
 
@@ -185,15 +227,22 @@ The loading screen names what was drawn.
 ## Keyboard
 
 Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
-v 3D on/off · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+v 3D on/off · c type coordinates · f full screen · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south ·
+Esc closes the card, then the drawer.
 ⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
+
+Full screen (`f` or the last rail button) keeps Esc for the viewer: in Chrome and Edge the Keyboard Lock API hands
+Esc to the page, so it closes the card or drawer and leaves full screen only when held down. Safari and Firefox have no
+keyboard lock and still leave full screen on Esc, and so does the browser's own full screen (⌃⌘F, F11), which a page
+cannot lock.
 
 ## Exploring
 
 - **Where am I.** The readout in the bottom-left corner follows the cursor (or the pin, selection or target): α δ in
   sexagesimal and degrees, Galactic l b, the offset from the target and the pixel value. `g` draws an RA/Dec grid.
-- **Go somewhere.** Type a name or coordinates in the search, or open Go to (rail, top button) for RA/Dec or Galactic
-  input with a live preview, optional proper motion, an all-sky map to click on and recent places. The pad above the
+- **Go somewhere.** Type a name or coordinates in the search, or click the field-centre coordinates under it (or press
+  `c`), type or paste a new position (sexagesimal, degrees, a J-name or Galactic `gal l b`) and press Enter; the field of
+  view is kept. Go to (rail, top button) adds optional proper motion, an all-sky map to click on and recent places. The pad above the
   compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
 - **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
   motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,

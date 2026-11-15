@@ -29,6 +29,7 @@ MIN_AMP_RING = 0.20  # ring photometry drifts up to ~14 % on constant stars
 MIN_CHI2 = 4.0
 MAX_SOURCES = 150
 PERIODOGRAM_TOP = 5
+EDGE = 7.0  # px: aperture and background annulus inside the image
 MIN_EPOCHS_FOR_PERIOD = 5
 
 
@@ -54,10 +55,10 @@ def _core_radius(stack: np.ndarray, x: float, y: float, max_r: int = 16) -> floa
     return best
 
 
-def _metrics(rel: np.ndarray, err: np.ndarray, epochs: np.ndarray, mjd: np.ndarray) -> dict:
+def _metrics(rel: np.ndarray, err: np.ndarray, epochs: np.ndarray, mjd: np.ndarray, bands: np.ndarray) -> dict:
     sig = np.sqrt(err ** 2 + (SYSTEMATIC * rel) ** 2)
     ok = np.isfinite(rel) & np.isfinite(sig) & (sig > 0)
-    rel, sig, epochs, mjd = rel[ok], sig[ok], epochs[ok], mjd[ok]
+    rel, sig, epochs, mjd, bands = rel[ok], sig[ok], epochs[ok], mjd[ok], bands[ok]
     n = len(rel)
     if n < MIN_POINTS:
         return {"n": n}
@@ -68,14 +69,21 @@ def _metrics(rel: np.ndarray, err: np.ndarray, epochs: np.ndarray, mjd: np.ndarr
     delta = np.sqrt(n / (n - 1)) * (rel[order] - mean) / sig[order]
     p = delta[:-1] * delta[1:]
     j = float(np.mean(np.sign(p) * np.sqrt(np.abs(p)))) if len(p) else 0.0
-    meds = []
-    for e in np.unique(epochs):
-        v = rel[epochs == e]
-        if len(v) >= 5:
-            meds.append((int(e), float(np.median(v)), int(len(v))))
-    amp = max(m[1] for m in meds) - min(m[1] for m in meds) if len(meds) >= 2 else 0.0
-    return {"n": n, "chi2_red": chi2, "stetson_j": j, "amplitude": float(amp),
-            "epoch_medians": [{"epoch": e, "rel": v, "n": k} for e, v, k in meds]}
+    meds, amp, amp_band = [], 0.0, None
+    for band in np.unique(bands):
+        sel = bands == band
+        per = []
+        for e in np.unique(epochs[sel]):
+            v = rel[sel & (epochs == e)]
+            if len(v) >= 5:
+                per.append((int(e), float(np.median(v)), int(len(v))))
+        meds += [(e, str(band), v, k) for e, v, k in per]
+        if len(per) >= 2:
+            a = max(p[1] for p in per) - min(p[1] for p in per)
+            if a > amp:  # the largest change in any detector: colour changes cancel in a mixed median
+                amp, amp_band = a, str(band)
+    return {"n": n, "chi2_red": chi2, "stetson_j": j, "amplitude": float(amp), "amplitude_band": amp_band,
+            "epoch_medians": [{"epoch": e, "band": b, "rel": v, "n": k} for e, b, v, k in meds]}
 
 
 def search(fd: FieldData, sources: list[dict], check: Check = no_check) -> list[dict]:
@@ -100,6 +108,8 @@ def search(fd: FieldData, sources: list[dict], check: Check = no_check) -> list[
     out = []
     for s in sources[:MAX_SOURCES]:
         check()
+        if s.get("blended_with") or min(s["x"], s["y"], fd.n - 1 - s["x"], fd.n - 1 - s["y"]) < EDGE:
+            continue
         xs, ys = _positions(fd, s, mjds)
         core = _core_radius(stack, s["x"], s["y"]) if s.get("saturated") else 0.0
         if core > 0:
@@ -136,7 +146,8 @@ def search(fd: FieldData, sources: list[dict], check: Check = no_check) -> list[
             continue
         m = _metrics(np.array([r["rel"] for r in rel]),
                      np.array([r["rel_err"] if r["rel_err"] is not None else np.nan for r in rel]),
-                     np.array([r["epoch"] for r in rel]), np.array([r["mjd"] for r in rel]))
+                     np.array([r["epoch"] for r in rel]), np.array([r["mjd"] for r in rel]),
+                     np.array([r["band"] for r in rel]))
         s["variability"] = {k: v for k, v in m.items() if k != "epoch_medians"} | {"method": method}
         min_amp = MIN_AMP_RING if method == "ring" else MIN_AMP_APERTURE
         if m.get("n", 0) < MIN_POINTS or m["amplitude"] < min_amp or m["chi2_red"] < MIN_CHI2:

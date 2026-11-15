@@ -106,7 +106,7 @@ function Overview({ meta, target, epoch, mode }: Props) {
           <kbd className="kbd">D</kbd>
           <kbd className="kbd">S</kbd>
           <kbd className="kbd">R</kbd>
-          <kbd className="kbd">E</kbd> modes <kbd className="kbd">⌘K</kbd> search
+          <kbd className="kbd">E</kbd> modes <kbd className="kbd">F</kbd> full screen <kbd className="kbd">⌘K</kbd> search
         </p>
       </div>
       {target?.source && <p className="fine">Position and motion: {target.source}</p>}

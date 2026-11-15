@@ -18,13 +18,16 @@ import numpy as np
 
 from ..flags import ARTIFACTS, MASK_DEFAULT, SATURATION
 
-FEATURES = ("log_snr", "sharpness", "roundness", "dipole", "bright_dist", "flagged", "masked_frac", "edge_dist")
+FEATURES = ("log_snr", "sharpness", "roundness", "dipole", "bright_dist", "flagged", "masked_frac", "edge_dist",
+            "partner")
 MODEL_PATH = Path(__file__).with_name("models") / "realbogus.json"
 BAD_BITS = ARTIFACTS | MASK_DEFAULT | SATURATION
 
 
-def features(s: np.ndarray, flags: np.ndarray | None, x: int, y: int, bright_xy: np.ndarray | None) -> np.ndarray:
-    """Feature vector at integer peak (x, y) of S/N image s."""
+def features(s: np.ndarray, flags: np.ndarray | None, x: int, y: int, bright_xy: np.ndarray | None,
+             partner: float = 0.5) -> np.ndarray:
+    """Feature vector at integer peak (x, y) of S/N image s; `partner` is the simultaneous-pair check
+    (1 seen in the partner detector, 0 not seen, 0.5 unknown)."""
     n_y, n_x = s.shape
     peak = float(s[y, x])
 
@@ -33,7 +36,11 @@ def features(s: np.ndarray, flags: np.ndarray | None, x: int, y: int, bright_xy:
 
     b1, b2, b3 = box(1), box(2), box(3)
     pos = np.clip(np.nan_to_num(b2, nan=0.0), 0, None)
+    fin = np.isfinite(b1)
+    # masked neighbours (bright-star mask) would inflate sharpness: scale the finite ones up to all eight
     total = float(np.nansum(np.clip(b1, 0, None)))
+    if 1 < fin.sum() < b1.size:
+        total = peak + (total - peak) * (b1.size - 1) / (fin.sum() - 1)
     sharp = peak / total if total > 0 else 1.0
     if pos.sum() > 0:
         yy, xx = np.mgrid[0:pos.shape[0], 0:pos.shape[1]]
@@ -56,7 +63,7 @@ def features(s: np.ndarray, flags: np.ndarray | None, x: int, y: int, bright_xy:
     masked = float(np.mean(~np.isfinite(b2)))
     edge = float(min(x, y, n_x - 1 - x, n_y - 1 - y))
     return np.array([np.log10(max(peak, 1e-3)), sharp, round_, dipole, min(bd, 15.0), flagged, masked,
-                     min(edge, 10.0)])
+                     min(edge, 10.0), float(partner)])
 
 
 # ------------------------------------------------------------------ gradient-boosted stumps
@@ -102,9 +109,10 @@ def predict(model: dict, x: np.ndarray) -> np.ndarray:
 @lru_cache(maxsize=1)
 def load_model() -> dict | None:
     try:
-        return json.loads(MODEL_PATH.read_text())
+        model = json.loads(MODEL_PATH.read_text())
     except (OSError, ValueError):
         return None
+    return model if model.get("features") == list(FEATURES) else None  # stale model: features changed
 
 
 def score(x: np.ndarray) -> np.ndarray:
@@ -114,8 +122,9 @@ def score(x: np.ndarray) -> np.ndarray:
     if model is not None:
         return predict(model, x)
     sharp_ok = (x[:, 1] > 0.15) & (x[:, 1] < 0.6)
+    partner = x[:, 8] if x.shape[1] > 8 else np.full(len(x), 0.5)
     return _sigmoid(2.0 * (x[:, 0] - np.log10(6)) * 3 + 2.0 * sharp_ok - 3.0 * x[:, 5] - 4.0 * x[:, 6]
-                    + 0.3 * np.minimum(x[:, 4], 6) - 1.5)
+                    + 0.3 * np.minimum(x[:, 4], 6) + 1.5 * (partner - 0.5) - 1.5)
 
 
 def importance(model: dict) -> dict[str, float]:

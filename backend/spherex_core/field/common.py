@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
-from scipy.ndimage import maximum_filter
+from scipy.ndimage import label, maximum_filter
 
 from ..analysis.common import SequenceContext
 from ..bands import BANDS, NATIVE_PIXSCALE
+from ..flags import FILLED, SATURATION
 from ..pipeline import results
 from ..timeutil import mjd_to_year
 
@@ -140,3 +141,34 @@ def aperture_fluxes(stack: np.ndarray, xs, ys, r: float = AP_RADIUS,
 
 def to_mjy(flux_units: np.ndarray) -> np.ndarray:
     return np.asarray(flux_units) * MJY_PER_UNIT * AP_CORRECTION
+
+
+def saturated_regions(fd: FieldData, margin: float = 3.0, min_fraction: float = 0.2,
+                      min_pixels: int = 2) -> list[tuple[float, float, float]]:
+    """(x, y, radius) of the saturated / pipeline-filled cores of bright stars: pixels flagged in at least
+    `min_fraction` of the epoch x detector planes (isolated NONLINEAR or OVERFLOW pixels flagged once are not
+    stars), grouped into footprints of >= min_pixels; radius = equivalent circle + `margin`."""
+    planes = [(e, b) for e in range(fd.flags.shape[0]) for b in range(fd.flags.shape[1])
+              if np.isfinite(fd.coadds[e, b]).any()]
+    if not planes:
+        return []
+    count = np.zeros((fd.n, fd.n), int)
+    for e, b in planes:
+        count += (fd.flags[e, b].astype(np.int64) & (SATURATION | FILLED)) != 0
+    sat = count >= max(2, int(np.ceil(min_fraction * len(planes))))
+    lab, n = label(sat)
+    out = []
+    for k in range(1, n + 1):
+        yy, xx = np.nonzero(lab == k)
+        if len(xx) < min_pixels:
+            continue
+        out.append((float(xx.mean()), float(yy.mean()), float(np.sqrt(len(xx) / np.pi)) + margin))
+    return out
+
+
+def region_mask(n: int, regions: list[tuple[float, float, float]], scale: float = 1.0, extra: float = 0.0) -> np.ndarray:
+    yy, xx = np.mgrid[0:n, 0:n]
+    m = np.zeros((n, n), bool)
+    for x, y, r in regions:
+        m |= np.hypot(xx - x, yy - y) <= r * scale + extra
+    return m

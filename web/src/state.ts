@@ -1,6 +1,7 @@
 /** View state, its defaults and the URL that encodes it (the only place that reads or writes the URL). */
 import type { BandSel, Cmap, Stretch } from "./render";
-import type { FlagBit, Target } from "./types";
+import { DEFAULT_ARCH_BANDS, parseArchBands, type ArchBands } from "./archival";
+import type { FlagBit, MovingRequest, Target } from "./types";
 
 export type Mode = "blink" | "diff" | "stack" | "rgb" | "exp";
 export const MODES: { id: Mode; label: string; short?: string; key: string; hint: string }[] = [
@@ -42,6 +43,10 @@ export interface ViewState {
   stack: number[] | null; // null = all epochs
   view3d: View3D;
   height3d: number; // vertical exaggeration of the 3D views, 1 = default
+  longBase: boolean; // prepend 2MASS / AllWISE / NEOWISE images to the blink (Blink mode only)
+  archBands: ArchBands; // [2MASS band, WISE band] shown in the long baseline
+  arch: number; // archival frame on screen (index in the archival frames), -1 = a SPHEREx epoch
+  invert: boolean; // dark stars on a light sky
 }
 
 export const DEFAULT_VIEW: ViewState = {
@@ -62,9 +67,16 @@ export const DEFAULT_VIEW: ViewState = {
   partial: false,
   ylog: true,
   stack: null,
-  view3d: "off",
+  view3d: "off", // the viewer opens on the flat sky; links to a 3D view carry v3d=relief|time|bands
   height3d: 1,
+  longBase: false,
+  archBands: DEFAULT_ARCH_BANDS,
+  arch: -1,
+  invert: false,
 };
+
+/** An embedded viewer has no 3D controls, so it shows the flat sky unless its link asks for a 3D view. */
+export const EMBED_VIEW3D: View3D = "off";
 
 export type TargetSpec =
   | { kind: "preset"; id: string }
@@ -102,6 +114,16 @@ export function parseUrl(search = window.location.search): UrlState {
         name: q.get("name") || null,
       },
     };
+    if (q.get("obj")) {
+      const moving: MovingRequest = {
+        object_name: q.get("obj")!,
+        object_type: q.get("objtype") || null,
+        naif_id: num(q.get("naif")) ?? null,
+        obs_begin: q.get("ob") || null,
+        obs_end: q.get("oe") || null,
+      };
+      target.target.moving = moving;
+    }
   }
   const view: Partial<ViewState> = {};
   const mode = q.get("mode") as Mode | null;
@@ -130,9 +152,17 @@ export function parseUrl(search = window.location.search): UrlState {
   if (q.has("flags")) view.flagBits = (q.get("flags") || "").split(",").map(Number).filter((b) => Number.isInteger(b) && b >= 0 && b < 32);
   if (q.has("stack")) view.stack = (q.get("stack") || "").split(",").map(Number).filter((e) => Number.isInteger(e) && e >= 0);
   const v3d = q.get("v3d");
-  if (v3d && VIEWS_3D.some((x) => x.id === v3d)) view.view3d = v3d as View3D;
+  if (v3d === "off" || VIEWS_3D.some((x) => x.id === v3d)) view.view3d = v3d as View3D;
   const h3d = num(q.get("h3d"));
   if (h3d !== undefined && h3d > 0) view.height3d = Math.min(4, h3d);
+  if (q.get("lb") === "1") {
+    view.longBase = true;
+    if (!q.has("v3d")) view.view3d = "off"; // the long baseline plays on the flat sky
+  }
+  const lbb = parseArchBands(q.get("lbb"));
+  if (lbb) view.archBands = lbb;
+  setNum("arch", "arch");
+  if (q.get("inv") === "1") view.invert = true;
   return { target, fov: num(q.get("fov")) ?? null, view, embed: q.get("embed") === "1", hasParams: [...q.keys()].length > 0 };
 }
 
@@ -151,6 +181,13 @@ export function buildQuery(spec: TargetSpec | null, fov: number, view: ViewState
       q.set("ref_epoch", fmt(t.ref_epoch, 3));
     }
     if (t.name) q.set("name", t.name);
+    if (t.moving) {
+      q.set("obj", t.moving.object_name);
+      if (t.moving.object_type) q.set("objtype", t.moving.object_type);
+      if (t.moving.naif_id) q.set("naif", String(t.moving.naif_id));
+      if (t.moving.obs_begin) q.set("ob", t.moving.obs_begin);
+      if (t.moving.obs_end) q.set("oe", t.moving.obs_end);
+    }
   }
   q.set("fov", fmt(fov, 2));
   const d = DEFAULT_VIEW;
@@ -171,8 +208,14 @@ export function buildQuery(spec: TargetSpec | null, fov: number, view: ViewState
   if (view.overlays.join(",") !== d.overlays.join(",")) q.set("ov", view.overlays.join(","));
   if (view.flagBits) q.set("flags", view.flagBits.join(","));
   if (view.stack) q.set("stack", view.stack.join(","));
-  if (view.view3d !== d.view3d) q.set("v3d", view.view3d);
+  if (view.view3d !== (embed ? EMBED_VIEW3D : d.view3d)) q.set("v3d", view.view3d);
   if (view.view3d !== "off" && view.height3d !== d.height3d) q.set("h3d", fmt(view.height3d, 2));
+  if (view.invert) q.set("inv", "1");
+  if (view.longBase) {
+    q.set("lb", "1");
+    if (view.archBands.join(",") !== d.archBands.join(",")) q.set("lbb", view.archBands.join(","));
+    if (view.arch >= 0) q.set("arch", String(view.arch));
+  }
   if (embed) q.set("embed", "1");
   return q.toString();
 }

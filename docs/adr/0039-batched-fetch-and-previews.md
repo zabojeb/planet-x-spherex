@@ -32,6 +32,7 @@
 - **A preview is written in a background task,** one at a time, while reading goes on. It is dropped if the full result is already being assembled when it is ready.
 - **The job announces each preview** with a `preview:<id>` stage. `GET /api/jobs/{id}` shows the latest one as `preview`, and its `meta.json` carries `preview: {of, n, frames, total}`. With a shared bucket, each preview is published there, so that every API replica can serve it.
 - **Previews are removed** from the cache and from the bucket once the full result is written.
+- **No stored work on a preview.** Field and point analyses, known objects, Track & Stack, verification, position photometry, archival epochs and exports refuse a preview id (`analysis.common.full_context`, 404 with a message). Their results are stored with the sequence or handed out, so on a preview they would cover only some epochs and be deleted with it. The viewer shows "Available once the sequence has finished loading" in those tools, and an analysis opened on a preview starts when the full result arrives.
 
 ### Web viewer
 

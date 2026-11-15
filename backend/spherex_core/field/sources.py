@@ -13,7 +13,8 @@ import numpy as np
 from ..analysis.motion import centroid
 from ..bands import BANDS
 from ..flags import FILLED, SATURATION
-from .common import Check, FieldData, aperture_fluxes, local_peaks, no_check, snr_image, to_mjy
+from .common import (Check, FieldData, aperture_fluxes, local_peaks, no_check, saturated_regions, snr_image,
+                     to_mjy)
 
 MERGE_RADIUS = 2.0  # px
 EPOCH_EXTRA_SNR = 1.0  # single-epoch detections need this much more S/N than the deep threshold
@@ -69,7 +70,7 @@ def detect(fd: FieldData, snr_min: float = 5.0, max_sources: int = 300, check: C
             best["epochs"].add(e)
         best["snr"] = max(best["snr"], snr)
     masters.sort(key=lambda m: -m["snr"])
-    masters = _absorb(masters)[:max_sources]
+    masters = _absorb(masters, saturated_regions(fd))[:max_sources]
 
     best_band = max(deep, key=lambda b: np.isfinite(deep[b]).sum()) if deep else None
     sources = []
@@ -92,7 +93,7 @@ def detect(fd: FieldData, snr_min: float = 5.0, max_sources: int = 300, check: C
         for s, r, d in zip(sources, ra, dec):
             s["ra"], s["dec"] = float(r), float(d)
         _deep_photometry(fd, sources, deep)
-        mark_blends(sources)
+        mark_blends(sources, saturated_regions(fd))
     return sources
 
 
@@ -104,15 +105,18 @@ def _bright_radius(snr: float) -> float:
     return float(min(MERGE_RADIUS + 2.0 * np.log10(snr / BRIGHT_MERGE_SNR), 6.0))
 
 
-def _absorb(masters: list[dict]) -> list[dict]:
-    """Fold peaks that sit in the halo of a much brighter source into it (masters sorted by S/N)."""
+def _absorb(masters: list[dict], regions: list[tuple[float, float, float]] = ()) -> list[dict]:
+    """Fold peaks that sit in the halo of a much brighter source, or inside the saturated footprint of a
+    bright star, into it (masters sorted by S/N)."""
     keep: list[dict] = []
     for m in masters:
         host = None
         for k in keep:
-            if k["snr"] >= ABSORB_RATIO * m["snr"] and np.hypot(k["_x0"] - m["_x0"], k["_y0"] - m["_y0"]) <= \
-                    _bright_radius(k["snr"]):
-                host = k
+            d = np.hypot(k["_x0"] - m["_x0"], k["_y0"] - m["_y0"])
+            in_core = any(np.hypot(k["_x0"] - x, k["_y0"] - y) <= r and np.hypot(m["_x0"] - x, m["_y0"] - y) <= r + 2.0
+                          for x, y, r in regions)
+            if in_core or (k["snr"] >= ABSORB_RATIO * m["snr"] and d <= _bright_radius(k["snr"])):
+                host = k  # inside the same saturated footprint, any peak is part of the star
                 break
         if host is None:
             keep.append(m)
@@ -122,14 +126,17 @@ def _absorb(masters: list[dict]) -> list[dict]:
     return keep
 
 
-def mark_blends(sources: list[dict]) -> None:
-    """`blended_with`: a source at least BLEND_RATIO times brighter within BLEND_RADIUS (its centroids and
-    fluxes are pulled by the neighbour)."""
+def mark_blends(sources: list[dict], regions: list[tuple[float, float, float]] = ()) -> None:
+    """`blended_with`: a source at least BLEND_RATIO times brighter within BLEND_RADIUS, or a bright star whose
+    saturated footprint (plus margin) covers this source (its centroids and fluxes are pulled by it)."""
     for s in sources:
         s["blended_with"] = None
         for o in sources:
-            if o is not s and o["snr"] >= BLEND_RATIO * s["snr"] and \
-                    np.hypot(o["x"] - s["x"], o["y"] - s["y"]) <= BLEND_RADIUS:
+            if o is s or o["snr"] < BLEND_RATIO * s["snr"]:
+                continue
+            d = np.hypot(o["x"] - s["x"], o["y"] - s["y"])
+            halo = max([r + 2.0 for x, y, r in regions if np.hypot(o["x"] - x, o["y"] - y) <= r], default=0.0)
+            if d <= max(BLEND_RADIUS, halo):
                 s["blended_with"] = o["id"]
                 break
 

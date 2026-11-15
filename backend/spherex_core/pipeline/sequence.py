@@ -94,6 +94,17 @@ def warm_pool() -> None:
         pool.submit(warm_worker)
 
 
+def _write_frames(result_dir: Path, frames) -> None:
+    """Every Frame of the build next to its result (frames.json, read by analysis.common.sequence_frames), so
+    analyses of a finished sequence never search IRSA again."""
+    import json
+    from dataclasses import asdict
+
+    tmp = result_dir / "frames.json.part"
+    tmp.write_text(json.dumps({f.file_name: asdict(f) for f in frames}))
+    tmp.replace(result_dir / "frames.json")
+
+
 def reset_pool() -> None:
     """Drop the shared pool (without waiting for it); the next cpu_pool() call starts a fresh one."""
     global _POOL
@@ -462,6 +473,7 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
                                 "total": time.perf_counter() - t0}
     with logs.timed(log, "write") as info:
         await asyncio.to_thread(results.write_result, out_dir, meta, arrays)
+        await asyncio.to_thread(_write_frames, out_dir, frames)
         info["mb"] = round(sum(a.nbytes for a in arrays.values()) / 1e6, 1)
     if previewing is not None:  # a preview still being written skips writing; wait so none is left behind
         await asyncio.gather(previewing, return_exceptions=True)

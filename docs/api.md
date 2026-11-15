@@ -81,7 +81,7 @@ The response is the job:
 
 `status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
 
-`preview` is the id of the latest preview while the build runs, else `null` (ADR-0039). A preview is a complete result of the epochs read so far: the epoch the viewer opens on first, then more at 1/3 and 2/3 of the exposures. Builds of fewer than 40 exposures, or with one epoch, have none. Read it like any finished result (`GET /api/sequences/{preview}` or `/lite`, its planes and tables). Its `meta.json` has `preview: {"of": <build id>, "n": <1, 2, …>, "frames": <exposures in it>, "total": <exposures in the build>}`. Previews are deleted once the full result is written, so a client should drop a preview's data when the build finishes.
+`preview` is the id of the latest preview while the build runs, else `null` (ADR-0039). A preview is a complete result of the epochs read so far: the epoch the viewer opens on first, then more at 1/3 and 2/3 of the exposures. Builds of fewer than 40 exposures, or with one epoch, have none. Read it like any finished result (`GET /api/sequences/{preview}` or `/lite`, its planes and tables). Its `meta.json` has `preview: {"of": <build id>, "n": <1, 2, …>, "frames": <exposures in it>, "total": <exposures in the build>}`. Previews are deleted once the full result is written, so a client should drop a preview's data when the build finishes. Work that is stored with a sequence or handed out answers `404` with a message for a preview: field and point analyses, known objects, Track & Stack, verification, position photometry, archival epochs and exports. Quick reads (planes, tables, motion, periodogram, spectra) work on it.
 
 Builds go through the job queue (ADR-0033): `SPHEREX_JOBS_PER_WORKER` builds run at once per worker (default 2; `SPHEREX_MAX_JOBS` is accepted as an alias), the rest wait by priority and submission order, and a queued job reports `position` (builds that start before it). Each POST and each poll is a heartbeat keyed by `X-Client-Id`; `DELETE` withdraws the caller. A build is cancelled when every client has withdrawn, or when nobody polled it for `SPHEREX_INTEREST_TIMEOUT` seconds (default 30; alias `SPHEREX_JOB_IDLE`); a cancelled job answers 410. A build that runs longer than `SPHEREX_MAX_RUNTIME` seconds (default 900; alias `SPHEREX_JOB_TIMEOUT`) fails with an error. Limits answer 429 with `Retry-After`.
 
@@ -326,3 +326,257 @@ on a grid centred on the object at its own time (ADR-0024). Its `meta.json` adds
 `exposures[i].center` and `epochs[i].center` ([ra, dec] of that grid's centre), `target.ephemeris`, and a
 `moving` block; `target_px` and the track sit on the central pixel. Stars trail; catalog overlays and archival
 epochs do not apply.
+
+## Spectral analysis
+
+All spectral endpoints work on photometry records shaped like `meta.photometry` (`wl`, `band`, `flux_mjy`,
+`err_mjy`, `epoch`, `flagged`, `relative`). Sequence endpoints are memoised per process and sent with
+`Cache-Control: public, max-age=86400`; every payload carries `version` (the analysis version). Method:
+[methods](methods.md#spectral-analysis), ADRs 0040–0044.
+
+### `GET /api/sequences/{id}/spectrum?include_flagged=false`
+
+```json
+{
+  "sequence": "d651cb1431ed20027191", "target": "ε Indi B", "version": 1,
+  "grid": {"bins_per_detector": 17, "n_bins": 102},
+  "n_measurements": 458,
+  "bins": [{"band": "D1", "bin": 3, "wl": 0.861, "wl_lo": 0.852, "wl_hi": 0.873, "flux_mjy": 1.92,
+            "err_mjy": 0.03, "n": 5, "n_rejected": 0, "chi2": 0.8, "relative": false, "epochs": [0, 1],
+            "continuum_mjy": 2.10}],
+  "relative_bins": [ ...same shape, ring fluxes of saturated stars (relative: true)... ],
+  "epochs": [{"epoch": 0, "bins": [...], "indices": {...}}],
+  "features": [{"id": "ch4_3.3", "name": "CH₄ 3.3 µm", "species": "CH4", "kind": "absorption", "phase": "gas",
+                "center": 3.3, "band": [3.15, 3.45], "blue": null, "red": [3.85, 4.15], "depth": 0.80,
+                "depth_err": 0.003, "ew_um": 0.24, "significance": 243.4, "detected": true, "n_band": 5}],
+  "detections": [{"kind": "absorption", "wl_min": 1.33, "wl_max": 1.47, "wl_center": 1.40, "depth_max": 0.85,
+                  "ew_um": 0.11, "significance": 48.5, "n_bins": 4, "identified_as": ["h2o_1.4"]}],
+  "continuum": {"available": true, "fraction_bins_below_3sigma": 0.31, "reliable": false, "note": "..."},
+  "indices": {"ch4_3.3": {"value": 0.19, "err": 0.004, "numerator_um": [3.2, 3.4],
+                          "denominator_um": [3.9, 4.1], "description": "..."}},
+  "notes": ["..."]
+}
+```
+
+`bins` is the absolute spectrum (calibrated, unflagged points); it is empty for saturated stars, whose
+measurements are all relative (`relative_bins`, see `notes`). `features[].detected` means ≥ 3σ in the
+feature's sense (absorption below, emission above the continuum). Use `detections` only when
+`continuum.reliable` is true. Indices: `h2o_1.4`, `ch4_1.6`, `h2o_1.9`, `ch4_2.2`, `ch4_3.3`, `co_2.3`,
+`peak_4um_J`, `slope_K_4.5` (value `null` when the denominator is not detected).
+
+### `GET /api/sequences/{id}/classify?catalogs=false`
+
+```json
+{
+  "sequence": "...", "target": "...", "version": 1, "available": true,
+  "summary": {"label": "T3.0V (methane at 3.3 µm)", "family": "brown_dwarf",
+              "notes": ["Methane: CH4(3.3)/4 µm = 0.19 ...", "..."], "context_suppressed": ["h2o_ice_3.05"]},
+  "templates": {"best": {"name": "spex_T3.0", "sptype": "T3.0V", "family": "dwarf_standard",
+                         "source": "SpeX Prism standard (SPLAT)", "chi2_red": 8.6, "probability": 1.0, "n_bins": 50},
+                "ranked": [ ...top 8, same shape... ],
+                "class_probabilities": {"T": 1.0, "L": 0.0},
+                "max_wl_um": 2.45, "n_bins": 50},
+  "template_error": null,
+  "blackbody": {"teff_k": 1752, "teff_range_k": [1700, 1800], "a_k_mag": 0.0, "chi2_red": 235.7, "n_bins": 102,
+                "max_wl_um": null, "scale": 1.2e-9},
+  "blackbody_short": { ...same, fitted to ≤ 2.45 µm... },
+  "ir_index": {"alpha": -0.14, "alpha_err": 0.02, "range_um": [2.0, 5.0], "lada_class": "flat spectrum",
+               "note": "Indicative: ..."},
+  "ir_excess": {"3_3.8um": {"observed_mjy": 14.5, "predicted_mjy": 11.3, "ratio": 1.29, "significance": 3.2},
+                "3.8_5um": {"...": "..."}, "reference_fit": "blackbody to 2.45 um (...)"},
+  "model_curves": {"best_template": {"source": "spex_T3.0", "wl": [...], "flux_mjy": [... null beyond 2.45 µm]},
+                   "blackbody": {"wl": [...], "flux_mjy": [...]}},
+  "synthetic_photometry": {"J": {"coverage": 1.0, "extrapolated": false, "flux_mjy": 36.1, "mag": 12.1,
+                                 "mag_err": 0.01}, "H": {...}, "Ks": {...}, "W1": {...}, "W2": {...}},
+  "catalog_comparison": {"bands": {"J": {"synthetic": 12.1, "catalog": 11.9, "delta_mag": 0.21,
+                                         "flux_ratio": 0.82, "catalog_id": "2MASS J..."}},
+                         "matches": {"2mass": {...source + separation_arcsec...}, "catwise": {...}},
+                         "errors": null},
+  "notes": []
+}
+```
+
+`family` is one of `star`, `late_m_dwarf`, `brown_dwarf`, `composite` (star + cold methane source),
+`yso` (rising continuum with 3 µm ice), `yso_candidate` (star with a 3.8–5 µm excess), `nonstellar` (no stellar
+template fits, rising red power law: AGN/QSO or YSO) or `null`. `catalog_comparison.bands[].suspect` is true
+when synthetic and catalogue magnitudes differ by > 0.75 mag (wrong match, blend, variability, or catalogue
+photometry of a fast mover).
+Without calibrated measurements: `{"available": false, "reason": "...", "synthetic_photometry": {},
+"catalog_comparison": null, "notes": [...]}`. `catalogs=true` matches 2MASS and CatWISE within 4″ after
+proper motion (seconds; catalogue failures land in `catalog_comparison.errors`). W2 extends past 5 µm and is
+computed with a power-law extension (`extrapolated: true`, `coverage` < 1).
+
+### `GET /api/sequences/{id}/spectral-variability?reference=`
+
+```json
+{
+  "sequence": "...", "version": 1, "available": true, "reference_epoch": 1,
+  "kinds": ["relative"], "systematic": 0.03,
+  "epochs": [{"epoch": 0, "variable": true, "significant_bands": ["D2", "D3", "D5"],
+              "chi2_red_constant": 14.2,
+              "per_band": {"D5": {"ratio": 1.23, "err": 0.02, "z": 9.9, "n_bins": 17, "kind": "relative"}},
+              "ratios": [{"band": "D5", "bin": 70, "wl": 3.9, "kind": "relative", "ratio": 1.2, "err": 0.04,
+                          "z": 5.1}]}]
+}
+```
+
+Unavailable: `{"available": false, "reason": "fewer than two epochs with measurements", "epochs": [...]}`.
+
+### `POST /api/spectrum/analyze`
+
+Body: `{"photometry": [records...], "target": {"ra", "dec", "pmra", "pmdec", "ref_epoch", "name"} | null,
+"catalogs": false, "reference": null}` (records e.g. from `POST /api/sequences/{id}/photometry`). Returns
+`{"version", "spectrum": <as /spectrum without sequence/target>, "classification": <as /classify>,
+"variability": <as /spectral-variability>, "epochs": [..]}`. 422 for an empty list.
+
+### `GET /api/spectral/reference`
+
+The bin grid (`grid[]`: bin, band, wl_lo, wl_hi, wl_center), the curated `features`, the `indices`
+definitions and the template library listing (`templates[]`: name, sptype, family, source).
+
+## Automated field analysis, moving objects, Track & Stack
+
+Jobs below share one lifecycle. `POST` starts or joins the job and returns the job JSON
+`{id, status, stage, done, total, error, elapsed}` (status `queued|running|done`); poll `GET /api/field/{id}`:
+200 with the result (immutable, `ETag "<id>"`), 202 with the job while it runs (every poll is a heartbeat),
+500 if it failed, 410 if cancelled (POST again). `DELETE /api/field/{id}` withdraws this client (200 job / 204);
+a job nobody polls for 60 s is cancelled. Send `X-Client-Id`. Job ids are `<sequence>-<kind><hash>` with kind
+`f` (field analysis), `k` (known objects), `s` (stack search). 404 for an unknown or unfinished sequence.
+
+### `POST /api/sequences/{id}/field`
+
+"Analyze this field". Body (all optional): `snr_min` (5), `max_sources` (300), `catalogs`, `motion`,
+`shift_stack`, `transients`, `known_objects`, `variability`, `colours` (all true), `vmag_lim` (21), `force`.
+Result: `{id, sequence, version, created, options, target, grid, epochs[{index, year, date_min, date_max}],
+reference_year, sources[], candidates{movers, faint_movers, tracklets, pairs, variables, red, anomalies},
+stats{sources, catalogs, transients, anomaly, seconds}, realbogus{model, validation, importance}, notes[]}`.
+
+- `sources[]`: `id, x, y` (grid px), `ra, dec, snr, bands_detected, epochs_detected, flux_mjy{D1..}`,
+  `flux_err_mjy, snr_band, saturated, blended_with, matches{gaia|catwise|2mass: {id, mag, mag_band, pmra,
+  pmdec, sep_arcsec} | null}`, and when fitted `motion{pmra, pmdec, pmra_err, pmdec_err, pm_total,
+  significance, n_epochs, bands, chi2_red, supporting_bands}`, `variability{n, chi2_red, stetson_j,
+  amplitude, method}`.
+- `movers[]`: `id, source, x, y, ra, dec, category` (`known_mover|discrepant_motion|unknown_mover`),
+  `score, motion, catalog_motion{catalog, id, pmra, pmdec} | null, catalog_discrepancy_sigma, saturated,
+  track[{epoch, year, ra, dec, x, y}]`.
+- `faint_movers[]` (shift-and-stack): `id, x, y, ra, dec, snr, gain_over_static, pmra, pmdec, pm_total,
+  at_speed_limit, mover, nearest_source, score`.
+- `tracklets[]` (≥ 3 detections in one visit) and `pairs[]`: `id, epoch, n, mjd_mid, rate_arcsec_per_hr,
+  pa_deg, rms_arcsec, mean_snr, mean_rb, partner_fraction, score, detections[{exposure, mjd, band, x, y, ra,
+  dec, snr, rb, partner_seen}], known` (best identification or null), `identification[{name, kind, vmag,
+  sep_arcsec, pos_tolerance_arcsec, dpa_deg, dspeed_frac, speed_arcsec_per_hr, pa_deg,
+  o_minus_c_arcsec[{dra, ddec}], score}]`.
+- `variables[]`: `id, source, x, y, ra, dec, method` (`aperture|ring`), `n, chi2_red, stetson_j, amplitude,
+  epoch_medians[{epoch, rel, n}], period{best_period_days, power, false_alarm_probability, peaks} | null, score`.
+- `red[]`: `id, source, x, y, ra, dec, ratio_long_short, snr_long, snr_short, short_absent, no_gaia,
+  method` (`source|map`), `excess_snr` (map), `score`.
+- `anomalies[]`: `id, source, x, y, ra, dec, score` (isolation forest, 0.5 ordinary → 1),
+  `explain[{ratio, z, direction}], no_gaia`.
+
+### `POST /api/sequences/{id}/moving-objects`
+
+Moving Object Detection only (tracklets + identification). Body `{vmag_lim: 21, force: false}`; result
+shape as above with the other searches off.
+
+### `POST /api/sequences/{id}/known-objects`
+
+Known asteroids and comets seen from SPHEREx. Body `{times: "epochs" | "exposures", epoch: null, vmag_lim: 21}`.
+Result: `{sequence, times_mode, epoch, vmag_lim, observer, times[{mjd, objects[{name, kind, mjd, ra, dec, vmag,
+ra_rate, dec_rate, err_ra, err_dec, x, y, inside, speed_arcsec_per_hr, pa_deg}]}]}` (rates in ″/h).
+
+### `POST /api/sequences/{id}/trackstack/search`
+
+Synthetic tracking in one visit. Body `{epoch, rate_min: 0.3, rate_max: 10, window_hours: 48, bands: null,
+snr_min: 6}`. Result: `{sequence, epoch, window_mjd, t_ref, frames, trials, rate_range_arcsec_per_hr,
+velocity_step_arcsec_per_hr, candidates[{id, x, y, ra, dec, mjd_ref, snr, rate_arcsec_per_hr, pa_deg,
+sub_snr[3], sub_detections, score}]}` (a candidate needs S/N ≥ 3 in two of three time thirds).
+
+### `GET /api/sequences/{id}/trackstack.bin`
+
+Track & Stack of one visit, synchronous. Query: `epoch`, `rate` (″/h), `pa` (deg east of north), `combine`
+(`mean|median|sum`), `bands` (comma list), `subtract_static`, `parts` (1–3), `part`. Body: float32 LE `[n, n]`;
+headers `X-Array-Shape`, `X-Array-Dtype`, `X-Track-Tref` (MJD), `X-Track-Frames`, `X-Track-Bands`. 422 for bad
+detectors or `part ≥ parts`.
+
+### `POST /api/sequences/{id}/verify`
+
+Body `{ra, dec, mjd_ref?, rate: 0, pa: 0, epoch?, max_exposures: 40}`. Result `{sequence, input, summary{exposures,
+fitted, detected_snr3, median_snr, median_offset_arcsec, median_sigma_arcsec, median_chi2_red},
+exposures[{index, mjd, band, wl, predicted_ra, predicted_dec, fit{flux_mjy, err_mjy, snr, bkg, chi2_red, npix,
+sigma_x, sigma_y, ra, dec, sigma_arcsec, offset_arcsec} | null}], strips{half_size_px, stare[{index, pixels}],
+track[{index, pixels}]}}` (pixels: 11×11 lists, null for no data).
+
+### `GET /api/field/{id}/ades.psv`
+
+The tracklets of a finished field / moving-objects job as ADES PSV for station 288 with SPHEREx's geocentric
+position per observation (`sys` ICRF_KM, `ctr` 399), `astCat` Gaia3, note Z. Follow-up data, not a submission.
+502 if Horizons fails.
+
+Tracklet identification (ADR-0054) queries known-object positions at each tracklet's first and last detection;
+each `identification[]` candidate is `{name, kind, vmag, sep_arcsec, pos_tolerance_arcsec, dpa_deg, dspeed_frac,
+motion_ok, speed_arcsec_per_hr, pa_deg, o_minus_c_arcsec[{dra, ddec}], score}` with speed and direction from the
+displacement between the two queried positions; `stats.known_objects.positions` says so.
+
+## Point analysis ("click a point → Analyze")
+
+Every automatic analysis of one position of a finished sequence in one job (ADR-0053). Same lifecycle as field
+jobs: deduplicated per sequence and position rounded to 1e-4° (motion to 1 mas/yr); send `X-Client-Id`.
+
+### `POST /api/sequences/{id}/analyze`
+
+Body `{ra, dec, pmra?: null, pmdec?: null, ref_epoch: 2000.0, name?: null, force: false}` (deg ICRS; motion in
+mas/yr with cos dec; without a motion the analysis follows a Gaia DR3 — else SIMBAD — counterpart within 4″
+that has a motion, else a static position). Returns the job `{id, status, stage, done, total, error, elapsed}` — `id` is
+`<sequence>-p<hash>`, `status` `done` straight away when the result exists. 404 unknown or unfinished sequence,
+422 bad body.
+
+### `GET /api/analyses/{job_id}` · `DELETE /api/analyses/{job_id}`
+
+GET: 200 with the result (immutable, `ETag: "<job_id>"`), 202 with the job while it runs, 500 failed, 410
+cancelled (POST again), 404 unknown; every GET is a heartbeat. The steps run concurrently (ADR-0056): `stage` lists
+the steps running now (e.g. `"photometry, known_objects"`, then `"verdict"`), `done`/`total` count finished steps,
+and `steps` gives each step's state: `{"identification": "done", "photometry": "running", ...}` with values
+`pending | running | done | error`. DELETE withdraws this client (200 job / 204 unknown); a job nobody polls for
+60 s is cancelled. `force: true` re-runs a finished analysis.
+
+The whole analysis returns within 60 s: a step still running then becomes `{"error": "TimeoutError: not finished
+within 60 s; ..."}` (repeat later — downloads and catalogue answers are cached). Remote services use short timeouts
+and a circuit breaker: a service that just failed is reported at once as `ServiceUnavailable: <host> is
+unavailable ...` instead of being waited for again. The result's `timings` block shows
+`{total_s, steps_s: {step: seconds}, timed_out: [steps], services_unavailable: {host: {retry_in_s, error}}}`.
+
+Result (every step slot is either its object or `{"error": "<Type>: <message>"}`):
+
+```text
+{ id, sequence, version: 1,
+  request: {ra, dec, pmra, pmdec, ref_epoch, name},
+  point: {ra, dec, x, y, inside, motion_used: {pmra, pmdec, ref_epoch, source}},
+  identification: {radius_arcsec: 15, reference_year,
+                   gaia|catwise|2mass|simbad: {matches: [{id, ra, dec, epoch, pmra, pmdec, mag, mag_band,
+                                                           otype?, sptype?, parallax?, sep_arcsec, pm_total,
+                                                           track: [{epoch, ra, dec, x, y}]}],   # ≤ 3, nearest first
+                                               n_in_radius, counterpart}            # counterpart: nearest ≤ 4″
+                                    | {error}},
+  photometry: {sequence, target, photometry: [records as meta.photometry], rings, stats,
+               summary: {n, n_flagged, n_saturated, n_relative, methods: {psf|aperture|ring: n},
+                         per_band: {D1..D6: {n, n_good, median_flux_mjy}}}},
+  spectrum: {spectrum: <GET /spectrum body without sequence/version>,
+             classification: <GET /classify body without sequence/version>,
+             variability: <GET /spectral-variability body without sequence/version>},
+  motion: <GET /motion body: {start, reference_year, prior, combined, per_band, points, track}>,
+  periodogram: <POST /api/periodogram body, curve trimmed to ≤ 400 samples>,
+  colours: {long_um, short_um, long_flux_mjy, long_err_mjy, short_flux_mjy, short_err_mjy, n_long, n_short,
+            ratio, long_snr, short_snr, red_excess},
+  known_objects: {radius_arcsec: 30, observer, epochs: [{epoch, mjd, n_in_box, near: [...]}],
+                  matches: [{name, kind, vmag, sep_arcsec, ra, dec, epoch}]},
+  tracklets: {available, reason?, field_job?,
+              candidates: [{category, kind: "tracklet"|"source", id, sep_arcsec, ...}]},   # ≤ 20 within 20″
+  verdict: {novelty: 0..1, headline,
+            findings: [{kind: identity|motion|spectrum|variability|colour|solar_system|data,
+                        text, confidence: 0..1, novelty: -0.3..0.55, evidence: {...}}]} }
+```
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' \
+  -d '{"ra": 269.4462, "dec": 4.7688}' https://<host>/api/sequences/<id>/analyze
+```

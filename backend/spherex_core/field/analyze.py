@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from ..analysis.common import SequenceContext
-from . import colours, crossmatch, movers, realbogus, sources, transients, variability
+from . import colours, crossmatch, known, movers, realbogus, sources, transients, variability
 from .common import Check, load_field, no_check
 
 FIELD_VERSION = 1
@@ -33,6 +33,7 @@ class FieldOptions:
     known_objects: bool = True
     variability: bool = True
     colours: bool = True
+    vmag_lim: float = 21.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -79,11 +80,11 @@ def analyze_field(ctx: SequenceContext, opts: FieldOptions, progress: Progress |
         dets, dstats = transients.detect(fd, check)
         tracklets, pairs = transients.link(dets, fd.grid.pixscale)
         t_id = time.perf_counter()
-        ident = transients.identify(fd, tracklets + pairs) if opts.known_objects and (tracklets or pairs) else {}
+        ident = known.identify(fd, tracklets + pairs, opts.vmag_lim) if opts.known_objects else {}
         secs["known_objects"] = time.perf_counter() - t_id
-        tr = {"tracklets": tracklets, "pairs": pairs[:30], "stats": {**dstats, "identification": ident,
-                                                                      "detections_rb_over_0.5":
-                                                                          sum(d["rb"] >= 0.5 for d in dets)}}
+        tr = {"tracklets": tracklets[:100], "pairs": pairs[:30],
+              "stats": {**dstats, "tracklets": len(tracklets), "pairs": len(pairs), "identification": ident,
+                        "detections_rb_over_0.5": sum(d["rb"] >= 0.5 for d in dets)}}
         secs["transients"] = time.perf_counter() - t
 
     var_c: list[dict] = []
@@ -95,7 +96,8 @@ def analyze_field(ctx: SequenceContext, opts: FieldOptions, progress: Progress |
     red_c, anom_c, anom_info = [], [], {}
     if opts.colours:
         t = step(6, "colours")
-        red_c = colours.red_excess(srcs)
+        red_c = colours.merge_red(colours.red_excess(srcs),
+                                  colours.red_excess_map(fd, sources.deep_images(fd), srcs))
         anom_c, anom_info = colours.anomalies(srcs)
         secs["colours"] = time.perf_counter() - t
     report("done", len(STEPS), len(STEPS))

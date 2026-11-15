@@ -1,26 +1,36 @@
 /** Top-level wiring: target + field of view -> server build -> derived images -> stage, controls, panels and charts. */
 import { ExternalLink } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, cachedTable, ensurePlanes, exportUrl, fetchCatalog, fetchExposures, fetchTable, getTargets, loadSequence, loadObjectIndex, measureSource, prefetchSequence, type Progress } from "./api";
-import { formatDate, formatRange, mjdToYear, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import {
+  AmbiguousObject, ApiError, cachedArchivalFrame, cachedTable, ensurePlanes, exportUrl, fetchArchivalFrame, fetchCatalog, fetchExposures, fetchTable, getTargets,
+  loadArchival, loadObjectIndex, loadSequence, measureSource, movingRequest, prefetchSequence, searchMoving, type Progress,
+} from "./api";
+import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames, stretchGroup } from "./archival";
+import { ArchivalStrip, LongBaselineControls } from "./components/LongBaseline";
+import { MovingCard, type MovingState } from "./components/Moving";
+import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
+import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
+import type { VerifySubject } from "./components/chart/VerifyPanel";
+import { formatDate, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
-import type { Layer, TrackPoint3D } from "./components/Sky3D";
+import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
+import { CoordField } from "./components/CoordField";
 import { Drawer, type DrawerTab } from "./components/Drawer";
 import { GoToPanel, rememberPlace, type Place } from "./components/GoTo";
 import { ObjectsPanel } from "./components/Objects";
 import { PickCard } from "./components/PickCard";
 import { Rail } from "./components/Rail";
-import { SkyView, selectionWorld, valueAt, type Selection, type StepDir } from "./components/SkyView";
+import { HIGH_PM, SkyView, catalogMarkers, markerTip, selectionWorld, sourceKey, valueAt, type Selection, type StepDir } from "./components/SkyView";
 import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
-import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, type Display, type ExposureView } from "./display";
-import { safeStorage, useMediaQuery } from "./hooks";
-import { Derived, type BandSel } from "./render";
+import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
+import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
+import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
-import { DEFAULT_VIEW, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
-import type { CatalogSource, ExposureStack, Meta, Photometry, SequenceData, Target } from "./types";
+import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
+import type { ArchivalMeta, CatalogSource, ExposureStack, Meta, MovingChoice, Photometry, SequenceData, Target } from "./types";
 
 // three.js is a separate chunk, fetched the first time a 3D view opens.
 const Sky3D = lazy(() => import("./components/Sky3D"));
@@ -35,6 +45,7 @@ interface StageHud {
 }
 
 const INTRO_KEY = "spherex-intro-dismissed";
+const xy = ([x, y]: [number, number]) => ({ x, y });
 
 /** Default detector from the data: a single band only when the target is detected in just a few detectors. */
 function bestBand(meta: Meta): BandSel {
@@ -63,6 +74,7 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
     const hinted = MODES.find((m) => m.id === target?.default_mode);
     if (hinted) mode = hinted.id;
   }
+  if (keep && fromUrl.longBase) mode = "blink"; // a long-baseline link plays in Blink
   if (band !== "all" && !d.playable(band).length) band = "all";
   const playable = d.playable(band);
   const full = playable.filter((e) => !data.meta.epochs[e]?.partial);
@@ -70,7 +82,7 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
   const start = mode === "diff" ? full[full.length - 1] : full[0];
   const keepEpoch = keep && fromUrl.epoch !== undefined && playable.includes(v.epoch);
   const epoch = keepEpoch ? v.epoch : start ?? playable[0] ?? 0;
-  return { ...v, band, mode, epoch, ref: keep ? v.ref : -1, stack: keep ? v.stack : null };
+  return { ...v, band, mode, epoch, ref: keep ? v.ref : -1, stack: keep ? v.stack : null, arch: keep ? v.arch : -1 };
 }
 
 /** The same view on a newer result of the same build (a preview growing into the full result). A preview has
@@ -101,8 +113,11 @@ const gridOf = (m: Meta) => `${m.grid.ra}|${m.grid.dec}|${m.grid.n}|${m.grid.pix
 
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
-const MOBILE_FRAME = { top: 108, bottom: 330 };
-const MID_FRAME = { top: 108, bottom: 264 };
+const MOBILE_FRAME = { top: 108, bottom: 290 };
+const MID_FRAME = { top: 160, bottom: 264 }; // top: below the coordinate box
+
+/** Shown where a tool waits for the full result of a build still running (a preview is on screen). */
+const WAIT_FULL = "Available once the sequence has finished loading";
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
@@ -113,13 +128,40 @@ export default function App() {
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
   const [fovOverride, setFovOverride] = useState<number | null>(initial.fov);
-  const [view, setView] = useState<ViewState>({ ...DEFAULT_VIEW, ...initial.view });
+  const [view, setView] = useState<ViewState>({ ...DEFAULT_VIEW, ...(embed ? { view3d: EMBED_VIEW3D } : null), ...initial.view });
   const [seq, setSeq] = useState<SequenceData | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
+  // The landing index sits above the HUD (epoch, target, coordinates), whose height depends on the width
+  // and the mode: track the HUD's top and expose the clearance as --hud-clear for the .hero rule.
+  const [hudClear, setHudClear] = useState(0);
+  useEffect(() => {
+    if (!hero) return;
+    let hud: Element | null = null;
+    const measure = () => {
+      const el = document.querySelector(".hud-min");
+      if (el !== hud) {
+        if (hud) ro.unobserve(hud);
+        hud = el;
+        if (hud) ro.observe(hud);
+      }
+      const r = hud?.getBoundingClientRect();
+      setHudClear(r && r.height ? Math.ceil(window.innerHeight - r.top) : 0);
+    };
+    const ro = new ResizeObserver(measure);
+    const mo = new MutationObserver(measure); // the HUD mounts once the first sequence is in
+    mo.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [hero]);
   const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
   const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
@@ -137,13 +179,18 @@ export default function App() {
   // Grid whose first frame is on screen: catalogues and other extras wait for it, so the image comes first.
   const [frameReady, setFrameReady] = useState("");
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  const fullscreen = useFullscreen();
   const [planesTick, setPlanesTick] = useState(0);
   const [planesBusy, setPlanesBusy] = useState(false);
   const [tablesTick, setTablesTick] = useState(0);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [source, setSource] = useState<{ key: string; label: string; photometry: Photometry[] } | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisSubject | null>(null);
+  const [verify, setVerify] = useState<VerifySubject | null>(null);
+  const [ruler, setRuler] = useState(false);
+  const [magnifier, setMagnifier] = useState(false);
   const [spin, setSpin] = useState(false);
-  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "relief");
+  const last3d = useRef<Exclude<View3D, "off">>(initial.view.view3d && initial.view.view3d !== "off" ? initial.view.view3d : "time");
   const [sel, setSel] = useState<Selection | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
@@ -190,6 +237,8 @@ export default function App() {
         setCatalogStatus({});
         setExp({ key: "", stack: null, error: null });
         setSource(null);
+        setAnalysis(null);
+        setVerify(null);
         setTablesError(null);
       }
       const keep = keepView.current; // read now: the updater below runs later
@@ -207,7 +256,7 @@ export default function App() {
       setShownPlace(place);
     };
     loadSequence(
-      { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null, fov_arcmin: fov },
+      { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null, fov_arcmin: fov, ...(target.moving ?? {}) },
       setProgress,
       ctrl.signal,
       adopt,
@@ -224,15 +273,20 @@ export default function App() {
       });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target?.ra, target?.dec, target?.pmra, target?.pmdec, target?.ref_epoch, fov, reloadKey]);
+  }, [target?.ra, target?.dec, target?.pmra, target?.pmdec, target?.ref_epoch, target?.moving?.object_name, target?.moving?.naif_id, fov, reloadKey]);
 
   const derived = useMemo(() => (seq ? new Derived(seq) : null), [seq]);
   const meta = seq?.meta ?? null;
+  /** Co-moving with a solar-system object: stars trail, catalogues and archival images do not apply. */
+  const comoving = meta?.grid.frame === "comoving";
+  /** A preview of a build still running is on screen (ADR-0039). Analyses, measurements, archival epochs and
+   *  exports wait for the full result: on a preview they would see only some epochs, and the server deletes it. */
+  const building = !!meta?.preview;
   useEffect(() => {
     setSel(null);
     setHoverKey(null);
   }, [meta ? gridOf(meta) : ""]); // eslint-disable-line react-hooks/exhaustive-deps -- a preview's full result keeps the selection
-  const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
+  const playable = useMemo(() => (derived ? playableEpochs(derived, view) : []), [derived, view.mode, view.band, view.ref, view.ends, view.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   const refEpoch = derived ? effectiveRef(derived, view) : -1;
 
   // ---- single exposures (Exposures mode)
@@ -309,7 +363,9 @@ export default function App() {
 
   // ---- per-exposure tables (columns), only when something on screen needs them
   const wantExposures = !!seq && (view.mode === "exp" || drawer === "details");
-  const wantPhotometry = !!seq && !!drawer && drawer !== "periodogram";
+  // The spectrum tab uses the server's spectral analysis; it needs the raw table only on an older server.
+  const [legacySpectrum, setLegacySpectrum] = useState(false);
+  const wantPhotometry = !!seq && !!drawer && drawer !== "periodogram" && (drawer !== "spectrum" || legacySpectrum);
   const exposures = meta ? cachedTable(meta.id, "exposures") : undefined;
   const photometry = meta ? cachedTable(meta.id, "photometry") : undefined;
   useEffect(() => {
@@ -330,6 +386,80 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [meta, exposures, photometry, tablesTick],
   );
+
+  // ---- long baseline: 2MASS / AllWISE / NEOWISE frames before the SPHEREx epochs (Blink, flat view)
+  const archFov = useMemo(() => (meta ? archivalFov(target ?? meta.target, meta.grid.fov_arcmin) : null), [meta?.id, target?.pmra, target?.pmdec]); // eslint-disable-line react-hooks/exhaustive-deps
+  const archKey = view.longBase && meta && !comoving && !building && !embed ? `${meta.id}|${archFov ?? ""}` : "";
+  const [archival, setArchival] = useState<{ key: string; meta: ArchivalMeta | null; error: string | null; progress: Progress | null }>({ key: "", meta: null, error: null, progress: null });
+  useEffect(() => {
+    if (!archKey || !meta) return;
+    const ctrl = new AbortController();
+    setArchival({ key: archKey, meta: null, error: null, progress: { stage: "queued", done: 0, total: 0, elapsed: 0 } });
+    loadArchival(meta.id, archFov, (pr) => setArchival((a) => (a.key === archKey ? { ...a, progress: pr } : a)), ctrl.signal)
+      .then((m) => setArchival({ key: archKey, meta: m, error: null, progress: null }))
+      .catch((e) => !ctrl.signal.aborted && setArchival({ key: archKey, meta: null, error: String(e?.message || e), progress: null }));
+    return () => ctrl.abort();
+  }, [archKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const arch = archival.key === archKey && archKey ? archival : null;
+  const archFrames = useMemo(() => (arch?.meta ? selectFrames(arch.meta.frames, view.archBands) : []), [arch?.meta, view.archBands.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lbActive = !!arch?.meta && view.mode === "blink" && !is3d;
+  const curArch = lbActive && view.arch >= 0 ? archFrames.find((f) => f.index === view.arch) ?? null : null;
+  const [archTick, setArchTick] = useState(0);
+  useEffect(() => {
+    if (!lbActive || !meta) return;
+    const ctrl = new AbortController();
+    const order = curArch ? [curArch, ...archFrames.filter((f) => f !== curArch)] : archFrames;
+    (async () => {
+      for (const f of order) {
+        if (ctrl.signal.aborted) return;
+        if (cachedArchivalFrame(meta.id, archFov, f.index)) continue;
+        await fetchArchivalFrame(meta.id, archFov, f.index, ctrl.signal).then(() => setArchTick((t) => t + 1), () => undefined);
+      }
+    })();
+    return () => ctrl.abort();
+  }, [lbActive, archFrames, curArch?.index]); // eslint-disable-line react-hooks/exhaustive-deps
+  const archLimits = useRef(new Map<string, [number, number]>());
+  const archDisplay: Display | null = useMemo(() => {
+    if (!curArch || !meta) return null;
+    const img = cachedArchivalFrame(meta.id, archFov, curArch.index);
+    if (!img) return null;
+    const group = archFrames.filter((f) => stretchGroup(f) === stretchGroup(curArch)).map((f) => cachedArchivalFrame(meta.id, archFov, f.index)).filter((a): a is Float32Array => !!a);
+    const key = `${meta.id}|${archFov}|${stretchGroup(curArch)}|${group.length}|${view.lo}|${view.hi}`;
+    let lim = archLimits.current.get(key);
+    if (!lim) {
+      const [a, b] = percentiles(group, [view.lo, view.hi]);
+      lim = [a, b > a ? b : a + 1e-6];
+      archLimits.current.set(key, lim);
+    }
+    return { kind: "scalar", img, lo: lim[0], hi: lim[1], unit: "MJy/sr" };
+  }, [curArch, archTick, view.lo, view.hi]); // eslint-disable-line react-hooks/exhaustive-deps
+  const archOff = lbActive && arch?.meta && meta ? gridOffset(arch.meta.grid, meta.grid) : 0;
+  // SPHEREx frames embedded in the (wider) archival grid.
+  const sxDisplay = useMemo((): Display | null => {
+    if (!lbActive || !display || !arch?.meta || !meta) return display;
+    const N = arch.meta.grid.n;
+    if (display.kind === "scalar") return { ...display, img: embedPlane(display.img, meta.grid.n, N, archOff) };
+    if (display.kind === "diverging") return { ...display, img: embedPlane(display.img, meta.grid.n, N, archOff) };
+    return display;
+  }, [lbActive, display, arch?.meta, archOff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastSky = useRef<Display | null>(null);
+  const skyDisplay = lbActive ? (curArch ? archDisplay ?? lastSky.current : sxDisplay) : display;
+  if (lbActive && skyDisplay) lastSky.current = skyDisplay;
+  /** One timeline for playback: archival frames, then the playable SPHEREx epochs. */
+  const sequenceItems: ({ a: number } | { e: number })[] = lbActive ? [...archFrames.map((f) => ({ a: f.index })), ...playable.map((e) => ({ e }))] : [];
+  const seqPos = lbActive ? (curArch ? archFrames.indexOf(curArch) : archFrames.length + Math.max(0, playable.indexOf(view.epoch))) : -1;
+  const goItem = (it: { a: number } | { e: number }) => ("a" in it ? set({ arch: it.a }) : set({ arch: -1, epoch: it.e }));
+  const archStatus = (() => {
+    if (!view.longBase) return null;
+    if (arch?.error) return null;
+    const pr = arch?.progress;
+    if (pr) return pr.stage === "fetch" && pr.total ? `Building: ${pr.done}/${pr.total} survey images` : pr.stage === "search" ? "Searching 2MASS, AllWISE and NEOWISE" : "Queued on the server";
+    if (arch?.meta) return view.mode !== "blink" ? "Plays in Blink mode" : `${archFrames.length} frames in ${view.archBands.join(" / ")} · ${arch.meta.grid.fov_arcmin.toFixed(1)}′ field`;
+    return null;
+  })();
+
+  // ---- field tools: candidates, known objects, Track & Stack (their marks and stacked image go on the sky)
+  const ft = useFieldTools(building ? null : meta, view.epoch);
 
   // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
   const slices = useMemo(
@@ -374,7 +504,7 @@ export default function App() {
     return () => catalogCtrl.current?.abort();
   }, [gridKey]);
   useEffect(() => {
-    if (!meta || frameReady !== gridKey) return;
+    if (!meta || comoving || frameReady !== gridKey) return;
     for (const cat of wanted) {
       if (catalogStatus[cat]) continue;
       const key = gridKey;
@@ -400,23 +530,28 @@ export default function App() {
   useEffect(() => {
     if (!playing || !derived) return;
     const t = window.setInterval(() => {
-      if (view.mode === "exp") {
+      if (sequenceItems.length > 1) {
+        goItem(sequenceItems[(seqPos + 1) % sequenceItems.length]);
+      } else if (view.mode === "exp") {
         if (nExp > 1) setExpIndex((i) => (i + 1) % nExp);
       } else if (view.mode !== "stack" && playable.length > 1) {
-        setView((v) => ({ ...v, epoch: playable[(playable.indexOf(v.epoch) + 1) % playable.length] }));
+        setView((v) => ({ ...v, epoch: stepEpoch(playable, v.epoch, 1) ?? v.epoch }));
       }
     }, view.speed);
     return () => window.clearInterval(t);
-  }, [playing, derived, view.mode, view.speed, playable, nExp]);
+  }, [playing, derived, view.mode, view.speed, playable, nExp, sequenceItems.length, seqPos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const step = (dir: 1 | -1) => {
+    if (sequenceItems.length > 1) {
+      goItem(sequenceItems[(seqPos + dir + sequenceItems.length) % sequenceItems.length]);
+      return;
+    }
     if (view.mode === "exp") {
       if (nExp) setExpIndex((i) => (i + dir + nExp) % nExp);
       return;
     }
-    if (!playable.length) return;
-    const i = Math.max(0, playable.indexOf(view.epoch));
-    set({ epoch: playable[(i + dir + playable.length) % playable.length] });
+    const e = stepEpoch(playable, view.epoch, dir);
+    if (e !== undefined) set({ epoch: e });
   };
 
   useEffect(() => {
@@ -447,6 +582,7 @@ export default function App() {
       } else if (e.key === "0") set({ band: "all" });
       else if (e.key.toLowerCase() === "v") toggle3d();
       else if (e.key.toLowerCase() === "g") toggleOverlay("grid");
+      else if (e.key.toLowerCase() === "f") fullscreen.toggle();
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -465,7 +601,8 @@ export default function App() {
   // ---- actions
   const resetForNewTarget = () => {
     keepView.current = false;
-    setView((v) => ({ ...v, epoch: 0, ref: -1, stack: null, mode: v.mode === "exp" ? "blink" : v.mode }));
+    // The long baseline is a heavy server build: it is never carried over to a new target.
+    setView((v) => ({ ...v, epoch: 0, ref: -1, stack: null, mode: v.mode === "exp" ? "blink" : v.mode, longBase: false, arch: -1 }));
     setPlaying(true);
     setHero(false);
   };
@@ -483,6 +620,35 @@ export default function App() {
       resetForNewTarget();
     }
     if (recent) setRecents(saveRecent(recent));
+  };
+  /** A comet or asteroid: find it in SPHEREx exposures (IRSA MOST, polled), then build a co-moving sequence. */
+  const [moving, setMoving] = useState<MovingState | null>(null);
+  const movingCtrl = useRef<AbortController | null>(null);
+  const findMoving = (q: { name?: string; naif_id?: number }, label: string) => {
+    movingCtrl.current?.abort();
+    const ctrl = new AbortController();
+    movingCtrl.current = ctrl;
+    setHero(false);
+    setMoving({ state: "search", query: label, progress: null });
+    searchMoving(q, (pr) => !ctrl.signal.aborted && setMoving((m) => (m?.state === "search" ? { ...m, progress: pr } : m)), ctrl.signal)
+      .then((res) => {
+        if (ctrl.signal.aborted) return;
+        const { target: t } = movingRequest(res);
+        setMoving(null);
+        setSpec({ kind: "coords", target: t });
+        setFovOverride(null);
+        resetForNewTarget();
+        setRecents(saveRecent({ label: t.name ?? label, sub: `Solar system · co-moving · ${res.n_exposures} exposures`, pick: { kind: "target", target: t } }));
+      })
+      .catch((e) => {
+        if (ctrl.signal.aborted) return;
+        if (e instanceof AmbiguousObject) setMoving({ state: "choices", query: label, message: e.message, choices: e.choices });
+        else setMoving({ state: "error", query: label, message: String(e?.message || e) });
+      });
+  };
+  const closeMoving = () => {
+    movingCtrl.current?.abort();
+    setMoving(null);
   };
   const lastRandom = useRef<string | undefined>(undefined);
   /** Random: an object (of a kind, or weighted over kinds) or, for "field" and a quarter of plain clicks, a patch of sky. */
@@ -526,6 +692,7 @@ export default function App() {
   /** Forced photometry of a catalogue source or a pinned position; its curves replace the target's in the drawer. */
   const measureAt = async (key: string, label: string, pos: { ra: number; dec: number; pmra: number; pmdec: number; ref_epoch: number }) => {
     if (!meta) return;
+    if (building) throw new Error(WAIT_FULL);
     const res = await measureSource(meta.id, { ...pos, name: label }).catch((e) => {
       throw e instanceof ApiError && (e.status === 404 || e.status === 405) ? new Error("Source photometry is not available on this server yet.") : e;
     });
@@ -542,6 +709,53 @@ export default function App() {
     if (s.kind === "point") return measureAt(`pt:${s.ra.toFixed(6)},${s.dec.toFixed(6)}`, `${s.ra.toFixed(5)} ${s.dec >= 0 ? "+" : ""}${s.dec.toFixed(5)}`, { ra: s.ra, dec: s.dec, pmra: 0, pmdec: 0, ref_epoch: 2000 });
     return Promise.resolve();
   };
+  /** Open the automatic analysis of a selection in the drawer. */
+  const analyzeSelection = (s: Selection, world: [number, number] | null) => {
+    if (!world) return;
+    let subject: AnalysisSubject;
+    if (s.kind === "target" && target) subject = { key: `target:${meta?.id}`, label: target.name ?? "Target", pos: { ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, name: target.name ?? null } };
+    else if (s.kind === "source") subject = { key: `${s.cat}:${s.src.id}`, label: String(s.src.id), pos: { ra: s.src.ra, dec: s.src.dec, pmra: s.src.pmra ?? 0, pmdec: s.src.pmdec ?? 0, ref_epoch: s.src.epoch, name: String(s.src.id) } };
+    else subject = { key: `pt:${world[0].toFixed(6)},${world[1].toFixed(6)}`, label: `${world[0].toFixed(5)} ${world[1] >= 0 ? "+" : ""}${world[1].toFixed(5)}`, pos: { ra: world[0], dec: world[1] } };
+    setAnalysis(subject);
+    setSel(null);
+    setHero(false);
+    setDrawer("analysis");
+  };
+  /** Per-exposure fits at a selection; a field candidate brings its trial motion along. */
+  const verifySelection = (world: [number, number] | null, label: string) => {
+    if (!world) return;
+    const c = ft.cands.find((x) => x.key === ft.active);
+    const near = c && Math.abs(c.ra - world[0]) < 1e-4 && Math.abs(c.dec - world[1]) < 1e-4 ? c : null;
+    setVerify({ key: `v:${world[0].toFixed(6)},${world[1].toFixed(6)}:${near?.rate ?? 0}`, label: near ? `${near.title}` : label, ra: world[0], dec: world[1], rate: near?.rate, pa: near?.pa, epoch: near?.epoch, mjd_ref: near?.mjd });
+    setSel(null);
+    setDrawer("verify");
+  };
+  /** A candidate from the field list or a mark on the sky: select it there and fly to it. */
+  const pickCandidate = (c: Candidate) => {
+    ft.setActive(c.key);
+    if (is3d) set({ view3d: "off" });
+    if (c.epoch != null && c.epoch !== view.epoch) set({ epoch: c.epoch });
+    setSel({ kind: "point", ra: c.ra, dec: c.dec });
+    setFocus({ ra: c.ra, dec: c.dec, key: Date.now() });
+    setHero(false);
+  };
+  const onMark = (key: string) => {
+    const c = ft.cands.find((x) => x.key === key);
+    if (c) return pickCandidate(c);
+    if (key.startsWith("s:") && ft.search.state === "done") {
+      const t = ft.search.result.candidates.find((x) => `s:${x.id}` === key);
+      if (t) {
+        ft.setStack({ ...ft.stack, rate: t.rate_arcsec_per_hr, pa: t.pa_deg });
+        setSel({ kind: "point", ra: t.ra, dec: t.dec });
+      }
+      return;
+    }
+    const m = ft.marks.find((x) => x.key === key);
+    if (m && meta) {
+      const [ra, dec] = pixelToWorld(meta.grid, m.x, m.y);
+      setSel({ kind: "point", ra, dec });
+    }
+  };
   const dismissHero = () => {
     setHero(false);
     safeStorage(INTRO_KEY, "1");
@@ -551,6 +765,7 @@ export default function App() {
   const epochInfo = meta?.epochs[view.epoch];
   const exposureRows = fullMeta?.exposures ?? [];
   const year = (() => {
+    if (curArch) return curArch.epoch_year;
     if (meta && view.mode === "exp" && expStack?.indices.length) {
       const ex = exposureRows[expStack.indices[Math.min(expIndex, expStack.indices.length - 1)]];
       if (ex) return mjdToYear(ex.mjd);
@@ -559,9 +774,15 @@ export default function App() {
   })();
   const span: [number, number] | null =
     meta && meta.epochs.length > 1 ? [mjdToYear(meta.epochs[0].mjd_mean), mjdToYear(meta.epochs[meta.epochs.length - 1].mjd_mean)] : null;
-  const track: [number, number][] = meta ? meta.target.track.map((t) => [t.x, t.y]) : [];
+  // In the long baseline the track runs from the archival positions (where the target is in the field) on.
+  const archInField = lbActive ? archFrames.filter((f) => f.target_in_field && f.target_px) : [];
+  const sxTrack: [number, number][] = meta ? meta.target.track.map((t) => [t.x + archOff, t.y + archOff]) : [];
+  const track: [number, number][] = lbActive ? [...archInField.map((f) => f.target_px as [number, number]), ...sxTrack] : sxTrack;
+  const trackIndex = curArch ? archInField.indexOf(curArch) : archInField.length + view.epoch;
   const trackPoint = meta ? meta.target.track.find((t) => t.epoch === view.epoch) ?? meta.target.track[0] : undefined;
-  let targetPx: [number, number] | null = trackPoint ? [trackPoint.x, trackPoint.y] : null;
+  let targetPx: [number, number] | null = curArch
+    ? curArch.target_in_field ? curArch.target_px : null
+    : trackPoint ? [trackPoint.x + archOff, trackPoint.y + archOff] : null;
   const pad2 = (k: number) => String(k).padStart(2, "0");
   let hud: StageHud | null = null;
   if (meta && derived && epochInfo) {
@@ -577,7 +798,7 @@ export default function App() {
       const i = Math.min(expIndex, expStack.indices.length - 1);
       const ex = exposureRows[expStack.indices[i]];
       hud = { epoch: `Exposure ${pad2(i + 1)} / ${pad2(expStack.indices.length)}`, dates: `${formatDate(ex.mjd, true)} UTC`, spectral: `${ex.band} · λ ${ex.wl.toFixed(3)} µm`, frames: `Epoch ${pad2(view.epoch + 1)}`, target: at(ex.mjd) };
-      targetPx = ex.target_px;
+      targetPx = [ex.target_px[0] + archOff, ex.target_px[1] + archOff];
     } else {
       hud = {
         epoch: `Epoch ${pad2(view.epoch + 1)} / ${pad2(meta.epochs.length)}${isPartial(derived, view.epoch) ? " · partial" : ""}`,
@@ -588,12 +809,24 @@ export default function App() {
       };
       if (view.mode === "diff" && !(refEpoch === view.epoch && playable.length < 2)) hud.extra = `minus epoch ${pad2(refEpoch + 1)} · ${formatDate(meta.epochs[refEpoch]?.mjd_mean ?? 0).slice(0, 7)}`;
     }
+    if (curArch) {
+      const at0 = propagate({ ra: meta.target.ra, dec: meta.target.dec, epoch: meta.target.ref_epoch, pmra: meta.target.pmra, pmdec: meta.target.pmdec }, curArch.epoch_year);
+      hud = {
+        epoch: frameLabel(curArch),
+        dates: `${curArch.date.slice(0, 10)}${curArch.n_images > 1 ? ` · ${curArch.n_images} images` : ""}`,
+        spectral: `${curArch.survey} ${curArch.band} · λ ${curArch.wl_um.toFixed(2)} µm`,
+        frames: curArch.target_in_field ? "target in field" : "target outside the field",
+        target: at0,
+      };
+    }
+    if (comoving) hud.extra = hud.extra ? `${hud.extra} · co-moving: stars trail` : "co-moving: stars trail";
+    if (ft.stackDisplay && !lbActive) hud.extra = `Track & Stack ${ft.stack.rate.toFixed(2)}″/h PA ${ft.stack.pa.toFixed(0)}°`;
   }
   const flagBits = meta ? view.flagBits ?? defaultFlagBits(meta.flag_bits) : [];
   const flagMask = flagBits.reduce((m, b) => m | (1 << b), 0);
-  const flags = derived && view.overlays.includes("flags") ? derived.flagsOr(view.epoch, view.mode === "rgb" ? "rgb" : view.band) : null;
+  const flags = derived && view.overlays.includes("flags") && !lbActive ? derived.flagsOr(view.epoch, view.mode === "rgb" ? "rgb" : view.band) : null;
   const overlays = useMemo(() => new Set(view.overlays), [view.overlays]);
-  const canPlay = view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1;
+  const canPlay = sequenceItems.length > 1 || (view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1);
   // While a build runs: is what is on screen of the place being loaded (a preview, or the same place at another
   // field size)? Then it stays bright and only the chip at the edge shows the progress.
   const onPlace = !!target && shownPlace === placeOf(target);
@@ -607,6 +840,15 @@ export default function App() {
     setDrawer((d) => (d ? null : tab));
   };
   const setFlagsOn = (on: boolean) => set({ overlays: on ? [...view.overlays.filter((o) => o !== "flags"), "flags"] : view.overlays.filter((o) => o !== "flags") });
+
+  // The field centre for the coordinate box: a fixed position as requested (so it shows at once while the field
+  // builds), a moving target's field once built (centred where the target was during the observations).
+  const fieldCentre: [number, number] | null =
+    target && (target.pmra || target.pmdec) && meta && meta.target.ra === target.ra && meta.target.dec === target.dec
+      ? [meta.grid.ra, meta.grid.dec]
+      : target
+        ? [target.ra, target.dec]
+        : null;
 
   // ---- the selected object, target or pin, and its card
   const targetWorld = hud?.target ?? null;
@@ -652,6 +894,8 @@ export default function App() {
           setDrawer("spectrum");
         }}
         onMeasure={sel.kind !== "target" ? () => measureSelection(sel) : undefined}
+        onAnalyze={() => analyzeSelection(sel, selWorld)}
+        onVerify={sel.kind !== "target" ? () => verifySelection(selWorld, sel.kind === "source" ? String(sel.src.id) : "Pinned position") : undefined}
         onCentre={sel.kind !== "target" && selWorld ? () => goTo({ name: sel.kind === "source" ? String(sel.src.id) : null, ra: selWorld[0], dec: selWorld[1], pmra: 0, pmdec: 0, ref_epoch: 2000 }) : undefined}
         onFollow={
           sel.kind === "source" && totalPm(sel.src) >= 20
@@ -661,6 +905,43 @@ export default function App() {
       />
     ) : null;
 
+
+  // Catalogue sources for the 3D views, at the shown date; in the time cube fast movers also get their
+  // position at every layer, so their path through the cube can be drawn beside the stars' columns.
+  const objects3d: Object3D[] = useMemo(() => {
+    if (!is3d || !meta) return [];
+    const g = meta.grid;
+    const at: { year: number; z: number }[] = [];
+    if (expCube && expRows.length > 1) {
+      const t0 = expRows[0].mjd;
+      const dt = expRows[expRows.length - 1].mjd - t0;
+      for (const ex of expRows) at.push({ year: mjdToYear(ex.mjd), z: dt > 0 ? (ex.mjd - t0) / dt : 0.5 });
+    } else if (view.view3d === "time" && !expCube) for (const s of slices) at.push({ year: mjdToYear(meta.epochs[s.view.epoch].mjd_mean), z: s.z });
+    return catalogMarkers(g, catalogs, overlays, year, null).map((m) => {
+      const tip = markerTip(m.cat, m.src);
+      return {
+        key: sourceKey(m.cat, m.src),
+        cat: m.cat,
+        name: tip.name,
+        sub: tip.sub,
+        x: m.x,
+        y: m.y,
+        big: m.pm > HIGH_PM,
+        label: m.cat === "simbad",
+        rank: Number(m.src.refs ?? 0),
+        path: m.pm > HIGH_PM && at.length > 1 ? at.map((a) => ({ ...xy(worldToPixel(g, ...propagate(m.src, a.year))), z: a.z })) : undefined,
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [is3d, meta, catalogs, overlays, year, view.view3d, expCube, expRows, slices]);
+  /** Open a catalogue source on the flat sky, where its card and the fly-to live. */
+  const openSource = (cat: string, src: CatalogSource) => {
+    const [ra, dec] = propagate(src, year);
+    if (is3d) set({ view3d: "off" });
+    setSel({ kind: "source", cat, src });
+    setFocus({ ra, dec, key: Date.now() });
+    setHero(false);
+  };
 
   const zOf = new Map(slices.map((s) => [s.view.epoch, s.z]));
   const track3d: TrackPoint3D[] = !meta
@@ -707,6 +988,8 @@ export default function App() {
         showTarget={overlays.has("target")}
         showTrack={overlays.has("track")}
         showCompass={overlays.has("compass")}
+        objects={objects3d}
+        highlight={hoverKey}
         axisLabel={view.view3d === "time" ? "time" : "λ"}
         dateLabel={label3d.date}
         subLabel={label3d.sub}
@@ -723,14 +1006,20 @@ export default function App() {
           if (view.view3d === "time") set({ epoch: s.view.epoch });
           else set({ band: s.view.band });
         }}
+        onPickObject={(key) => {
+          for (const cat of CATALOG_IDS) {
+            const src = view.overlays.includes(cat) ? catalogs[cat]?.find((s) => sourceKey(cat, s) === key) : undefined;
+            if (src) return openSource(cat, src);
+          }
+        }}
         onInteract={() => hero && setHero(false)}
         shiftX={hero && !mobile && presets.length ? 180 : 0}
       />
     </Suspense>
   ) : (
     <SkyView
-      grid={meta?.grid ?? null}
-      display={display}
+      grid={lbActive && arch?.meta ? arch.meta.grid : meta?.grid ?? null}
+      display={!lbActive && ft.stackDisplay ? ft.stackDisplay : skyDisplay}
       view={view}
       overlays={overlays}
       flags={flags}
@@ -744,7 +1033,7 @@ export default function App() {
       chipNote={chipNote}
       targetWorld={targetWorld}
       track={track}
-      trackIndex={view.epoch}
+      trackIndex={trackIndex}
       dateLabel={dateLabel}
       progress={progress}
       lockKey={gridKey || "none"}
@@ -758,6 +1047,11 @@ export default function App() {
         if (s) setHero(false);
       }}
       card={card}
+      marks={lbActive ? undefined : ft.marks}
+      onMark={onMark}
+      ruler={ruler}
+      magnifier={magnifier}
+      invert={view.invert}
       highlight={hoverKey}
       focus={focus}
       onStep={embed ? undefined : stepField}
@@ -781,11 +1075,11 @@ export default function App() {
         partial={view.partial}
         onPartial={(partial) => set({ partial })}
         mode={view.mode}
-        current={view.epoch}
+        current={curArch ? -1 : view.epoch}
         available={derived.playable(view.mode === "rgb" ? "rgb" : view.band)}
         refEpoch={view.mode === "diff" ? refEpoch : null}
         stackSel={view.stack}
-        onSelect={(e) => set({ epoch: e })}
+        onSelect={(e) => set({ epoch: e, arch: -1 })}
         onToggleStack={(e) => {
           const cur = stackEpochs(derived, view);
           const next = cur.includes(e) ? cur.filter((x) => x !== e) : [...cur, e].sort((a, b) => a - b);
@@ -793,6 +1087,11 @@ export default function App() {
         }}
         exposures={view.mode === "exp" && nExp ? { count: nExp, index: Math.min(expIndex, nExp - 1), onIndex: setExpIndex } : null}
         date={hud?.dates ?? ""}
+        archival={
+          view.longBase && view.mode === "blink" && !is3d && !comoving ? (
+            <ArchivalStrip frames={archFrames} current={curArch?.index ?? null} onSelect={(i) => set({ arch: i })} status={arch?.error ?? archStatus} />
+          ) : undefined
+        }
       >
         <ModeControl view={view} set={set} size="sm" />
       </Dock>
@@ -819,7 +1118,10 @@ export default function App() {
   }
 
   return (
-    <div className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}>
+    <div
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}
+      style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
+    >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />
       {sky}
       <TopLeft
@@ -832,13 +1134,16 @@ export default function App() {
         onPick={pick}
         onRandom={random}
         onWarm={warmIndex}
+        onMoving={(name) => findMoving({ name }, name)}
         onFov={(f) => setFovOverride(f)}
+        coords={<CoordField centre={fieldCentre} onGo={goTo} />}
       />
+      {moving && <MovingCard st={moving} onChoose={(c: MovingChoice) => findMoving({ naif_id: c.naif_id }, c.name)} onClose={closeMoving} />}
       {hero && presets.length > 0 && <Hero presets={presets} onPick={choosePreset} onDismiss={dismissHero} onPrefetch={prefetchPreset} />}
       <Rail
         bandLabel={bandShort}
         goTo={(close: () => void) => (
-          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} close={close} />
+          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} onStep={embed ? undefined : (d) => { stepField(d); close(); }} close={close} />
         )}
         objects={
           meta ? (
@@ -851,13 +1156,7 @@ export default function App() {
               year={year}
               targetWorld={targetWorld}
               onHover={setHoverKey}
-              onPick={(cat, src) => {
-                const [ra, dec] = propagate(src, year);
-                if (is3d) set({ view3d: "off" }); // the card and the fly-to live on the flat sky
-                setSel({ kind: "source", cat, src });
-                setFocus({ ra, dec, key: Date.now() });
-                setHero(false);
-              }}
+              onPick={openSource}
             />
           ) : undefined
         }
@@ -866,16 +1165,45 @@ export default function App() {
           meta ? (
             <div className="panel-stack">
               <DisplayPanel view={view} set={set} />
+              <MeasureTools ruler={ruler} onRuler={setRuler} magnifier={magnifier} onMagnifier={setMagnifier} invert={view.invert} onInvert={(invert) => set({ invert })} />
               <PlaybackOptions meta={meta} mode={view.mode} speed={view.speed} onSpeed={(speed) => set({ speed })} ends={view.ends} onEnds={(ends) => set({ ends })} partial={view.partial} onPartial={(partial) => set({ partial })} />
             </div>
           ) : undefined
         }
-        layers={meta ? <LayersPanel view={view} set={set} catalogStatus={catalogStatus} /> : undefined}
-        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={(k) => exportUrl(meta.id, k)} /> : undefined}
+        layers={
+          meta ? (
+            <>
+              <LayersPanel view={view} set={set} catalogStatus={catalogStatus} />
+              <LongBaselineControls
+                on={view.longBase}
+                onToggle={(on) => set(on ? { longBase: true, mode: "blink", view3d: "off", arch: -1 } : { longBase: false, arch: -1 })}
+                bands={view.archBands}
+                onBands={(archBands) => set({ archBands, arch: -1 })}
+                unavailable={comoving ? "Not for co-moving sequences (the field follows the object)" : building ? WAIT_FULL : null}
+                status={archStatus}
+                error={arch?.error ?? null}
+              />
+            </>
+          ) : undefined
+        }
+        field={
+          meta && !comoving ? (
+            building ? (
+              <div className="field-panel">
+                <div className="micro menu-title">Field analysis</div>
+                <p className="small muted">{WAIT_FULL}</p>
+              </div>
+            ) : (
+              <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} />
+            )
+          ) : undefined
+        }
+        share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={building ? undefined : (k) => exportUrl(meta.id, k)} /> : undefined}
         detailsOpen={!!drawer}
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
         on3d={meta ? toggle3d : undefined}
+        fullscreen={fullscreen.supported ? fullscreen : undefined}
       />
       {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
@@ -889,6 +1217,10 @@ export default function App() {
           tablesError={tablesError}
           source={source}
           onClearSource={() => setSource(null)}
+          onNeedPhotometry={() => setLegacySpectrum(true)}
+          analysis={analysis}
+          verify={verify}
+          waitFull={building ? WAIT_FULL : null}
           target={target}
           epoch={view.epoch}
           band={view.band}

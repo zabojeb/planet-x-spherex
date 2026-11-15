@@ -35,13 +35,27 @@ export function rgbLabel(d: Derived): string {
 
 export const isPartial = (d: Derived, e: number) => !!d.seq.meta.epochs[e]?.partial;
 
-/** Epochs a player cycles through for the current mode and band (partial visits only on request). */
+/** Epochs a player cycles through for the current mode and band (partial visits only on request). In
+ *  Difference the reference epoch is left out: minus itself it is a blank frame. */
 export function playableEpochs(d: Derived, v: ViewState): number[] {
   const all = d.playable(v.mode === "rgb" ? "rgb" : v.band);
   const full = all.filter((e) => !isPartial(d, e));
-  const list = v.partial || full.length < 2 ? all : full;
+  let list = v.partial || full.length < 2 ? all : full;
+  if (v.mode === "diff" && list.length > 1) {
+    const ref = effectiveRef(d, v);
+    list = list.filter((e) => e !== ref);
+  }
   if (v.ends && list.length > 2 && v.mode !== "stack" && v.mode !== "exp") return [list[0], list[list.length - 1]];
   return list;
+}
+
+/** The epoch after (dir 1) or before (dir −1) `cur` in a playback list, wrapping around; from an epoch not
+ *  in the list (the Difference reference, say) the nearest one in that direction. */
+export function stepEpoch(list: number[], cur: number, dir: 1 | -1): number | undefined {
+  if (!list.length) return undefined;
+  const i = list.indexOf(cur);
+  if (i >= 0) return list[(i + dir + list.length) % list.length];
+  return dir > 0 ? list.find((e) => e > cur) ?? list[0] : [...list].reverse().find((e) => e < cur) ?? list[list.length - 1];
 }
 
 /** Reference epoch for Difference: the chosen one, else the earliest epoch with at least half the

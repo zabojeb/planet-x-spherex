@@ -16,11 +16,13 @@ from __future__ import annotations
 import json
 import logging
 import math
+import urllib.parse
 import urllib.request
 
 import numpy as np
 
-from .. import cache
+from .. import cache, netpolicy
+from ..logs import timed
 from .assemble import arrays
 
 log = logging.getLogger(__name__)
@@ -34,7 +36,8 @@ FILTERS = {
     "W2": {"svo": "WISE/WISE.W2", "zp_jy": 171.787, "catalog": "catwise", "column": "mag"},
 }
 _CURVES: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-MIN_COVERAGE = 0.75  # fraction of the photon-weighted response covered by measured bins
+MIN_COVERAGE = 0.75
+SUSPECT_DELTA_MAG = 0.75  # fraction of the photon-weighted response covered by measured bins
 
 
 def curve(band: str) -> tuple[np.ndarray, np.ndarray]:
@@ -44,8 +47,17 @@ def curve(band: str) -> tuple[np.ndarray, np.ndarray]:
     path = cache.layout().root / "spectral" / "filters.json"
     data = json.loads(path.read_text()) if path.exists() else {}
     if band not in data:
-        with urllib.request.urlopen(SVO.format(id=FILTERS[band]["svo"]), timeout=30) as r:
-            rows = [ln.split() for ln in r.read().decode().splitlines() if ln.strip() and not ln.startswith("#")]
+        url = SVO.format(id=FILTERS[band]["svo"])
+        service = urllib.parse.urlsplit(url).netloc
+        netpolicy.check(service)  # interactive callers skip SVO for a few minutes after it failed
+        timeout, _ = netpolicy.timeouts(30.0, 1)
+        try:
+            with timed(log, "spectral filter download", band=band), urllib.request.urlopen(url, timeout=timeout) as r:
+                rows = [ln.split() for ln in r.read().decode().splitlines() if ln.strip() and not ln.startswith("#")]
+        except Exception as e:
+            netpolicy.failed(service, e)
+            raise
+        netpolicy.succeeded(service)
         data[band] = [[float(a) / 1e4, float(b)] for a, b in rows]
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
@@ -104,6 +116,11 @@ def compare_with_catalogs(synth: dict, matches: dict[str, dict | None]) -> dict:
         if s.get("mag") is None or cat is None:
             out[band] = None
             continue
-        out[band] = {"synthetic": s["mag"], "catalog": float(cat), "delta_mag": s["mag"] - float(cat),
-                     "flux_ratio": 10 ** (-0.4 * (s["mag"] - float(cat))), "catalog_id": src.get("id")}
+        delta = s["mag"] - float(cat)
+        out[band] = {"synthetic": s["mag"], "catalog": float(cat), "delta_mag": delta,
+                     "flux_ratio": 10 ** (-0.4 * delta), "catalog_id": src.get("id"),
+                     "separation_arcsec": src.get("separation_arcsec"),
+                     # > 0.75 mag: a wrong match, a blend, a variable, or catalogue photometry corrupted by fast
+                     # motion (CatWISE splits fast movers) — not a calibration problem
+                     "suspect": bool(abs(delta) > SUSPECT_DELTA_MAG)}
     return out
