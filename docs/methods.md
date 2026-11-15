@@ -239,7 +239,12 @@ swing by about ±15″/h over the 98-min orbit for an object 2.4 AU away (Klotho
 
 ## Point analysis ("click a point → Analyze")
 
-`POST /api/sequences/{id}/analyze` runs, for one position, in order (ADR-0053):
+`POST /api/sequences/{id}/analyze` runs these steps for one position (ADR-0053). Since ADR-0056 they run
+concurrently within a 60 s deadline in interactive network mode (15 s timeouts, per-service circuit breakers,
+stale catalogue cache when a service is down): identification, known objects, tracklets and motion start at once;
+photometry waits up to 8 s for a catalogue counterpart to follow, then spectrum, periodogram and colours use its
+records. Photometry reads only the sequence's own cutout cache (never an IRSA search) and runs in the process pool;
+motion starts at the measured target's position at the sequence's mean epoch, with its catalogue motion as prior.
 
 1. **Identification**: Gaia DR3 / CatWISE2020 / 2MASS / SIMBAD cones (radius at each catalogue's epoch wide
    enough for 10″/yr movers), every source moved to the sequence's mean epoch; the nearest three within 15″, the

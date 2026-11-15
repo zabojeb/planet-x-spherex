@@ -43,9 +43,10 @@ CONE_RADIUS = {"gaia": 180.0, "catwise": 180.0, "2mass": 30.0, "simbad": 300.0}
 KNOWN_RADIUS = 30.0  # arcsec: known solar-system object this close at an epoch
 TRACKLET_RADIUS = 20.0  # arcsec: field-analysis candidates this close to the point
 MAX_KNOWN_EPOCHS = 8
-KNOWN_BUDGET_S = 60.0  # stop starting sb_ident queries after this long
-CATALOG_BUDGET_S = 60.0  # deadline for the four catalogue cones together
-KNOWN_TIMEOUT_S = 45.0  # per HTTP request
+KNOWN_BUDGET_S = 40.0  # total time for the sb_ident queries of all epochs (run in parallel)
+KNOWN_CONCURRENCY = 4  # JPL rate-limits bursts; a few at a time is enough
+CATALOG_BUDGET_S = 20.0  # deadline for the four catalogue cones together (a cached answer is instant)
+KNOWN_TIMEOUT_S = 20.0  # per HTTP request
 SIGNIFICANT_PM = 100.0  # mas/yr, and > 3 sigma
 RED_RATIO = 0.8
 STEPS = ("identification", "photometry", "spectrum", "motion", "periodogram", "colours", "known_objects",
@@ -90,14 +91,20 @@ def _propagate(src: dict, year: float) -> tuple[float, float]:
 # ------------------------------------------------------------------------------------------------- steps
 def identification(ctx: SequenceContext, req: PointRequest, years: list[float]) -> dict:
     """Nearest catalogue sources (at the sequence's mean epoch) with positions at every epoch."""
-    from .. import catalogs
+    from .. import catalogs, netpolicy
 
     y_mid = float(np.mean(years))
     out: dict = {"radius_arcsec": SEARCH_RADIUS, "reference_year": y_mid}
     # All four catalogues at once with one deadline: IRSA TAP can take minutes when busy. A query still running
     # at the deadline keeps going in its thread and fills the disk cache for the next analysis.
     ex = ThreadPoolExecutor(len(CATALOGS))
-    futures = {name: ex.submit(catalogs.cone, name, req.ra, req.dec, CONE_RADIUS[name] / 3600.0)
+    # Cones centred on a 0.01° bucket (radius grown to still cover the point): every click in the same part of a
+    # field reuses one cached answer per catalogue instead of a new remote query.
+    # The bucket centre is at most 0.005·√2 ≈ 0.0071° from the point (less in RA away from the equator), so a fixed
+    # 0.0075° margin keeps the cache key (and the answer) identical for every click in the bucket.
+    bra, bdec = round(req.ra, 2) % 360.0, round(req.dec, 2)
+    futures = {name: ex.submit(netpolicy.run_in_context(catalogs.cone), name, bra, bdec,
+                               CONE_RADIUS[name] / 3600.0 + 0.0075)
                for name in CATALOGS}
     wait(futures.values(), timeout=CATALOG_BUDGET_S)
     ex.shutdown(wait=False)
@@ -186,23 +193,39 @@ def colours(records: list[dict]) -> dict:
 def known_objects(ctx: SequenceContext, req: PointRequest, budget_s: float = KNOWN_BUDGET_S) -> dict:
     """Asteroids/comets within KNOWN_RADIUS of the point at each epoch mid-time, seen from SPHEREx.
 
-    JPL sb_ident (two-pass) can take a minute per query when busy, so the step stops starting new queries after
-    `budget_s` and reports the epochs it skipped; answers are cached, so a repeat finishes them."""
-    import time
+    JPL sb_ident (two-pass) can take 20-60 s per query, so the epochs are queried in parallel (KNOWN_CONCURRENCY at
+    a time) within `budget_s`; epochs not answered by then are reported as skipped. The box is centred on a
+    0.01° bucket around the point (and is wide enough to contain the search circle from anywhere in it), so the
+    answers are cached for every click nearby."""
+    from concurrent.futures import ThreadPoolExecutor as Pool
+    from concurrent.futures import wait as wait_all
 
-    from ..field import known
+    from .. import netpolicy
+    from ..field import known, observer
 
     epochs = ctx.meta["epochs"][:MAX_KNOWN_EPOCHS]
+    bra, bdec = round(req.ra, 2) % 360.0, round(req.dec, 2)
     half = (KNOWN_RADIUS + 60.0) / 3600.0
     out = {"radius_arcsec": KNOWN_RADIUS, "observer": "SPHEREx (Horizons -163182)", "epochs": [],
            "matches": [], "skipped_epochs": []}
-    t0 = time.monotonic()
-    for e in epochs:
-        if time.monotonic() - t0 > budget_s:
+    try:  # one Horizons call for every epoch's spacecraft position (the parallel queries then share the cache)
+        observer.states([float(e["mjd_mean"]) for e in epochs])
+    except Exception as ex:  # noqa: BLE001 - the per-epoch queries report it
+        log.info("spacecraft states unavailable: %r", ex)
+
+    def one(e: dict):  # one attempt: an interactive analysis must not sit in JPL's 429 back-off for minutes
+        return known.query(bra, bdec, half, float(e["mjd_mean"]), timeout=KNOWN_TIMEOUT_S, retries=1)
+
+    pool = Pool(KNOWN_CONCURRENCY, thread_name_prefix="sbident")
+    futs = [(e, pool.submit(netpolicy.run_in_context(one), e)) for e in epochs]
+    wait_all([f for _, f in futs], timeout=budget_s)
+    pool.shutdown(wait=False, cancel_futures=True)  # late answers still land in the cache for the next click
+    for e, fut in futs:
+        if not fut.done() or fut.cancelled():
             out["skipped_epochs"].append(e["index"])
             continue
-        try:  # one attempt: an interactive analysis must not sit in JPL's 429 back-off for minutes
-            objs = known.query(req.ra, req.dec, half, float(e["mjd_mean"]), timeout=KNOWN_TIMEOUT_S, retries=1)
+        try:
+            objs = fut.result()
         except Exception as ex:  # noqa: BLE001 - JPL busy: report per epoch, keep the other epochs
             out["epochs"].append({"epoch": e["index"], "mjd": e["mjd_mean"], "error": _err(ex)["error"]})
             continue
@@ -299,9 +322,11 @@ def verdict(r: dict) -> dict:
     elif has_gaia:
         out.append(_f("identity", f"Matches {gaia_m['id']} (G={gaia_m.get('mag'):.1f})" if gaia_m.get("mag") else
                       f"Matches {gaia_m['id']}", 0.85, -0.15, gaia=gaia_m["id"], sep_arcsec=gaia_m["sep_arcsec"]))
-    elif not ident.get("error"):
+    elif not ident.get("error") and not gaia.get("error"):
         out.append(_f("identity", "No Gaia DR3 counterpart within 4″ at the SPHEREx epochs", 0.6,
                       0.0 if mover_near else 0.2, catwise=has_catwise, twomass=has_2mass))
+    elif gaia.get("error"):
+        out.append(_f("data", "Gaia DR3 could not be checked (service unavailable); identity unknown", 0.9, 0.0))
 
     mo = (r.get("motion") or {}).get("combined")
     if mo and mo.get("pm_total"):
@@ -317,6 +342,9 @@ def verdict(r: dict) -> dict:
             elif mover_near:
                 out.append(_f("motion", f"Centroid shifts {arcsec:.2f}″/yr, but an intra-visit mover passes here, so "
                               "the shift is not a proper motion", 0.5, 0.0, pm_mas_yr=pm, err=err))
+            elif gaia.get("error"):  # Gaia unreachable: report the motion, claim nothing about novelty
+                out.append(_f("motion", f"Moves {arcsec:.2f}″/yr toward PA {mo['pa_deg']:.0f}° (Gaia not checked)",
+                              0.6, 0.1, pm_mas_yr=pm, err=err))
             elif pm / err >= 5:
                 out.append(_f("motion", f"Moves {arcsec:.2f}″/yr toward PA {mo['pa_deg']:.0f}° with no Gaia "
                               "counterpart → high-proper-motion candidate (brown dwarf?)",
@@ -400,79 +428,150 @@ def verdict(r: dict) -> dict:
 
 
 # ------------------------------------------------------------------------------------------------- driver
-def analyze_point(ctx: SequenceContext, req: PointRequest, progress, check) -> dict:
-    from .. import spectral
+DEADLINE_S = 60.0  # the whole analysis: steps still running then become {"error": "...not finished..."}
+IDENT_WAIT_S = 8.0  # how long photometry waits for a catalogue counterpart whose motion it could follow
+
+
+def analyze_point(ctx: SequenceContext, req: PointRequest, progress, check, deadline_s: float = DEADLINE_S) -> dict:
+    """Every step concurrently, in interactive network mode (short timeouts, circuit breakers), returning
+    whatever finished within `deadline_s`. Independent steps start at once; photometry waits up to IDENT_WAIT_S
+    for the catalogue identification (to follow a known proper motion); spectrum, periodogram and colours follow
+    photometry."""
+    from .. import netpolicy
+
+    with netpolicy.fast():
+        return _analyze(ctx, req, progress, check, deadline_s)
+
+
+def _choose_target(req: PointRequest, ident: dict, years: list[float]) -> tuple[Target, str]:
+    """The position to measure: the request's motion, else a Gaia/SIMBAD counterpart's, else static."""
+    if req.pmra is not None and req.pmdec is not None:
+        return Target(ra=req.ra, dec=req.dec, name=req.name, pmra=req.pmra, pmdec=req.pmdec,
+                      ref_epoch=req.ref_epoch), "request"
+    for cat in ("gaia", "simbad"):  # Gaia first, then SIMBAD (brown dwarfs too faint for Gaia)
+        c = ident.get(cat) or {}
+        m = (c.get("matches") or [None])[0]
+        if c.get("counterpart") and m and m.get("pmra") is not None and m.get("pmdec") is not None:
+            return (Target(ra=m["ra"], dec=m["dec"], name=req.name or m["id"], pmra=m["pmra"], pmdec=m["pmdec"],
+                           ref_epoch=float(m.get("epoch") or (2016.0 if cat == "gaia" else 2000.0))),
+                    f"{'Gaia DR3' if cat == 'gaia' else 'SIMBAD'} ({m['id']})")
+    return (Target(ra=req.ra, dec=req.dec, name=req.name, ref_epoch=float(np.mean(years))),
+            "none (static position at the sequence's epochs)")
+
+
+def _analyze(ctx: SequenceContext, req: PointRequest, progress, check, deadline_s: float) -> dict:
+    import threading
+    import time
+
+    from .. import netpolicy, spectral
     from .motion import fit_motion
     from .periodogram import periodogram
 
+    t0 = time.monotonic()
     years = [float(mjd_to_year(e["mjd_mean"])) for e in ctx.meta["epochs"]]
+    mjd_mid = float(np.mean([e["mjd_mean"] for e in ctx.meta["epochs"]]))
     x, y = ctx.grid.world_to_pixel(req.ra, req.dec)
     result: dict = {"sequence": ctx.seq_id, "version": POINT_VERSION, "request": asdict(req),
                     "point": {"ra": req.ra, "dec": req.dec, "x": float(x), "y": float(y),
                               "inside": bool(0 <= x < ctx.grid.n and 0 <= y < ctx.grid.n)}}
-    total = len(STEPS)
+    state = {name: "pending" for name in STEPS}
+    seconds: dict[str, float] = {}
+    lock = threading.Lock()
 
-    def step(i: int, name: str, fn):
-        check()
-        progress(name, i, total)
+    def report() -> None:
+        with lock:
+            running = [n for n, s in state.items() if s == "running"]
+            done = sum(s in ("done", "error") for s in state.values())
+            steps = dict(state)
         try:
-            result[name] = fn()
+            progress(", ".join(running) or "verdict", done, len(STEPS), steps=steps)
+        except TypeError:  # a runner without per-step reporting
+            progress(", ".join(running) or "verdict", done, len(STEPS))
+
+    def run(name: str, fn) -> None:
+        with lock:
+            state[name] = "running"
+        report()
+        t = time.monotonic()
+        try:
+            value, ok = fn(), True
         except Exception as e:  # noqa: BLE001 - every step reports its own failure
-            if e.__class__.__name__ == "FieldCancelled":
-                raise
             log.warning("point analysis %s: %s failed: %r", ctx.seq_id, name, e)
-            result[name] = _err(e)
+            value, ok = _err(e), False
+        with lock:
+            if state[name] == "running":  # not already given up on at the deadline
+                result[name] = value
+                state[name] = "done" if ok else "error"
+                seconds[name] = round(time.monotonic() - t, 2)
+        report()
 
-    step(0, "identification", lambda: identification(ctx, req, years))
+    pool = ThreadPoolExecutor(6, thread_name_prefix="point")
 
-    pmra, pmdec, ref, pm_source = req.pmra, req.pmdec, req.ref_epoch, "request"
-    ident = result["identification"] if isinstance(result.get("identification"), dict) else {}
-    # Follow a catalogue counterpart with a motion (Gaia first, then SIMBAD, e.g. for brown dwarfs too faint for
-    # Gaia): its position at its own epoch plus its motion.
-    follow = None
-    if pmra is None or pmdec is None:
-        for cat in ("gaia", "simbad"):
-            c = ident.get(cat) or {}
-            if c.get("counterpart") and c["matches"][0].get("pmra") is not None \
-                    and c["matches"][0].get("pmdec") is not None:
-                follow = (cat, c["matches"][0])
-                break
-    if follow:
-        cat, m = follow
-        target = Target(ra=m["ra"], dec=m["dec"], name=req.name or m["id"], pmra=m["pmra"], pmdec=m["pmdec"],
-                        ref_epoch=float(m.get("epoch") or (2016.0 if cat == "gaia" else 2000.0)))
-        pm_source = f"{'Gaia DR3' if cat == 'gaia' else 'SIMBAD'} ({m['id']})"
-    elif pmra is None or pmdec is None:
-        target = Target(ra=req.ra, dec=req.dec, name=req.name, ref_epoch=float(np.mean(years)))
-        pm_source = "none (static position at the sequence's epochs)"
-    else:
-        target = Target(ra=req.ra, dec=req.dec, name=req.name, pmra=pmra, pmdec=pmdec, ref_epoch=ref)
+    def submit(name: str, fn):
+        return pool.submit(netpolicy.run_in_context(lambda: run(name, fn)))
+
+    futures = {"identification": submit("identification", lambda: identification(ctx, req, years)),
+               "known_objects": submit("known_objects", lambda: known_objects(ctx, req)),
+               "tracklets": submit("tracklets", lambda: tracklets(ctx, req))}
+
+    def wait_for(names: list[str], until: float) -> None:
+        while time.monotonic() < until:
+            check()
+            pending = [futures[n] for n in names if n in futures and not futures[n].done()]
+            if not pending:
+                return
+            wait(pending, timeout=0.25)
+
+    wait_for(["identification"], t0 + IDENT_WAIT_S)
+    ident = result.get("identification") if isinstance(result.get("identification"), dict) else {}
+    target, pm_source = _choose_target(req, ident or {}, years)
+    if state["identification"] in ("pending", "running"):
+        pm_source += f"; catalogue identification still running after {IDENT_WAIT_S:.0f} s"
     result["point"]["motion_used"] = {"pmra": target.pmra, "pmdec": target.pmdec, "ref_epoch": target.ref_epoch,
                                       "source": pm_source}
 
-    step(1, "photometry", lambda: photometry(ctx, target))
-    records = (result.get("photometry") or {}).get("photometry") or []
+    def chain() -> None:
+        """Photometry, then the steps that need its records."""
+        run("photometry", lambda: photometry(ctx, target))
+        records = (result.get("photometry") or {}).get("photometry") or []
 
-    def spec():
-        if not records:
-            raise ValueError("no photometry")
-        s = spectral.analyze(records, target=target, catalogs=False)
-        return {"spectrum": s["spectrum"], "classification": s["classification"], "variability": s["variability"]}
+        def spec():
+            if not records:
+                raise ValueError("no photometry")
+            s = spectral.analyze(records, target=target, catalogs=False)
+            return {"spectrum": s["spectrum"], "classification": s["classification"], "variability": s["variability"]}
 
-    step(2, "spectrum", spec)
+        run("spectrum", spec)
+        run("periodogram", lambda: _trim_periodogram(periodogram(records)))
+        run("colours", lambda: colours(records))
 
     def motion():
+        # Start where the measured target is at the sequence's mean epoch: a request given at a catalogue epoch
+        # (ε Indi B at J2000 is 2′ from where SPHEREx sees it) would otherwise centroid the wrong place.
+        ra_m, dec_m = target.position_at(mjd_mid)
+        mx, my = ctx.grid.world_to_pixel(ra_m, dec_m)
+        prior = (target.pmra, target.pmdec) if (target.pmra or target.pmdec) else (None, None)
         coadds = results.read_array(ctx.dir, ctx.meta, "coadds")
-        return fit_motion(ctx.meta, coadds, ctx.grid, float(x), float(y))
+        return fit_motion(ctx.meta, coadds, ctx.grid, float(mx), float(my), pmra=prior[0], pmdec=prior[1])
 
-    step(3, "motion", motion)
-    step(4, "periodogram", lambda: _trim_periodogram(periodogram(records)))
-    step(5, "colours", lambda: colours(records))
-    step(6, "known_objects", lambda: known_objects(ctx, req))
-    step(7, "tracklets", lambda: tracklets(ctx, req))
+    futures["photometry"] = pool.submit(netpolicy.run_in_context(chain))
+    futures["motion"] = submit("motion", motion)
+    wait_for(list(futures), t0 + deadline_s)
+    pool.shutdown(wait=False, cancel_futures=True)  # steps still running finish in the background
+
+    late = []
+    with lock:
+        for name, s in state.items():
+            if s in ("pending", "running"):
+                result[name] = {"error": f"TimeoutError: not finished within {deadline_s:.0f} s; retry later "
+                                         "(finished downloads and catalogue answers are cached)"}
+                state[name] = "error"
+                late.append(name)
     check()
-    progress("verdict", total, total)
+    progress("verdict", len(STEPS), len(STEPS))
     result["verdict"] = verdict(result)
+    result["timings"] = {"total_s": round(time.monotonic() - t0, 2), "steps_s": seconds, "timed_out": late,
+                         "services_unavailable": netpolicy.status()}
     return result
 
 
@@ -484,3 +583,5 @@ def _trim_periodogram(p: dict) -> dict:
         idx = np.linspace(0, n - 1, 400).astype(int)
         p["periodogram"] = {k: [v[i] for i in idx] for k, v in curve.items()}
     return p
+
+

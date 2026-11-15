@@ -44,6 +44,10 @@ def cone(catalog: str, ra: float, dec: float, radius_deg: float, max_age_hours: 
                  radius_deg)
     except Exception as e:  # noqa: BLE001 - every upstream failure becomes one user-facing error
         log.warning("catalog %s failed s=%.2f error=%s", catalog, time.perf_counter() - t0, e)
+        stale = _stale(path)  # an old answer beats none while the service is down
+        if stale is not None:
+            log.info("catalog %s serving stale cache rows=%d", catalog, len(stale))
+            return stale
         reason = str(e).splitlines()[0][:200] if str(e) else e.__class__.__name__
         raise UpstreamError(f"{CATALOGS[catalog]} did not answer usefully ({reason}). Try again shortly.") from e
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +55,13 @@ def cone(catalog: str, ra: float, dec: float, radius_deg: float, max_age_hours: 
     tmp.write_text(json.dumps(rows))
     tmp.replace(path)
     return rows
+
+
+def _stale(path) -> list[dict] | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
 
 
 __all__ = ["CATALOGS", "cone"]

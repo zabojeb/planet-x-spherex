@@ -177,7 +177,10 @@ def catalog_cone(name: str, ra: float, dec: float, radius_arcmin: float) -> list
     remote service fails."""
     if name not in catalogs.CATALOGS:
         raise NotFound("unknown catalog")
-    return catalogs.cone(name, ra, dec, radius_arcmin / 60.0)
+    from . import netpolicy
+
+    with netpolicy.fast():  # an overlay layer: short timeouts, and skip a service that just failed
+        return catalogs.cone(name, ra, dec, radius_arcmin / 60.0)
 
 
 # ---------------------------------------------------------------- analyses, exports, releases (agent B)

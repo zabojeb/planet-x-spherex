@@ -530,10 +530,18 @@ that has a motion, else a static position). Returns the job `{id, status, stage,
 
 ### `GET /api/analyses/{job_id}` · `DELETE /api/analyses/{job_id}`
 
-GET: 200 with the result (immutable, `ETag: "<job_id>"`), 202 with the job while it runs (stages
-`identification`, `photometry`, `spectrum`, `motion`, `periodogram`, `colours`, `known_objects`, `tracklets`,
-`verdict`; every GET is a heartbeat), 500 failed, 410 cancelled (POST again), 404 unknown. DELETE withdraws this
-client (200 job / 204 unknown); a job nobody polls for 60 s is cancelled.
+GET: 200 with the result (immutable, `ETag: "<job_id>"`), 202 with the job while it runs, 500 failed, 410
+cancelled (POST again), 404 unknown; every GET is a heartbeat. The steps run concurrently (ADR-0056): `stage` lists
+the steps running now (e.g. `"photometry, known_objects"`, then `"verdict"`), `done`/`total` count finished steps,
+and `steps` gives each step's state: `{"identification": "done", "photometry": "running", ...}` with values
+`pending | running | done | error`. DELETE withdraws this client (200 job / 204 unknown); a job nobody polls for
+60 s is cancelled. `force: true` re-runs a finished analysis.
+
+The whole analysis returns within 60 s: a step still running then becomes `{"error": "TimeoutError: not finished
+within 60 s; ..."}` (repeat later — downloads and catalogue answers are cached). Remote services use short timeouts
+and a circuit breaker: a service that just failed is reported at once as `ServiceUnavailable: <host> is
+unavailable ...` instead of being waited for again. The result's `timings` block shows
+`{total_s, steps_s: {step: seconds}, timed_out: [steps], services_unavailable: {host: {retry_in_s, error}}}`.
 
 Result (every step slot is either its object or `{"error": "<Type>: <message>"}`):
 

@@ -16,11 +16,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+import urllib.parse
 import urllib.request
 
 import numpy as np
 
-from .. import cache
+from .. import cache, netpolicy
 from ..logs import timed
 from .assemble import arrays
 
@@ -46,9 +47,17 @@ def curve(band: str) -> tuple[np.ndarray, np.ndarray]:
     path = cache.layout().root / "spectral" / "filters.json"
     data = json.loads(path.read_text()) if path.exists() else {}
     if band not in data:
-        with timed(log, "spectral filter download", band=band), \
-                urllib.request.urlopen(SVO.format(id=FILTERS[band]["svo"]), timeout=30) as r:
-            rows = [ln.split() for ln in r.read().decode().splitlines() if ln.strip() and not ln.startswith("#")]
+        url = SVO.format(id=FILTERS[band]["svo"])
+        service = urllib.parse.urlsplit(url).netloc
+        netpolicy.check(service)  # interactive callers skip SVO for a few minutes after it failed
+        timeout, _ = netpolicy.timeouts(30.0, 1)
+        try:
+            with timed(log, "spectral filter download", band=band), urllib.request.urlopen(url, timeout=timeout) as r:
+                rows = [ln.split() for ln in r.read().decode().splitlines() if ln.strip() and not ln.startswith("#")]
+        except Exception as e:
+            netpolicy.failed(service, e)
+            raise
+        netpolicy.succeeded(service)
         data[band] = [[float(a) / 1e4, float(b)] for a, b in rows]
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
