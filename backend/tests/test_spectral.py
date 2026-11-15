@@ -139,6 +139,23 @@ def test_variability_ratio_flags_the_changing_band():
     assert abs(ep["per_band"]["D2"]["ratio"] - 1) < 0.03 and "D2" not in ep["significant_bands"]
 
 
+def test_ring_drift_is_systematics_limited_but_a_2x_fade_is_real():
+    """Barnard's Star rings drift to ~0.7 in D2 (constant star); RW Aur fades to ~0.53 at 4-5 um."""
+    drift = {1: lambda wl: 0.70 if 1.1 <= wl <= 1.6 else 1.0}
+    v = variability.variability(_records(star, scale_by_epoch=drift, relative=True), reference=0)
+    ep = v["epochs"][0]
+    d2 = ep["per_band"]["D2"]
+    assert d2["ratio"] == pytest.approx(0.70, abs=0.03) and abs(d2["z"]) > 5  # statistically "significant"
+    assert d2["systematics_limited"] and "D2" not in ep["significant_bands"]
+    assert ep["variable"] is False and ep["systematics_limited"] is True
+    fade = {1: lambda wl: 0.53 if wl > 3.8 else 1.0}
+    ep = variability.variability(_records(star, scale_by_epoch=fade, relative=True), reference=0)["epochs"][0]
+    assert ep["variable"] and {"D5", "D6"} <= set(ep["significant_bands"]) and not ep["systematics_limited"]
+    # calibrated photometry keeps the 3 % floor only: the same 30 % change is real there
+    ep = variability.variability(_records(star, scale_by_epoch=drift), reference=0)["epochs"][0]
+    assert "D2" in ep["significant_bands"] and not ep["per_band"]["D2"]["systematics_limited"]
+
+
 def test_synthetic_photometry_of_vega_like_flat_spectrum(monkeypatch):
     # top-hat filters so the test needs no download; F_nu = zero point -> magnitude 0
     from spherex_core.spectral import synphot
@@ -200,6 +217,26 @@ def test_summary_rules_for_ice_yso_and_power_law():
     good = {"best": {"sptype": "G2V", "family": "star", "chi2_red": 1.0}}
     assert cls.summarize(good, None, {"alpha": -2.8, "lada_class": "Class III / photosphere"}, None, {}, [])[
         "family"] == "star"
+
+
+def test_methane_without_a_template_does_not_crash():
+    """No usable near-IR template (best=None) used to hit `"" in "LT"` and index None."""
+    idx = {"ch4_3.3": {"value": 0.3}, "peak_4um_J": {"value": 1.2}}
+    s = cls.summarize(None, None, None, None, idx, [])
+    assert s["family"] == "brown_dwarf" and s["label"] == "T dwarf (methane at 3.3 µm)"
+    assert cls.summarize(None, None, None, None, {}, [])["family"] is None
+
+
+def test_blackbody_temperature_only_for_a_good_non_molecular_fit():
+    good = {"best": {"sptype": "G2V", "family": "star", "chi2_red": 1.0}}
+    bb = {"teff_k": 5800.0, "teff_range_k": [5600.0, 6000.0], "a_k_mag": 0.0, "chi2_red": 1.2}
+    notes = " ".join(cls.summarize(good, bb, None, None, {}, [])["notes"])
+    assert "colour temperature ≈ 5800 K" in notes and "T_eff" not in notes
+    notes = " ".join(cls.summarize(good, {**bb, "chi2_red": 235.0}, None, None, {}, [])["notes"])
+    assert "5800" not in notes and "poor" in notes  # eps Indi B: chi2/dof ~235
+    t_dwarf = {"best": {"sptype": "T1", "family": "dwarf_standard", "chi2_red": 2.0}}
+    notes = " ".join(cls.summarize(t_dwarf, bb, None, None, {}, [])["notes"])
+    assert "5800" not in notes
 
 
 def test_catalog_comparison_flags_suspect_matches():

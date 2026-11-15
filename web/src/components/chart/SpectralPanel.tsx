@@ -296,6 +296,8 @@ const FAMILY: Record<string, string> = {
   yso_candidate: "YSO candidate",
   nonstellar: "Non-stellar (AGN/QSO or YSO)",
 };
+const BB_MAX_CHI2 = 10;
+const MOLECULAR = new Set(["brown_dwarf", "late_m_dwarf", "composite"]);
 
 export function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: SpectrumResult | null; meta: Meta; ylog: boolean }) {
   const curves = c.model_curves ?? {};
@@ -318,7 +320,9 @@ export function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: Spectrum
   const legend: LegendItem[] = [];
   if (points.length) legend.push({ label: "binned spectrum", color: SERIES.blue });
   if (curves.best_template) legend.push({ label: `template ${best?.sptype ?? ""}`.trim(), color: SERIES.orange, kind: "line" });
-  if (curves.blackbody && c.blackbody) legend.push({ label: `blackbody ${Math.round(c.blackbody.teff_k)} K`, color: SERIES.aqua, kind: "dash" });
+  // Mirrors classify.py: no temperature for a poor fit (eps Indi B: chi2/dof ~235) or a molecular / blended spectrum.
+  const bbT = c.blackbody && c.blackbody.chi2_red <= BB_MAX_CHI2 && !MOLECULAR.has(c.summary?.family ?? "") ? c.blackbody : null;
+  if (curves.blackbody && c.blackbody) legend.push({ label: bbT ? `blackbody ${Math.round(bbT.teff_k)} K` : "blackbody fit", color: SERIES.aqua, kind: "dash" });
 
   return (
     <div className="class-view">
@@ -330,12 +334,12 @@ export function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: Spectrum
             {c.summary?.family && <div className="muted small">{FAMILY[c.summary.family] ?? c.summary.family}</div>}
           </div>
           <dl className="class-facts">
-            {c.blackbody && (
+            {bbT && (
               <>
-                <dt>T<sub>eff</sub> (blackbody)</dt>
+                <dt title="Temperature of the best-fitting blackbody; not an effective temperature">Blackbody colour temperature</dt>
                 <dd className="num">
-                  {Math.round(c.blackbody.teff_k)} K
-                  {c.blackbody.teff_range_k && <span className="muted"> ({c.blackbody.teff_range_k[0]}–{c.blackbody.teff_range_k[1]})</span>}
+                  {Math.round(bbT.teff_k)} K
+                  {bbT.teff_range_k && <span className="muted"> ({bbT.teff_range_k[0]}–{bbT.teff_range_k[1]})</span>}
                 </dd>
               </>
             )}
@@ -350,9 +354,12 @@ export function ClassView({ c, s, meta, ylog }: { c: ClassifyResult; s: Spectrum
           </dl>
         </div>
         {ranked.length > 0 && (
-          <ul className="prob-list" aria-label="Best-matching templates">
-            {ranked.map((t) => (
-              <li key={t.name} title={`${t.source} · χ²ᵣ ${t.chi2_red.toFixed(1)} over ${t.n_bins} bins`}>
+          <div className="micro">Closest standard {ranked[0].sptype} · relative template weight, not a probability</div>
+        )}
+        {ranked.length > 0 && (
+          <ul className="prob-list" aria-label="Relative template weight of the closest standards">
+            {ranked.map((t, i) => (
+              <li key={t.name} title={`${i === 0 ? "Closest standard · " : ""}${t.source} · χ²ᵣ ${t.chi2_red.toFixed(1)} over ${t.n_bins} bins · relative template weight`}>
                 <span className="prob-name">{t.sptype}</span>
                 <span className="prob-bar">
                   <span style={{ width: `${Math.max(1, t.probability * 100)}%` }} />
@@ -471,7 +478,12 @@ export function VariabilityView({ v, meta }: { v: VariabilityResult; meta: Meta 
         points={points}
         legend={legend}
         height={240}
-        note={v.systematic ? `Includes a ${(v.systematic * 100).toFixed(0)}% systematic error per bin.` : null}
+        note={
+          v.systematic
+            ? `Includes a ${(v.systematic * 100).toFixed(0)}% systematic error per bin.` +
+              (v.ring_systematic ? ` Verdicts for ring photometry also allow a ${(v.ring_systematic * 100).toFixed(0)}% drift per detector.` : "")
+            : null
+        }
         empty={points.length ? null : "No ratios to show"}
         background={(sc) => (
           <g>
@@ -495,7 +507,17 @@ export function VariabilityView({ v, meta }: { v: VariabilityResult; meta: Meta 
               <td>
                 <span className="swatch dot" style={{ color: epochColor(e.epoch, nE) }} /> {e.epoch + 1} · {formatDate(meta.epochs[e.epoch]?.mjd_mean ?? 0).slice(0, 7)}
               </td>
-              <td>{e.variable ? <strong style={{ color: STATUS.warning }}>changed</strong> : <span className="muted">constant</span>}</td>
+              <td>
+                {e.variable ? (
+                  <strong style={{ color: STATUS.warning }}>changed</strong>
+                ) : e.systematics_limited ? (
+                  <span className="muted" title={`The change in ${e.systematics_limited_bands?.join(", ") ?? "some detectors"} is within the ${Math.round((v.ring_systematic ?? 0.15) * 100)}% per-detector drift of ring photometry on constant stars`}>
+                    within systematics
+                  </span>
+                ) : (
+                  <span className="muted">constant</span>
+                )}
+              </td>
               <td className="num">{e.chi2_red_constant != null ? e.chi2_red_constant.toFixed(1) : "—"}</td>
               <td>{e.significant_bands?.length ? e.significant_bands.join(", ") : "—"}</td>
             </tr>

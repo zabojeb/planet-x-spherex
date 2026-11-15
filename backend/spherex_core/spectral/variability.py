@@ -4,6 +4,12 @@ Each epoch is binned on the common grid; every epoch is divided by a reference e
 are scale-free, so ring measurements of saturated stars (relative within a detector, ADR-0020) are as
 usable as calibrated ones, as long as numerator and denominator use the same kind. A 3 % systematic is
 added in quadrature to each bin's error, matching the scatter of constant stars between epochs.
+
+Ring photometry also drifts by 10-15 % per detector between epochs on constant stars (Barnard's Star D2/D3,
+analysis/validation/REPORT.md). That error is shared by every bin of a detector, so averaging bins cannot beat
+it down: the detector verdict adds RING_SYSTEMATIC in quadrature to the detector average (in log ratio, so a
+fade and a brightening by the same factor count alike). A detector whose change is significant on the bin
+errors alone but not with that systematic is reported as systematics-limited, not as variable.
 """
 
 from __future__ import annotations
@@ -16,6 +22,8 @@ from ..bands import BANDS
 from .assemble import by_epoch
 
 SYSTEMATIC = 0.03
+RING_SYSTEMATIC = 0.15  # correlated per-detector, per-epoch error of relative (ring) photometry
+SIGNIFICANT_Z = 3.0
 
 
 MIN_SNR = 3.0  # both bins must be detected; ratios of noise or of a blended faint source mean nothing
@@ -73,12 +81,26 @@ def variability(records: list[dict], reference: int | None = None, include_flagg
             mean = float((w * r).sum() / w.sum())
             err = float(math.sqrt(1 / w.sum()))
             err = max(err, float(np.std(r, ddof=1) / math.sqrt(r.size))) if r.size > 1 else err
-            per_band[band] = {"ratio": mean, "err": err, "z": (mean - 1) / err if err > 0 else None,
-                              "n_bins": len(sel), "kind": sel[0]["kind"]}
+            z_stat = (mean - 1) / err if err > 0 else None
+            ring = any(x["kind"] == "relative" for x in sel)
+            if ring and mean > 0:
+                z_total = math.log(mean) / math.hypot(err / mean, math.log1p(RING_SYSTEMATIC))
+            else:
+                z_total = z_stat
+            limited = bool(z_stat is not None and abs(z_stat) >= SIGNIFICANT_Z
+                           and (z_total is None or abs(z_total) < SIGNIFICANT_Z))
+            # "z" stays the statistical significance (analysis/point.py applies its own ring thresholds to it)
+            per_band[band] = {"ratio": mean, "err": err, "z": z_stat, "z_total": z_total, "n_bins": len(sel),
+                              "kind": sel[0]["kind"], "systematic": RING_SYSTEMATIC if ring else 0.0,
+                              "systematics_limited": limited}
         z = np.array([x["z"] for x in ratios if x["z"] is not None])
         chi2 = float((z ** 2).sum() / z.size) if z.size else None
-        sig_bands = [b for b, v in per_band.items() if v["z"] is not None and abs(v["z"]) >= 3]
+        sig_bands = [b for b, v in per_band.items()
+                     if v["z_total"] is not None and abs(v["z_total"]) >= SIGNIFICANT_Z]
+        limited_bands = [b for b, v in per_band.items() if v["systematics_limited"]]
         out_epochs.append({"epoch": e, "ratios": ratios, "per_band": per_band, "chi2_red_constant": chi2,
-                           "variable": bool(sig_bands), "significant_bands": sig_bands})
-    return {"available": True, "reference_epoch": ref, "epochs": out_epochs,
-            "kinds": sorted(kinds), "systematic": SYSTEMATIC}
+                           "variable": bool(sig_bands), "significant_bands": sig_bands,
+                           "systematics_limited": bool(limited_bands and not sig_bands),
+                           "systematics_limited_bands": limited_bands})
+    return {"available": True, "reference_epoch": ref, "epochs": out_epochs, "kinds": sorted(kinds),
+            "systematic": SYSTEMATIC, "ring_systematic": RING_SYSTEMATIC if "relative" in kinds else None}

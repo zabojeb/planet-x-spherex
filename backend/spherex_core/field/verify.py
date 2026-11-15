@@ -123,7 +123,7 @@ async def verify(ctx: SequenceContext, fd: FieldData, ra: float, dec: float, mjd
                 fra, fdec = (float(v) for v in cut.wcs.all_pix2world(fit["x"] + cut.x0, fit["y"] + cut.y0, 0))
                 pix = np.sqrt(omega)
                 fit.update({"ra": fra, "dec": fdec, "sigma_arcsec": float(np.hypot(fit["sigma_x"], fit["sigma_y"]) * pix),
-                            "offset_arcsec": float(np.hypot((fra - ra_t) * np.cos(np.radians(fdec)),
+                            "offset_arcsec": float(np.hypot(((fra - ra_t + 180.0) % 360.0 - 180.0) * np.cos(np.radians(fdec)),
                                                             fdec - dec_t) * 3600.0)})
                 for k in ("x", "y"):
                     fit.pop(k)

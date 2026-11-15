@@ -21,3 +21,5 @@
 .comet-spec-label { fill: var(--text-3); font-family: var(--mono); font-size: 8px; }
 .comet-why { margin: 0; padding-left: 14px; font-size: 11.5px; color: var(--text-2, var(--text-1)); }
 .comet-why li { margin: 1px 0; }
+.comet-caveats { padding-left: 14px; }
+.comet-caveats li { margin: 1px 0; }

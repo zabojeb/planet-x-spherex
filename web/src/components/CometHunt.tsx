@@ -13,6 +13,8 @@ import type { SkyMark } from "./SkyView";
 import { Switch } from "./ui/primitives";
 import "./CometHunt.css";
 
+const SCORE_LABEL = "comet-likeness (heuristic, not a probability)";
+
 type Job<T> = { state: "idle" } | { state: "running"; progress: Progress | null } | { state: "done"; result: T } | { state: "error"; message: string };
 
 const progressText = (p: Progress | null) =>
@@ -215,6 +217,7 @@ export function CometPanel(p: {
           ) : (
             <p className="small muted">{res.object}: best visit {res.summary?.max_score?.toFixed(0) ?? "?"} / 100</p>
           )}
+          {list.length > 0 && <p className="form-hint">Score: {SCORE_LABEL}, 0–100.</p>}
           <div className="cand-list">
             {list.length ? (
               list.map((c) => {
@@ -229,7 +232,7 @@ export function CometPanel(p: {
                     }}
                   >
                     <span className="cand-title">
-                      <span className={`comet-score ${b.tone}`} title={b.label}>{c.comet_likeness.score.toFixed(0)}</span>
+                      <span className={`comet-score ${b.tone}`} title={`${SCORE_LABEL}: ${b.label}`}>{c.comet_likeness.score.toFixed(0)}</span>
                       {c.kind === "object" ? `Visit ${c.epoch + 1}` : c.id} <Badge c={c} />
                     </span>
                     <span className="cand-score num">{motionLine(c)}</span>
@@ -251,6 +254,13 @@ export function CometPanel(p: {
                 <Download size={14} /> All tracks <small>ADES</small>
               </a>
             </div>
+          )}
+          {res.caveats?.length > 0 && (
+            <ul className="fine comet-caveats" aria-label="Caveats">
+              {res.caveats.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
           )}
         </>
       )}

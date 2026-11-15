@@ -352,7 +352,7 @@ def _rank(t: dict, objs: list[dict]) -> list[dict]:
         for d in det:
             ra, dec = position_at(o, d["mjd"])
             cosd = np.cos(np.radians(dec))
-            oc.append(((d["ra"] - ra) * cosd * 3600.0, (d["dec"] - dec) * 3600.0))
+            oc.append((((d["ra"] - ra + 180.0) % 360.0 - 180.0) * cosd * 3600.0, (d["dec"] - dec) * 3600.0))
         sep = float(np.mean([np.hypot(*v) for v in oc]))
         err = max(POS_TOL, 3.0 * float(np.hypot(o.get("err_ra") or 0.0, o.get("err_dec") or 0.0)))
         if sep > err:

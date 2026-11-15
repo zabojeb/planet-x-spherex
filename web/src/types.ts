@@ -393,12 +393,17 @@ export interface VariabilityResult {
   reason?: string;
   reference_epoch?: number;
   systematic?: number;
+  /** Correlated per-detector error of ring (relative) photometry, added to each detector average. */
+  ring_systematic?: number | null;
   epochs: {
     epoch: number;
     variable?: boolean;
     significant_bands?: string[];
+    /** A change is significant on bin errors alone but within the ring-photometry systematic. */
+    systematics_limited?: boolean;
+    systematics_limited_bands?: string[];
     chi2_red_constant?: number | null;
-    per_band?: Record<string, { ratio: number; err: number; z: number; n_bins: number; kind: string }>;
+    per_band?: Record<string, { ratio: number; err: number; z: number; z_total?: number | null; systematic?: number; systematics_limited?: boolean; n_bins: number; kind: string }>;
     ratios?: { band: BandId; bin: number; wl: number; kind: string; ratio: number; err: number; z: number }[];
   }[];
 }

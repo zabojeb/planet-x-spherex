@@ -382,7 +382,7 @@ async def analyze_point(sequence_id: str, ra: float, dec: float, pmra: float = 0
             out["indices"] = compact({k: (v or {}).get("value") for k, v in (spec.get("indices") or {}).items()})
             var = sp.get("variability", {})
             out["spectral_variability"] = compact([{k: e.get(k) for k in ("epoch", "variable", "significant_bands",
-                                                                           "chi2_red_constant")}
+                                                                           "systematics_limited", "chi2_red_constant")}
                                                    for e in var.get("epochs", [])])
         except Exception as e:  # noqa: BLE001 - each part reports its own failure
             out["spectrum_error"] = str(e)[:200]
