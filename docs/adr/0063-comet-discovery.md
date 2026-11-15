@@ -64,8 +64,11 @@ Object checks (co-moving, static sky subtracted):
 | 433 Eros | 6 (4 measurable) | point-like, -0.5 to +0.05 sigma | - | none | NEO | 0.1-0.2 (1.0 for the 2 saturated visits) |
 | 16 Psyche | 2 | point-like, +0.3 / -0.1 sigma | - | none | main belt | 0.1 / 0.1 |
 
-Each object check takes 1-3 s. Field hunts and their false-positive counts are in the PR description; crowded
-low-latitude fields remain the weak spot (see Consequences).
+Each object check takes 1-3 s. Field hunts: across 5 fixed fields (40 measured movers) none scored as comet-like;
+before the crowded-field fixes in this ADR the crowded field near C/2025 A6's track gave 13 false positives; 97 Klotho
+was identified as a known asteroid (score 1.0). Fixed 8′ fields around single ~7-minute passes of C/2025 A6 and
+3I/ATLAS missed both comets (0 of 2), so the hunt does not yet find fast comets from one pass. Each field takes
+18-137 s, 12-60 s of it the JPL lookup. Crowded low-latitude fields remain the weak spot (see Consequences).
 
 ## Consequences
 

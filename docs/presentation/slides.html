@@ -98,8 +98,9 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 .s3 li b { color: var(--text-1); font-weight: 500; }
 .s3 .right { position: absolute; left: 648px; right: 0; top: 10px; }
 .s3 .shot img { height: auto; }
-.s3 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+.s3 .pair { display: grid; grid-template-columns: 392px 1fr; gap: 28px; }
 .s3 .pair .shot { aspect-ratio: 1 / 1; }
+.s3 .pair > div + div .shot { aspect-ratio: 16 / 10; }
 .s3 .pair .shot img { height: 100%; }
 .s3 .pair .cap { text-transform: none; letter-spacing: 0; font-family: var(--ui); font-size: 20px; line-height: 1.45; color: var(--text-2); }
 .s3 h2 { font-size: 80px; }
@@ -182,16 +183,16 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
   <div class="frame"><i></i><i></i><i></i><i></i></div>
   <div class="bar top"><span><span class="dot"></span><b>Seek In Space</b></span><span>NASA Space Apps Challenge 2026<span class="sep">/</span>01 — 07</span></div>
   <div class="reticle"></div>
-  <div class="reticle-label">Barnard's Star<span>10.4″ / yr · SPHEREx all-sky</span></div>
+  <div class="reticle-label">Demo target: Barnard's Star<span>moves ≈10″ a year · see slide 3</span></div>
   <div class="title">
     <div class="micro">Challenge · <span class="n">Planet X and SPHEREx</span></div>
     <h1 class="display" style="margin-top:34px">Seek <span class="x">In</span> Space</h1>
     <div class="tag">See what moves in the infrared sky.</div>
-    <p class="lead">A web tool for NASA's SPHEREx survey. Name a star or click anywhere on the sky, and see every visit of that spot aligned, played in order and measured.</p>
+    <p class="lead">A public tool built on NASA's SPHEREx data. Enter a name or RA/Dec, or click the sky, to play the aligned visits and measure motion or brightness changes.</p>
   </div>
   <div class="links">
     <div><div class="k">Live</div><div class="v a">seekin.space</div></div>
-    <div><div class="k">Code</div><div class="v">github.com/zabojeb/planet-x-spherex</div></div>
+    <div><div class="k">Evidence</div><div class="v">seekin.space/evidence</div></div>
     <div style="flex:.55"><div class="k">Team</div><div class="v">NUPASA</div></div>
   </div>
   <div class="bar bottom"><span>0.75–5 <span style="text-transform:none">µm</span> · 102 bands · 2025 → 2026</span><span>seekin.space</span></div>
@@ -206,13 +207,13 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <h2 class="display">SPHEREx maps the whole sky every six months. Comparing the visits shows <em>what moves or changes.</em></h2>
     <div class="stats">
       <div><div class="big">102</div><p>infrared colours from 0.75 to 5 µm</p></div>
-      <div><div class="big">6<small>mo</small></div><p>between visits to every part of the sky, since May 2025</p></div>
+      <div><div class="big">6<small>mo</small></div><p>for a full-sky pass since May 2025; dates vary by position</p></div>
       <div><div class="big">1.6<small>M</small></div><p>images of 64 MB each in NASA's open archive</p></div>
-      <div class="zero"><div class="big">3–4</div><p>visits of each showcase field so far, and two more every year</p></div>
+      <div class="zero"><div class="big">3–4</div><p>visits so far in non-polar showcase fields (10 near the pole)</p></div>
     </div>
     <div class="row">
       <div><div class="yr">The idea</div><p>Pluto was found by <b>blinking</b> two photographic plates, and volunteers still find <b>brown dwarfs</b> by blinking WISE images. We bring the same method to SPHEREx.</p></div>
-      <div><div class="yr">The difficulty</div><p>Each image is a <b>64 MB</b> multi-extension file, and IRSA's cutout service was overloaded during the hackathon (<b>~95 s per cutout</b>). The tool has to fetch, align and measure by itself, in seconds.</p></div>
+      <div><div class="yr">The difficulty</div><p>Each exposure is a <b>64 MB</b> file. The tool reads only the region it needs, then aligns and measures it: a new field of about 200 exposures builds in <b>6–13 s</b> in our tests.</p></div>
     </div>
   </div>
   <div class="bar bottom"><span>Data: NASA / IRSA SPHEREx DR1 + QR3</span><span>seekin.space</span></div>
@@ -228,7 +229,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       <h2 class="display">Enter coordinates, press play, see what <em>moved.</em></h2>
       <ol>
         <li><span><b>Type</b> a name or RA/Dec, or click the all-sky map</span></li>
-        <li><span><b>Every SPHEREx visit</b> of that spot is fetched and aligned</span></li>
+        <li><span><b>Available visits</b> in the indexed releases are fetched and aligned</span></li>
         <li><span><b>Blink, subtract or stack</b> the visits; RGB, single exposures, 3D</span></li>
         <li><span><b>Field 2′–30′</b>, quality flags, Gaia and CatWISE at each visit's date</span></li>
         <li><span><b>Every view is a link</b>, shareable and embeddable</span></li>
@@ -237,9 +238,9 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <div class="right">
       <div class="pair">
         <div><div class="shot"><img src="img/barnard-diff.png" alt="Difference of two SPHEREx visits of Barnard's Star"></div>
-          <div class="cap"><b>Difference</b> of two visits a year apart: blue where Barnard's Star was in Aug 2025, red where it was in Aug 2026</div></div>
-        <div><div class="shot"><img src="img/cube.jpg" alt="Time cube of Barnard's Star"></div>
-          <div class="cap"><b>Time cube</b>: each layer is one visit, so the star's track climbs north through Aug 2025, Mar 2026 and Aug 2026</div></div>
+          <div class="cap"><b>Difference</b>, Aug 2026 minus Aug 2025: blue is the earlier position, red the later one</div></div>
+        <div><div class="shot"><img src="img/browser.jpg" alt="The Seek In Space web app showing Barnard's Star in Difference mode"></div>
+          <div class="cap"><b>In the browser</b>: pick Barnard's Star, press Play, then choose Difference; the timeline shows the visit dates</div></div>
       </div>
     </div>
   </div>
@@ -254,8 +255,8 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <div class="micro"><span class="n">03</span> — How it works</div>
     <h2 class="display">It reads only what it needs from NASA's <em>open archive.</em></h2>
     <div class="pipe">
-      <div class="step"><div class="n">01</div><h3>Find</h3><p>Our own index of all 1.6 M DR1 + QR3 files; IRSA TAP and SIA as fallbacks</p><div class="m">~90 ms</div></div>
-      <div class="step"><div class="n">02</div><h3>Read</h3><p>HTTP range requests to the public S3 copy, matching astropy exactly in tests</p><div class="m">2 of 64 MB</div></div>
+      <div class="step"><div class="n">01</div><h3>Find</h3><p>Local index of 1.6 M DR1 + QR3 files; median lookup over 200 random positions</p><div class="m">~90 ms</div></div>
+      <div class="step"><div class="n">02</div><h3>Read</h3><p>Reads only the required image rows from public S3; arrays match Astropy in our tests</p><div class="m">~2 MB / exposure</div></div>
       <div class="step"><div class="n">03</div><h3>Align</h3><p>Common north-up grid, visits, per-detector co-adds with outlier and flag rejection</p><div class="m">6 detectors</div></div>
       <div class="step"><div class="n">04</div><h3>Measure</h3><p>Forced PSF photometry with each file's own PSF and per-pixel wavelengths</p><div class="m">102 bands</div></div>
       <div class="step"><div class="n">05</div><h3>Analyse</h3><p>Spectra, classification, motion, periods, catalogues matched at the right epoch</p><div class="m">one click</div></div>
@@ -263,7 +264,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     </div>
     <div class="strip">
       <div><div class="v">~5 s</div><div class="k">358 exposures of Barnard's Star, cached</div></div>
-      <div><div class="v">6–13 s</div><div class="k">a field never requested before, ~200 exposures</div></div>
+      <div><div class="v">6–13 s</div><div class="k">~200 exposures, uncached, in our tests</div></div>
       <div><div class="v">1.6 M</div><div class="k">SPHEREx files in our own index</div></div>
       <div><div class="v">1 h</div><div class="k">for new SPHEREx data to reach the index</div></div>
     </div>
@@ -282,10 +283,10 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       <div class="r"><div class="t">Barnard's Star<span>Fastest-moving star</span></div><p>Moves <b>10″ a year</b>; three visit positions within <span class="y">0.5″</span> of the Gaia prediction</p></div>
       <div class="r"><div class="t">ε Indi B<span>Brown dwarf binary</span></div><p><b>T-dwarf-like</b> spectrum with strong 3.3 µm methane; moves <span class="y">4.42 ± 0.29″/yr</span> (Gaia: 4.68)</p></div>
       <div class="r"><div class="t">WISE 0855−0714<span>Coldest known brown dwarf</span></div><p>A <b>moving source seen only at 3.8–5 µm</b>, as a ~285 K object should be, next to a brighter star</p></div>
-      <div class="r"><div class="t">R Draconis<span>Mira variable</span></div><p>Period <span class="y">236 or 247 days</span> by two methods; catalogue value 246 days</p></div>
-      <div class="r"><div class="t">RW Aurigae<span>Young T Tauri star</span></div><p>Faded about <b>1.9×</b> at 4–5 µm in one year</p></div>
+      <div class="r"><div class="t">R Draconis<span>Mira variable</span></div><p>Period estimates <span class="y">236 and 247 days</span> (catalogue: 246); sparse visits limit precision</p></div>
+      <div class="r"><div class="t">RW Aurigae<span>Young T Tauri star</span></div><p>Relative flux fell <b>~1.9×</b> at 4–5 µm; saturated, systematics up to ~15 %</p></div>
     </div>
-    <p class="foot">Synthetic J/H/Ks photometry of a comparison star agrees with 2MASS to ~2 %. Saturated stars get relative photometry, and the app says so.</p>
+    <p class="foot">One comparison star agrees with 2MASS to ~2 %; that is not an overall accuracy estimate. Saturated stars get relative photometry.</p>
     <div class="charts">
       <div class="shot" style="padding:18px 10px 6px">
 <!--CHART-->
@@ -518,10 +519,10 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 </svg>
 <!--/CHART-->
       </div>
-      <div class="cap"><b><span style="text-transform:none">ε</span> Indi B</b> · its 102-band spectrum from SPHEREx · water, methane and CO bands found automatically</div>
+      <div class="cap"><b><span style="text-transform:none">ε</span> Indi B</b> · measured SPHEREx spectrum · shaded: expected water, methane and CO bands</div>
     </div>
   </div>
-  <div class="bar bottom"><span>Methods and full validation report in the repository</span><span>seekin.space</span></div>
+  <div class="bar bottom"><span>Methods and validation report: seekin.space/evidence</span><span>seekin.space</span></div>
 </section>
 
 <!-- 6 · Discovery -->
@@ -534,10 +535,10 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <div class="cols">
       <div class="col">
         <h3>Comets &amp; asteroids</h3>
-        <p>Follow a known object across visits while the stars trail. Coma, tail and CO₂ tests give a comet-likeness score out of 100 (a ranking, not a probability).</p>
+        <p>Track known objects while the stars trail, measure their rotation, and rank comet-likeness with coma, tail and CO₂ tests (an experimental 0–100 ranking).</p>
         <div class="kv">
-          <div><span class="v a">99.9</span><span class="k">the interstellar comet 3I/ATLAS, strong CO₂</span></div>
-          <div><span class="v">100</span><span class="k">comet C/2025 A6 Lemmon, tail away from the Sun</span></div>
+          <div><span class="v a">5.27 h</span><span class="k">Eros rotation from its SPHEREx light curve: 5.27029 ± 0.00019 h (known 5.27026 h)</span></div>
+          <div><span class="v">~100</span><span class="k">comet-likeness of 3I/ATLAS and C/2025 A6, strong CO₂</span></div>
           <div><span class="v">≤ 1</span><span class="k">asteroids 433 Eros and 16 Psyche, as expected</span></div>
         </div>
       </div>
@@ -552,7 +553,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       </div>
       <div class="col">
         <h3>AI agents</h3>
-        <p>An MCP server gives assistants like Claude the same 30 tools, so they can chain a search-and-verify loop. Our demo runs one in the ε Indi field.</p>
+        <p>An MCP server exposes 30 tools for scripted searches. The ε Indi demo runs target lookup, sequence building, field analysis and report export.</p>
         <div class="term">
           <div class="c"># scripts/mcp_discovery_demo.py</div>
           <div><span class="c">agent →</span> <span class="f">resolve_target</span>("eps Ind B")</div>
@@ -563,7 +564,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       </div>
     </div>
   </div>
-  <div class="bar bottom"><span>Candidates, not yet confirmed discoveries</span><span>seekin.space/mcp</span></div>
+  <div class="bar bottom"><span>Search tools for Planet X candidates · no confirmed discovery yet</span><span>seekin.space/mcp</span></div>
 </section>
 
 <!-- 7 · Close -->
@@ -574,13 +575,13 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
     <div class="micro"><span class="n">06</span> — Try it</div>
     <h2 class="display">Open seekin.space and start with <em>Barnard's Star.</em></h2>
     <div class="aud">
-      <div><h3>Start here</h3><p>Press Play, then switch to Difference: the red–blue pair is the star moving in one year.</p></div>
+      <div><h3>Start here</h3><p>Search Barnard's Star, press Play, then choose Difference: blue is where it was, red where it is a year later.</p></div>
       <div><h3>Explore</h3><p>Plain-language hints, a guided tour of the five targets and a find-it-yourself game.</p></div>
       <div><h3>Research</h3><p>Errors, flags and χ²; FITS, CSV, VOTable and ADES exports; an MCP server for AI agents.</p></div>
     </div>
     <div class="next">
-      <div><h4>Where it stands</h4><p>No confirmed discovery yet, only candidates. Our showcase fields have 3–4 visits so far, and the file index picks up new data every hour.</p></div>
-      <div><h4>Next</h4><p>Train the real/bogus model on volunteer votes, alert people when a release covers their field, and find fast comets from a single pass.</p></div>
+      <div><h4>Where it stands</h4><p>No confirmed discovery yet, only candidates. Non-polar fields have 3–4 visits so far, and the file index picks up new data every hour.</p></div>
+      <div><h4>Planned</h4><p>Learn from volunteer votes, notify users when new data covers their field, and test single-pass searches for fast comets.</p></div>
     </div>
     <div class="cta">
       <div class="qr"><img src="img/qr.svg" alt="QR code for seekin.space"></div>

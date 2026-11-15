@@ -1,0 +1,1031 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Methods · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1>Methods</h1>
+<p>How a sequence is built, with the parameters the code uses today, what we have validated, and what we know is still weak. The reasoning behind each choice is in the <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/README.md">ADRs</a>; the data themselves are described in <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/data.md">data.md</a>.</p>
+<h2>Inputs</h2>
+<p>A request gives a target and processing options:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ra</code>, <code>dec</code></td>
+<td>—</td>
+<td>ICRS position in degrees at <code>ref_epoch</code></td>
+</tr>
+<tr>
+<td><code>pmra</code>, <code>pmdec</code></td>
+<td>0</td>
+<td>proper motion, mas/yr (<code>pmra</code> includes cos δ)</td>
+</tr>
+<tr>
+<td><code>ref_epoch</code></td>
+<td>2000.0</td>
+<td>Julian year of the position</td>
+</tr>
+<tr>
+<td><code>fov_arcmin</code></td>
+<td>6</td>
+<td>field of view, 1–30 arcmin</td>
+</tr>
+<tr>
+<td><code>gap_days</code></td>
+<td>20</td>
+<td>a gap longer than this starts a new epoch</td>
+</tr>
+<tr>
+<td><code>max_epoch_days</code></td>
+<td>45</td>
+<td>an epoch never spans more than this</td>
+</tr>
+</tbody>
+</table>
+<h2>Pipeline</h2>
+<h3>1. Search</h3>
+<p>Propagate the target to 2026.0 and query our local index of SPHEREx Level 2 files (a mirror of the archive's file catalogue, re-synced every hour; <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0057-data-access-mirror-and-fallbacks.md">ADR-0057</a>) for every <code>science</code> image whose footprint contains that position in the configured collections. IRSA TAP and SIA are fallbacks. Keep one image per (observation id, detector), preferring DR1 over QR3 (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0003-tap-image-discovery.md">ADR-0003</a>). Results are cached for 12 hours.</p>
+<h3>2. Output grid</h3>
+<p>Centre the grid on the target's position at the median MJD of its images. TAN projection, north up, east left, 6.15″ pixels, n = ceil(FOV / 6.15″) made odd (minimum 9); 6′ gives 59 × 59 pixels (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0006-common-output-grid.md">ADR-0006</a>).</p>
+<h3>3. Read cutouts</h3>
+<p>For each image, read a square of 2h + 1 native pixels around the grid centre, with h = ceil(n / 2 × 1.42) + 3 (45 for a 6′ field): <code>IMAGE</code>, <code>FLAGS</code> and <code>VARIANCE</code>.</p>
+<ul>
+<li><strong>Where from.</strong> First IRSA's cutout service, which cuts the window on its side: one request, ~160 KB at 6′, with at most 8 requests open per build. When no request slot is free, or the service is busy, slow or answers with something unusable, the image is read from S3 with HTTP range requests (<code>FLAGS</code> RICE tiles decoded on our side). Both give the same pixels (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0002-s3-range-reads.md">ADR-0002</a>, <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0038-irsa-cutouts.md">ADR-0038</a>).</li>
+<li><strong>What is kept.</strong> Each file's rows are cached in one chunk, with the columns of a 30′ field, so a wider or narrower field later reads only rows it does not hold yet. <code>VARIANCE</code> is read only within 22 px of the target, the farthest any measurement looks; elsewhere it is NaN (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0037-per-file-chunk-cache.md">ADR-0037</a>).</li>
+<li><strong>How.</strong> The images are read in batches of 2–16 on the process pool, each worker reading and processing its own (step 4), with 64 images in flight over the whole build. The epoch the viewer opens on is read first, and a preview of the finished epochs is published while the rest is read (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0039-batched-fetch-and-previews.md">ADR-0039</a>).</li>
+<li><strong>Tables.</strong> The detector's wavelength table (<code>WCS-WAVE</code>) and effective-PSF table (<code>EPSF</code>, 441 zones) are read once per detector from S3 and cached (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0016-epsf-psf-photometry.md">ADR-0016</a>).</li>
+</ul>
+<h3>4. Per exposure (process pool)</h3>
+<ol>
+<li><strong>Mask.</strong> Set pixels with any image-mask bit to NaN: <code>TRANSIENT</code>, <code>SUR_ERROR</code>, <code>NONFUNC</code>, <code>MISSING_DATA</code>, <code>HOT</code>, <code>COLD</code>, <code>PERSIST</code>, <code>OUTLIER</code>, <code>STREAK</code>, <code>SNOWBALL</code> (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0018-photometry-flag-policy.md">ADR-0018</a>).</li>
+<li><strong>Background.</strong> Subtract the sigma-clipped median (3σ, 5 iterations) of the remaining pixels; keep the clipped standard deviation as the exposure's noise <code>rms</code>.</li>
+<li><strong>Align.</strong> Map grid pixels to cutout pixels through the exposure WCS (SIP included) evaluated on a 9 × 9 control grid and a cubic spline. Resample bilinearly with NaN-aware weights (data × valid and valid resampled separately, output NaN below half valid weight) so masked areas do not grow; resample flags nearest-neighbour. The exposure is also aligned without masking (<code>aligned_raw</code>) for filling co-add holes (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0017-nan-aware-resampling-and-filled-coadds.md">ADR-0017</a>).</li>
+<li><strong>Photometry</strong> at the target's position at <code>MJD-AVG</code> (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0010-proper-motion-aware-targets.md">ADR-0010</a>, <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0016-epsf-psf-photometry.md">ADR-0016</a>):
+   - <strong>ePSF fit (primary, <code>method: "psf"</code>).</strong> The ePSF of the detector zone nearest the cutout centre (33 × 33, oversampled 5×) is evaluated with a cubic spline at the target's sub-pixel position and normalised to unit sum at that phase. Flux and a constant background are fitted by weighted linear least squares (weights 1/<code>VARIANCE</code>) on pixels within 5 px that are neither saturated (<code>OVERFLOW</code>, <code>NONLINEAR</code>) nor masked. A fit is made if the usable pixels hold ≥ 2 % of the PSF; <code>npix</code>, reduced <code>chi2</code> and <code>psf_weight</code> (PSF fraction in the fitted pixels) are reported; <code>saturated</code> is set when a saturated pixel lies within 2 px.
+   - <strong>Aperture (secondary, <code>flux_ap_mjy</code>).</strong> r = max(1.5 px, FWHM) with FWHM = <code>PSF_FWHM</code> / √<code>OMEGA_MEDIAN</code>; background: sigma-clipped (3σ) median in an annulus from max(4 px, 2.5 × FWHM) to 3 px further out; exact-overlap sum with Gaussian aperture correction 1/(1 − exp(−r²/2σ²)). It becomes the primary value (<code>method: "aperture"</code>) when no fit is possible.
+   - <strong>Radial profile for rings.</strong> Background-subtracted sums, variances and pixel counts in 1-px annuli out to 16 px (local background: median of usable pixels at 16–21 px, else the frame background), and the radius of the saturated core: the blob of <code>OVERFLOW</code>/<code>NONLINEAR</code>/<code>TRANSIENT</code>/<code>SUR_ERROR</code>/<code>BLOOM</code> pixels touching the source. <code>PERSIST</code> is left out of the core because persistence blobs from earlier exposures are not centred on the star (up to ~200 px around Barnard's Star in D3) (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0020-ring-photometry-for-saturated-stars.md">ADR-0020</a>).
+   - <strong>Errors.</strong> From <code>VARIANCE</code>, with a 3 % systematic floor added in quadrature.
+   - <strong>Units and wavelength.</strong> MJy/sr × <code>OMEGA_MEDIAN</code> → mJy, AB magnitude; wavelength and bandwidth from the detector's <code>WCS-WAVE</code> table at the target pixel, bilinear in raw pixel coordinates.
+   - <strong><code>flagged</code>.</strong> For a fit: usable PSF weight &lt; 20 %, more than 20 % of the PSF weight on masked pixels, or <code>GHOST</code>/<code>BLOOM</code>/<code>CROSSTALK</code> on a fitted pixel. For an aperture value: any photometry-bad bit in the aperture (image mask, <code>OVERFLOW</code>, <code>NONLINEAR</code>, <code>GHOST</code>, <code>BLOOM</code>, <code>CROSSTALK</code>; <code>HALO</code> is informational) or more than 20 % of it masked (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0018-photometry-flag-policy.md">ADR-0018</a>).</li>
+</ol>
+<h3>5. Ring photometry for saturated detectors</h3>
+<p>A detector switches to rings when at least half of its exposures are saturated (or failed with a bad-pixel blob over the source). All its exposures then use one ring, from 1 px outside the 95th percentile of the saturated-core radii, 3 px wide (capped at 16 px); masked pixels in the ring are filled with their annulus mean, and exposures whose ring is cut by the cutout edge or has under 60 % usable pixels lose their photometry instead of mixing methods. These records have <code>method: "ring"</code>, <code>relative: true</code>, <code>ring_r_in</code>, <code>ring_r_out</code> and no AB magnitude: the flux is the ring's share of the light, comparable only within one detector and wavelength. Divided by the median of their wavelength bin, as the web client does, they give a relative light curve. The chosen rings are in <code>processing.rings</code> (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0020-ring-photometry-for-saturated-stars.md">ADR-0020</a>).</p>
+<h3>6. Epochs and co-adds</h3>
+<p>Sort exposures by time; start a new epoch after a gap &gt; <code>gap_days</code> or when the epoch spans <code>max_epoch_days</code>. Then fold every epoch with fewer than 20 exposures into its nearest neighbour if they are less than 60 days apart; epochs still below 20 exposures are kept with <code>partial: true</code> (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0019-merge-small-epochs.md">ADR-0019</a>). For each epoch and detector: with ≥ 4 exposures, reject pixels more than 5 × max(1.4826 × MAD, median <code>rms</code>) from the per-pixel median; then take the mean weighted by 1/<code>rms</code>² per exposure. Pixels that no clean exposure covered (coverage 0, typically saturated star cores whose pixels also carry masked bits) are filled with the median of the unmasked values and get pipeline flag bit 31 <code>FILLED</code>. Also record the number of contributing exposures per pixel and the bitwise OR of flags (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0007-epochs-and-coadds.md">ADR-0007</a>, <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0017-nan-aware-resampling-and-filled-coadds.md">ADR-0017</a>).</p>
+<h3>7. Outputs</h3>
+<p><code>coadds.f32</code>, <code>coverage.u16</code>, <code>flags.u32</code> (FLAGS bits plus pipeline bit 31 <code>FILLED</code>), <code>exposures.f16</code> (if ≤ 80 million voxels) and <code>meta.json</code> with the grid, epochs (dates, <code>partial</code>, exposures, wavelength range and filled pixels per detector), every exposure (date, detector, wavelength, noise, flag counts, predicted target pixel), photometry (<code>method</code>, <code>flux_mjy</code>, <code>err_mjy</code>, <code>saturated</code>, <code>npix</code>, <code>chi2</code>, <code>psf_weight</code>, <code>flux_ap_mjy</code>, <code>err_ap_mjy</code>, <code>relative</code>, <code>ring_r_in</code>, <code>ring_r_out</code>, <code>flagged</code>, …), flag definitions (<code>pipeline: true</code> for bit 31), the processing constants (<code>processing</code>), the predicted target track per epoch, and timing and transfer statistics (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0005-server-side-alignment-client-side-display.md">ADR-0005</a>).</p>
+<h2>Measured performance</h2>
+<p>From the dev server in Pennsylvania (32 vCPU), 6′ field:</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Exposures used</th>
+<th>Epochs</th>
+<th>Requests</th>
+<th>Transferred</th>
+<th>Build time (TAP query)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Barnard's Star</td>
+<td>358 / 358</td>
+<td>6</td>
+<td>2,190</td>
+<td>718 MB</td>
+<td>37.7 s (12.3 s)</td>
+</tr>
+<tr>
+<td>ε Indi B</td>
+<td>458 / 458</td>
+<td>5</td>
+<td>2,748</td>
+<td>996 MB</td>
+<td>39.4 s (2.7 s)</td>
+</tr>
+<tr>
+<td>WISE 0855−0714</td>
+<td>258 / 258</td>
+<td>4</td>
+<td>1,548</td>
+<td>555 MB</td>
+<td>29.2 s (8.7 s)</td>
+</tr>
+<tr>
+<td>RW Aurigae</td>
+<td>335 / 335</td>
+<td>3</td>
+<td>2,010</td>
+<td>692 MB</td>
+<td>41.0 s (14.7 s)</td>
+</tr>
+</tbody>
+</table>
+<p>These first builds ran before the process-pool change (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/adr/0013-process-pool-and-slim-headers.md">ADR-0013</a>). Rebuilding Barnard's Star from cached cutouts took 19.2 s before that change and 5.2 s after it.</p>
+<p>ALGO_VERSION 2 rebuilds at each preset's field of view (cutouts cached except WISE 0855, whose preset moved by 0.2″; the first build also reads the six ePSF tables, 3.9 MB each):</p>
+<table>
+<thead>
+<tr>
+<th>Target (FOV)</th>
+<th>Exposures</th>
+<th>Epochs</th>
+<th>Build time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Barnard's Star (6′)</td>
+<td>358</td>
+<td>3</td>
+<td>6.1 s</td>
+</tr>
+<tr>
+<td>ε Indi B (16′)</td>
+<td>458</td>
+<td>4</td>
+<td>4.0 s</td>
+</tr>
+<tr>
+<td>WISE 0855−0714 (6′)</td>
+<td>258</td>
+<td>3</td>
+<td>24.7 s from S3 (555 MB, TAP 13.0 s)</td>
+</tr>
+<tr>
+<td>RW Aurigae (6′)</td>
+<td>335</td>
+<td>3</td>
+<td>2.7 s</td>
+</tr>
+<tr>
+<td>R Draconis (6′)</td>
+<td>2,493</td>
+<td>10</td>
+<td>16.4 s</td>
+</tr>
+</tbody>
+</table>
+<p>With per-file chunks, batched reading on the pool and IRSA cutouts first (ADR-0037 to ADR-0039), Barnard's Star at 6′ (358 exposures, 583 MB, dev server, 29 workers, 128 exposures in flight, TAP query cached; the default of 64 is within the same spread, ADR-0039):</p>
+<table>
+<thead>
+<tr>
+<th>Build</th>
+<th>Before (ADR-0037)</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cold: first picture (opening epoch, 118 exposures)</td>
+<td>only the full result</td>
+<td>3.0–3.5 s in about half the runs, up to 7 s when one of its reads is slow</td>
+</tr>
+<tr>
+<td>Cold: full result</td>
+<td>19.8–20.4 s</td>
+<td>6.6–10.4 s, median 7.9 s</td>
+</tr>
+<tr>
+<td>Every row already cached</td>
+<td>4.4 s</td>
+<td>~1.0 s</td>
+</tr>
+</tbody>
+</table>
+<h2>Validation so far</h2>
+<ul>
+<li><strong>Reader correctness.</strong> For a DR1 file, the range reader's <code>IMAGE</code>, <code>VARIANCE</code> and <code>FLAGS</code> cutouts are identical to astropy's <code>section</code> reads (<code>backend/tests/test_reader_network.py</code>).</li>
+<li><strong>Wavelengths.</strong> Our <code>WCS-WAVE</code> interpolation equals astropy's FITS <code>-TAB</code> result to a relative 10⁻⁶ at four test pixels, once the SIP keywords are removed from the header (see the gotcha in <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/data.md#wcs-wave-wavelength-per-pixel">data.md</a>).</li>
+<li><strong>Astrometry and proper motion.</strong> Flux-weighted centroids of Barnard's Star per visit, measured on cutouts from S3, match the propagated positions to better than 1″ (about 0.15 pixel) on the three full visits:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Epoch</th>
+<th>Exposures</th>
+<th>ΔRA·cos δ measured</th>
+<th>predicted</th>
+<th>ΔDec measured</th>
+<th>predicted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2025.653</td>
+<td>108</td>
+<td>−19.9″</td>
+<td>−20.6″</td>
+<td>266.0″</td>
+<td>265.8″</td>
+</tr>
+<tr>
+<td>2026.207</td>
+<td>113</td>
+<td>−20.5″</td>
+<td>−21.0″</td>
+<td>271.8″</td>
+<td>271.6″</td>
+</tr>
+<tr>
+<td>2026.637</td>
+<td>117</td>
+<td>−21.9″</td>
+<td>−21.4″</td>
+<td>276.0″</td>
+<td>276.0″</td>
+</tr>
+</tbody>
+</table>
+<p>Offsets are from the J2000 position. The star moved 10″ (1.6 pixels) north between the first and last full visits.
+- <strong>Validation of ALGO_VERSION 1 and 2</strong> on all five targets, with the scripts and numbers, is in <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/../analysis/validation/REPORT.md">analysis/validation/REPORT.md</a>. After the version-2 fixes:
+  - a G = 13.9 field star matches 2MASS J/H/Ks at 1.00/1.04/1.02 and WISE W1/W2 at 0.93/1.08 (version 1: 0.94/0.97/0.94 and 0.91/0.99);
+  - its normalised light curve has reduced χ² = 1.2 against a constant (version 1: 3.8) and only 3 % of points are flagged (version 1: 24 %);
+  - Barnard's Star has 3 epochs whose centroids follow its proper motion to ≤ 0.36″, and its co-add cores are filled (≤ 1 NaN pixel instead of up to 49);
+  - RW Aur fades by about 2× at 4–5 µm (D5 1.13 → 1.00 → 0.50, D6 1.47 → 1.00 → 0.63) while brightening at 0.75–1.1 µm, in ePSF fits and independently in PSF-wing photometry.
+- <strong>ALGO_VERSION 3 (ring photometry)</strong>, from the pipeline's own photometry normalised per wavelength bin (<code>analysis/validation/pipeline_lightcurves.py</code>):
+  - R Draconis: every detector uses rings (9–15 px); Lomb–Scargle on 2,452 measurements gives a period of 236 d (power 0.29; expected ≈ 245 d).
+  - RW Aur: D5 1.22 → 1.00 → 0.65 and D6 1.38 → 1.00 → 0.74 (fading), D1 0.84 → 1.00 → 1.24 (brightening) over Sep 2025 – Sep 2026.
+  - Barnard's Star (constant): per-epoch medians within 1–4 % in D1, D4, D5 and D6 and 1.00 / 1.00 / 1.00 over all detectors, but up to 14 % off in D2 and D3 (see limitations).
+  - ε Indi B, WISE 0855 and the comparison star are unsaturated and keep ePSF photometry in every detector.
+- <strong>Unit tests</strong> cover coordinate parsing, proper-motion propagation, epoch grouping and merging, outlier rejection and hole filling in co-adds, NaN-aware resampling, grid centring, wavelength interpolation, FITS header parsing, flags, ePSF photometry with saturated cores, ring photometry (flux scaling through a growing saturated core, one ring per detector), catalog failures mapped to HTTP 502, the result format and the HTTP API; network tests compare the reader's cutouts, wavelengths and ePSF table with astropy (<code>backend/tests/</code>).</p>
+<h2>Known limitations</h2>
+<ul>
+<li><strong>Heavily saturated stars.</strong> The ePSF covers only ±3.3 px and holds ~97 % of the flux in the central 3 × 3 pixels, so stars whose saturated core is larger than that (R Draconis, Barnard's Star, RW Aur) get ring photometry instead: relative fluxes only, no calibrated spectrum. Ring fluxes depend on the wing profile at 4–15 px, which changes with the detector position, so constant stars scatter by ~5 % per exposure and per-epoch medians can be off by up to ~14 % in some detectors (Barnard's Star D2/D3); amplitudes below ~15 % are not reliable with this method.</li>
+<li><strong>Blends.</strong> With 6.15″ pixels, neighbours within about 10″ contaminate both the ePSF fit (single source, fixed position) and the aperture. WISE 0855 passes 8″ from a G = 16.3 star in 2025–26, which dominates D1–D4 at its position.</li>
+<li><strong>Absolute flux scale</strong> rests on the ePSF normalisation; one field star agrees with 2MASS and WISE to within 8 %, more stars are needed for a proper calibration check.</li>
+<li><strong>Mixed wavelengths in co-adds.</strong> A detector co-add averages up to 17 channels; epochs that miss channels can change the apparent brightness of strongly coloured sources.</li>
+<li><strong>Filled co-add pixels</strong> (<code>FILLED</code>) come from flagged pixels: fine for display, not for measurement.</li>
+<li><strong>Parallax ignored</strong> in position propagation (0.55″ for Barnard's Star).</li>
+<li><strong>Fixed flag policy;</strong> users can display any flag but cannot yet change which bits are masked.</li>
+<li><strong>Running jobs are not persistent;</strong> a restart loses in-flight builds (finished results stay on disk).</li>
+</ul>
+<h2>Analyses on a built sequence</h2>
+<ul>
+<li><strong>Photometry of any position</strong> (ADR-0027): the pipeline's measurements on the cached native cutouts, at a new position with optional proper motion, PSF zone nearest to that position. Re-measuring the targets reproduces the build's fluxes exactly for Barnard's Star (357 of 358 exposures) and with a median difference of zero for ε Indi B (maximum 6 %, expected where the PSF zone nearest the source differs from the one nearest the cutout centre that the build used). 11–14 s for 358–458 exposures in a cold script, no downloads.</li>
+<li><strong>Proper motion</strong> (ADR-0028): flux-weighted centroids per epoch and detector, a straight-line fit with per-detector zero points. ε Indi B 3628 ± 305 / −2526 ± 260 mas/yr (Gaia 3982 / −2467); Barnard's Star −1316 ± 325 / 9557 ± 385 (Gaia −802 / 10362); three static Gaia stars −98 … +57 mas/yr. Precision is about 300 mas/yr with 3–4 visits; per-detector centroids of bright, saturated stars scatter by ~0.5″.</li>
+<li><strong>Periodograms</strong> (ADR-0029): Lomb–Scargle on the client-identical relative light curve. R Dra 235.7 d (standard) and 246.9 d (multiband) against ~245 d; RW Aur's three visits give the visit spacing (131 d), not a period.</li>
+</ul>
+<h3>Calibration checks (2026-11-14)</h3>
+<ul>
+<li><strong>Wavelengths.</strong> WCS-WAVE (the 9 × 9 lookup we use) against the EPSF table's CWAVE at all 441 zone centres: median offset +0.02–0.04 % (D1–D4) and +0.14–0.16 % (D5–D6), maximum 0.19 % — a fifth of a resolution element or less. Bandwidths agree in the median (−0.04 %) but differ by up to 4 % (95th percentile) in some zones. No change needed.</li>
+<li><strong>Pixel solid angle.</strong> The pixel area from the WCS (with SIP) is 0.03 % below OMEGA_MEDIAN at the detector centre and 0.9–1.3 % away from it at the corners and edges, so using OMEGA_MEDIAN for every pixel biases fluxes by up to ~1.3 % near the edges. Proposed (needs an algorithm version bump): compute the solid angle at the target pixel from the WCS Jacobian.</li>
+</ul>
+<h2>Archival epochs and solar-system objects</h2>
+<h3>Archival epochs (ADR-0023)</h3>
+<ol>
+<li>CAOM TAP search around the grid centre: 2MASS and AllWISE images that intersect the field, NEOWISE-R
+   frames that contain the centre (<code>spherex_core/archival/sources.py</code>).</li>
+<li>Pixels: AllWISE Atlas tiles and NEOWISE-R frames by range reads from <code>s3://nasa-irsa-wise</code> (rows covering
+   the field only); 2MASS images downloaded whole (gzip, ~1.5 MB).</li>
+<li>Calibration to MJy/sr: <code>DN × F0 × 10^(−0.4 MAGZP) / Ω_pixel</code>, Vega zero points 1594 / 1024 / 666.7 Jy
+   (J/H/Ks) and 309.54 / 171.79 Jy (W1/W2).</li>
+<li>Background: sigma-clipped median subtracted per image.</li>
+<li>Smoothing to the SPHEREx scale: NaN-aware Gaussian, σ = 0.35 × (6.15″ / native pixel) native pixels
+   (2.2 px for 2MASS, 1.6 for AllWISE, 0.8 for NEOWISE); then bilinear resampling onto the sequence grid.</li>
+<li>Epochs: 2MASS images within 3 days mosaicked (mean), all AllWISE tiles mosaicked (mean), NEOWISE single
+   exposures median-combined per visit (gap &gt; 20 days or span &gt; 30 days starts a new visit; ≥ 3 frames).</li>
+</ol>
+<p>Checks (2026-11-14, light-weighted centroid within 4 px of the predicted target position):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Frames</th>
+<th>Baseline</th>
+<th>Centroid offset from proper motion</th>
+<th>Build</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Barnard's Star, 12′</td>
+<td>47</td>
+<td>2000.4–2024.2</td>
+<td>0.1–2.5″ (median ~0.8″)</td>
+<td>134 s, 1.1 GB</td>
+</tr>
+<tr>
+<td>ε Indi B, 16′</td>
+<td>50</td>
+<td>1999.9–2024.4</td>
+<td>0.2–1.4″</td>
+<td>130 s, 1.5 GB</td>
+</tr>
+<tr>
+<td>ε Indi B, 20′</td>
+<td>50</td>
+<td>1999.9–2024.4</td>
+<td>0.2–1.3″</td>
+<td>95 s, 1.75 GB</td>
+</tr>
+</tbody>
+</table>
+<p>Limitations: AllWISE combines 2010 passes ~6 months apart, so fast movers look slightly elongated; 2MASS
+coverage of wide fields can be partial (<code>coverage</code>); bright stars saturate in 2MASS and WISE.</p>
+<h3>Solar-system objects (ADR-0024)</h3>
+<p>IRSA MOST lists the SPHEREx files that contain the object with its predicted position at each exposure
+start. The co-moving build cuts out and resamples every exposure on a grid centred on that position, then
+runs the normal epoch grouping, co-adds and photometry, so co-adds stack the object while the stars trail.</p>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>MOST</th>
+<th>Files</th>
+<th>Epochs</th>
+<th>Build</th>
+<th>Brightest co-add pixel</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3I/ATLAS, 2025-08-01..20</td>
+<td>1.9 s</td>
+<td>160</td>
+<td>1</td>
+<td>11 s</td>
+<td>central pixel in D1–D6 (D4: 1 px off), S/N 69 (D1) to 3 (D6)</td>
+</tr>
+<tr>
+<td>433 Eros, 2025-04..2026-11</td>
+<td>12–165 s</td>
+<td>954</td>
+<td>6</td>
+<td>47 s</td>
+<td>central pixel in every epoch and detector</td>
+</tr>
+</tbody>
+</table>
+<p>Command-line tools: <code>scripts/build_archival.py &lt;sequence id&gt; [--fov 12]</code> builds (or warms) archival epochs and
+prints the target's centroid offset in every frame; <code>scripts/build_moving.py &lt;name&gt; [--begin --end --type]</code>
+runs the MOST search and builds the co-moving sequence.</p>
+<h3>Static sky, comets, asteroids, unknown movers (ADR-0060)</h3>
+<p><strong>Static sky ("different background, same comet").</strong> A co-moving build with <code>static_sky</code> gives every exposure a
+template made of SPHEREx's own images of the same patch: same detector, wavelength within 1.5 resolution elements
+(from the footprint corners and the detector's wavelength map, re-measured after alignment), taken while the object
+was more than the grid half-diagonal plus a coma margin away (ephemeris interpolated inside a visit, extrapolated
+up to 30 days along it). Up to four candidates are read; the template is their median (two or more within
+0.5 dλ), a linear interpolation in wavelength, or the nearest one. The clean exposure is aligned − template − outer
+offset; pixels where the template is bright enough that the measured residual fraction ε would leave more than
+3σ (template &gt; max(3, 3/ε) σ) are masked. The clean stacks are the normal co-adds of the clean exposures.</p>
+<table>
+<thead>
+<tr>
+<th>Sequence</th>
+<th>Exposures with a template</th>
+<th>Templates read</th>
+<th>p99 |pixel|/σ before → after</th>
+<th>Masked</th>
+<th>Static-sky time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3I/ATLAS Aug 2025, 6′</td>
+<td>160/160</td>
+<td>576 (1.2 GB)</td>
+<td>31.7 → 1.6 (3σ mask)</td>
+<td>22 %</td>
+<td>205 s (177 s MOST searches)</td>
+</tr>
+<tr>
+<td>3I/ATLAS Aug 2025, 16′</td>
+<td>160/160</td>
+<td>576 (2.9 GB)</td>
+<td>35.2 → 2.1</td>
+<td>8.5 %</td>
+<td>75 s; 29 s with cached searches</td>
+</tr>
+<tr>
+<td>C/2025 A6 (Lemmon), 10′, 2 visits</td>
+<td>228/228</td>
+<td>653 (2.1 GB)</td>
+<td>43.3 → 2.4</td>
+<td>11 %</td>
+<td>352 s (314 s searches)</td>
+</tr>
+<tr>
+<td>433 Eros, 6′, 6 visits</td>
+<td>952/954 (1 of 109 searches failed)</td>
+<td>2,399 (5.1 GB)</td>
+<td>21.3 → 2.2</td>
+<td>6.3 %</td>
+<td>436 s</td>
+</tr>
+<tr>
+<td>16 Psyche, 6′, 2 visits</td>
+<td>295/295</td>
+<td>670 (1.4 GB)</td>
+<td>32.7 → 2.2</td>
+<td>8.0 %</td>
+<td>70 s</td>
+</tr>
+</tbody>
+</table>
+<p>Searches ran on IRSA MOST (fixed-point pseudo-orbit) because IRSA TAP answered 502 during these runs; TAP takes
+seconds when it is up. In the 3I/ATLAS D5 clean stack the CO2 coma is visible to ~3′ where the plain stack shows
+star trails.</p>
+<p><strong>Comets.</strong> Apertures of fixed radius in km (θ″ = ρ / (725.27 Δ_au), Δ from SPHEREx) on the clean exposures,
+masked pixels filled with their ring mean; Afρ = (2Δr_h)²/ρ · F/F_sun with the CALSPEC Sun averaged over each
+channel, A(0)fρ with the Halley–Marcus phase function; gas and ice bands from a linear continuum through
+sidebands (emission: integrated flux from the channel response; absorption: depth), Monte Carlo errors;
+Q = 2vN/(πρ), N = 4πΔ²F/(g hν), v = 0.85 r_h^−0.5 km/s, g(CO2) = 2.86·10⁻³, g(CO) = 2.6·10⁻⁴,
+g(H2O 2.7 µm) = 2.8·10⁻⁴ s⁻¹ at 1 au (× r_h⁻²); 3σ upper limits when not detected.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Measured (ρ = 2·10⁴ / 5·10⁴ km)</th>
+<th>Published</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3I/ATLAS Aug 2025, r_h 3.22 au, Δ 2.71 au, α 17°</td>
+<td>Q(CO2) 8.7·10²⁶ / 1.1·10²⁷ s⁻¹ (53σ, 56σ)</td>
+<td>9.4·10²⁶–1.6·10²⁷ (SPHEREx team, arXiv 2508.15469, 2512.07318)</td>
+</tr>
+<tr>
+<td></td>
+<td>Q(H2O) 3.3 / 4.0·10²⁶ s⁻¹ (3.4σ, 4.3σ)</td>
+<td>~3.2·10²⁶ (ibid.)</td>
+</tr>
+<tr>
+<td></td>
+<td>CO not detected: Q &lt; 5.1·10²⁶ (3σ)</td>
+<td>&lt; 2.8·10²⁶ (ibid.)</td>
+</tr>
+<tr>
+<td></td>
+<td>water-ice 3 µm band depth 0.75 ± 0.07 (10.5σ)</td>
+<td>ice absorption reported (ibid.)</td>
+</tr>
+<tr>
+<td></td>
+<td>Afρ (D1) 204 cm, A(0)fρ 379 cm; dust colour −1.5 ± 0.3 %/100 nm</td>
+<td>Afρ ~ 300 cm (r band, Aug 2025; arXiv 2509.01647, 2507.13409)</td>
+</tr>
+<tr>
+<td>C/2025 A6 (Lemmon) Feb 2026, r_h 2.12 au, Δ 1.95 au</td>
+<td>Q(CO2) 2.0 / 2.2·10²⁷, Q(CO) 1.4 / 1.2·10²⁷ s⁻¹ (61σ, 11σ); Afρ (D1) 723 cm</td>
+<td>—</td>
+</tr>
+<tr>
+<td>C/2025 A6 May 2026, r_h 3.33 au, Δ 2.87 au</td>
+<td>Q(CO2) 2.0 / 2.4·10²⁶, Q(CO) 7.9 / 9.3·10²⁶, Q(H2O) 5.0 / 5.5·10²⁶; Afρ 179 cm</td>
+<td>—</td>
+</tr>
+<tr>
+<td>C/2025 A6 activity</td>
+<td>A(0)fρ ∝ r_h^(−3.7 ± 0.2) (1683 → 319 cm), CO2 down 10×, CO down &lt; 2×</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>The Afρ of 3I/ATLAS falls with ρ (178, 204, 109, 62 cm at 1, 2, 5, 10·10⁴ km): its profile is steeper than ρ⁻¹
+beyond ~5·10⁴ km. One Lemmon visit has no channel inside the H2O 2.7 µm window, so that band is not measured there.</p>
+<p><strong>Asteroids.</strong> Fluxes from the ePSF photometry, or clean apertures (2 FWHM) scaled to it per detector;
+saturated detectors re-measured in their ring on the clean exposures (relative, light curve only). Reduced
+reflectance magnitudes at light-time corrected times; per visit a quadratic in wavelength per detector, a phase
+slope and a Fourier series; Δχ² summed over visits and zoomed at the peak. One brightness maximum per periodogram
+cycle (topographic prominence ≥ 10 %) means the peak is the second harmonic: P = 2 × peak, confirmed when the odd
+harmonics are significant. <code>period.confidence</code> is high when two or more visits peak on the joint period and it is
+not within 3 % of a harmonic of SPHEREx's 98.6-min orbit.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Result</th>
+<th>Known</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>433 Eros (308 ePSF points, 3 visits used)</td>
+<td>P = 5.27029 ± 0.00019 h, peak at 2.6351 h doubled (odd harmonics p = 4·10⁻¹²), confidence high, amplitude 1.2 mag at α ≈ 60°</td>
+<td>5.27026 h</td>
+</tr>
+<tr>
+<td>433 Eros, clean apertures (348 points)</td>
+<td>P = 5.27054 ± 0.00019 h</td>
+<td></td>
+</tr>
+<tr>
+<td>Eros spectrum (visit at α 60°, r 1.14 au)</td>
+<td>1 µm band depth 0.220 ± 0.014 at 0.958 µm, slope 43 %/µm, thermal tail 330 K (12 % at 3 µm) → S</td>
+<td>S (Sq)</td>
+</tr>
+<tr>
+<td>16 Psyche (82 ePSF + 143 clean-ring points)</td>
+<td>P = 3.46 h, confidence low (one visit peaks at the 1.62 h orbital alias) — <strong>not recovered</strong></td>
+<td>4.196 h</td>
+</tr>
+</tbody>
+</table>
+<p>Psyche (V ≈ 11) saturates D1–D3, its amplitude is ~0.1 mag, and ring photometry scatters by ~5 % per exposure
+(Known limitations), so its light curve is below what SPHEREx's sampling and these fluxes can resolve; no
+spectrum class either (no unsaturated 1 µm channels).</p>
+<p><strong>Unknown movers.</strong> Fixed-position sequences only: the field analysis' moving-object detection and JPL
+identification (or a finished field job), then every tracklet without a JPL match listed with its evidence and a
+tier (strong: high quality, ≥ 4 detections, detector pair confirmed ≥ 50 %, real/bogus ≥ 0.6), one step lower
+when a tracklet of another visit lies within 6″ (a real mover is elsewhere months later). Identification
+failures make tracklets "unverified". The ADES export (station 288) writes the strong ones; it is follow-up data
+for MPChecker / NEOCP checks, not a discovery claim.</p>
+<h3>Comet discovery (ADR-0063)</h3>
+<p>The comet search (<code>spherex_core.comets</code>) finds movers in a fixed field (field-analysis tracklets, single-pass
+tracklets, slow links over days with SPHEREx's parallax x(t) = x0 + v dt + B(t)/D, and a capped shift-and-stack),
+measures each along its track in exposures minus the other visits' static sky, and ranks them by a 0-100
+comet-likeness: coma extent and tail against field stars built the same way (bootstrap errors, interpolation and
+jitter corrected), CO2 / CO / H2O bands from the per-exposure spectrum, and a digest2-style orbit-class share
+(ranging with population densities). On a co-moving sequence it checks the object itself: 3I/ATLAS 99.9, C/2025 A6
+100, 433 Eros &lt;= 1, 16 Psyche 0.1 (ADR-0063 has the table). Scores are hand-weighted rankings, not probabilities.</p>
+<h2>Spectral analysis</h2>
+<p>Code: <code>spherex_core/spectral/</code> (ADRs 0040–0044); endpoints in <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/api.md#spectral-analysis">api</a>.</p>
+<ol>
+<li><strong>Binning.</strong> Per-exposure photometry is combined on a fixed grid of 102 bins (17 geometric bins per
+   detector, width ≈ λ/R). Inverse-variance mean after a 4σ robust cut; error = max(formal, scatter/√n).
+   Absolute spectra use calibrated, unflagged points; ring points of saturated stars are binned as
+   relative spectra. Built overall and per epoch.</li>
+<li><strong>Features.</strong> 16 curated features (H₂O 1.4/1.9/2.7, CH₄ 1.65/2.2/3.3, CO 2.3/4.6, CO₂ 4.26, H₂O ice 3.05,
+   CO₂ ice 4.27, CO ice 4.67, PAH 3.3, Paα, Brγ, Brα) measured against power-law side windows (one-sided ones
+   carried with the local continuum slope), 2 % systematic per window; depth, EW, significance for each.
+   Flux-ratio indices (methane 1.6/2.2/3.3 µm, water 1.4/1.9 µm, CO, 4 µm peak/J, K/4.5 µm). Automatic
+   detection against a log-log spline pseudo-continuum with asymmetric clipping, flagged unreliable when
+   more than a quarter of the bins sit &gt; 3σ below it (cool dwarfs).</li>
+<li><strong>Classification.</strong> Template χ² (Pickles 131 stars + SpeX standards M0–T9, integrated onto the grid, fitted
+   below 2.45 µm with a 3 % floor; relative probabilities after inflating errors to χ²/dof = 1), blackbody +
+   extinction grid (Indebetouw 2005), IR index α over 2–5 µm, IR excess at 3–3.8 and 3.8–5 µm against the
+   ≤ 2.45 µm blackbody, methane index; combined into a label and a family (star, late M dwarf, brown dwarf,
+   composite, YSO candidate).</li>
+<li><strong>Synthetic photometry.</strong> 2MASS J/H/Ks and WISE W1/W2 from the spectrum with SVO response curves and Vega
+   zero points (W2 extended past 5 µm with a power law), compared with matched 2MASS/CatWISE magnitudes.</li>
+<li><strong>Variability.</strong> Ratio spectra of each epoch against a reference epoch with a 3 % systematic per bin,
+   S/N ≥ 3 in both, per-detector weighted ratios and significance; usable for ring photometry.</li>
+</ol>
+<p>Validation on real sequences (ALGO 3 photometry):</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Result</th>
+<th>Expected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ε Indi B (T1+T6 binary)</td>
+<td>T3 standard, p = 1.0; CH₄(3.3)/4 µm = 0.19; H₂O, CH₄, CO bands at 17–160σ</td>
+<td>T dwarf, combined type ~T2</td>
+</tr>
+<tr>
+<td>G=13.9 comparison star</td>
+<td>G2V (p = 0.66, G class 1.0); no false feature detections; synthetic − catalogue J −0.003, H −0.021, Ks +0.005, W1 −0.011, W2 +0.007 mag</td>
+<td>normal star, calibration to a few %</td>
+</tr>
+<tr>
+<td>LP 944-20 (M9)</td>
+<td>L0 standard, p = 1.0; H₂O 1.4/1.9/2.7 µm; synthetic − 2MASS J +0.04, H +0.02, Ks −0.00</td>
+<td>late M</td>
+</tr>
+<tr>
+<td>2MASS J0746+20 (L0+L1.5)</td>
+<td>L1 standard, p = 0.985</td>
+<td>early L</td>
+</tr>
+<tr>
+<td>WISE 0855 (blended with a G=16.3 star)</td>
+<td>"composite: star + cold methane-rich source"; 3.8–5 µm excess 7.9× (30σ); CH₄(3.3)/4 µm = 0.23</td>
+<td>Y dwarf + neighbour</td>
+</tr>
+<tr>
+<td>IRAS 04016+2610 (Class I protostar)</td>
+<td>"embedded YSO (Class I) with H₂O ice"; ice depth 0.94; α = 1.30</td>
+<td>Class I with deep 3 µm ice</td>
+</tr>
+<tr>
+<td>3C 273 (QSO)</td>
+<td>"red power law (AGN/QSO or YSO)"; best stellar χ²/dof 45, α = 0.29</td>
+<td>QSO (no QSO templates yet)</td>
+</tr>
+<tr>
+<td>RW Aur (saturated, ring photometry)</td>
+<td>no absolute spectrum; ratio spectra D5 1.23 (9.9σ) then 0.64 (−24σ), D6 1.46 then 0.74</td>
+<td>variable at 4–5 µm</td>
+</tr>
+<tr>
+<td>ε Indi B / comparison star epochs</td>
+<td>per-detector ratios within 1–3 % of 1, all &lt; 3σ except one 2σ-scale case</td>
+<td>constant</td>
+</tr>
+</tbody>
+</table>
+<p>Synthetic − CatWISE W1/W2 is −1.8/−1.7 mag for ε Indi B: CatWISE's entry for this 4.7″/yr mover has a wrong
+motion (0.4″/yr) and fainter photometry; the comparison flags it <code>suspect</code>.</p>
+<p>Limitations: templates stop at 2.5 µm; no QSO/galaxy templates; narrow lines are diluted at R 35–130; blends
+(WISE 0855) are recognised as composite but not decomposed.</p>
+<h2>Automated field analysis</h2>
+<p><code>spherex_core.field</code> searches every source of a built sequence (ADR-0045 to ADR-0052).</p>
+<ol>
+<li><strong>Sources</strong> (ADR-0046): peaks above S/N 5 in the all-epoch mean and S/N 6 per epoch, per detector, merged
+   within 2 px; peaks in the halo or saturated footprint of a bright star are folded into it; fluxes per detector
+   from the all-epoch mean (r = 2 px, nominal 1/0.80 aperture correction; approximate).</li>
+<li><strong>Cross-match</strong>: Gaia DR3, CatWISE2020, 2MASS moved to the sequence's mean epoch, nearest within 1.5 px.</li>
+<li><strong>Movers</strong> (ADR-0047): blind ADR-0026 motion fits for unblended sources with S/N ≥ 8; ≥ 4σ, ≥ 500 mas/yr,
+   &lt; 15″/yr and at least two agreeing detectors; compared with Gaia/CatWISE. Shift-and-stack over 1–15″/yr on
+   static-subtracted epoch maps for faint movers.</li>
+<li><strong>Moving Object Detection</strong> (ADR-0048): exposure-minus-co-add S/N maps, simultaneous-pair check, real/bogus
+   (ADR-0051), tracklets of ≥ 3 detections per visit, identification against known objects seen from SPHEREx
+   (ADR-0049); Track &amp; Stack and synthetic tracking within a visit (ADR-0050); verification with free-position
+   ePSF fits and ADES export for station 288 (ADR-0052).</li>
+<li><strong>Variability</strong>: aperture (or ring outside a saturated core) photometry of every source in every aligned
+   exposure, normalised per wavelength bin; reduced χ² with a 3 % floor, Stetson J, amplitude between epoch
+   medians; candidates need ≥ 20 points, amplitude ≥ 10 % (≥ 20 % for rings) and χ² ≥ 4; periodograms for the
+   top five when there are ≥ 5 epochs.</li>
+<li><strong>Colours</strong>: red excess (D5 + D6 vs D1–D3) per source and as a pixel map where stars cancel (catches a cold
+   dwarf blended with a bluer star), plus an isolation-forest anomaly score on adjacent-detector flux ratios.</li>
+</ol>
+<p>Known-object identification (ADR-0054) uses SPHEREx-centric positions queried at each tracklet's first and last
+detection time and interpolated between them. sb_ident's rates are instantaneous rates seen from SPHEREx and
+swing by about ±15″/h over the 98-min orbit for an object 2.4 AU away (Klotho's Dec rate read −11.7″/h and
++14″/h half an orbit apart while it drifted south at 2″/h), so they are not used to propagate positions.</p>
+<h2>Point analysis ("click a point → Analyze")</h2>
+<p><code>POST /api/sequences/{id}/analyze</code> runs these steps for one position (ADR-0053). Since ADR-0056 they run
+concurrently within a 60 s deadline in interactive network mode (15 s timeouts, per-service circuit breakers,
+stale catalogue cache when a service is down): identification, known objects, tracklets and motion start at once;
+photometry waits up to 8 s for a catalogue counterpart to follow, then spectrum, periodogram and colours use its
+records. Photometry reads only the sequence's own cutout cache (never an IRSA search) and runs in the process pool;
+motion starts at the measured target's position at the sequence's mean epoch, with its catalogue motion as prior.</p>
+<ol>
+<li><strong>Identification</strong>: Gaia DR3 / CatWISE2020 / 2MASS / SIMBAD cones (radius at each catalogue's epoch wide
+   enough for 10″/yr movers), every source moved to the sequence's mean epoch; the nearest three within 15″, the
+   counterpart if ≤ 4″, and each match's position at every epoch.</li>
+<li><strong>Photometry</strong>: re-measure in every exposure (ePSF / aperture / ring, as the pipeline). With no motion given,
+   the analysis follows a Gaia (else SIMBAD) counterpart's motion, so fast movers are measured where they are.</li>
+<li><strong>Spectrum</strong>: binned spectrum, features and indices, template / blackbody classification and ratio spectra
+   between epochs (the spectral module).</li>
+<li><strong>Motion</strong>: blind proper-motion fit from per-epoch co-add centroids (no Gaia prior, so it can be compared).</li>
+<li><strong>Periodogram</strong>: Lomb–Scargle of the point's photometry, normalised per wavelength bin.</li>
+<li><strong>Colours</strong>: weighted mean flux density at 3.8–5 µm against 0.75–2.4 µm; red excess when the long-wavelength
+   S/N ≥ 5 and the ratio ≥ 0.8 or the short-wavelength S/N &lt; 3.</li>
+<li><strong>Known objects</strong>: sb_ident from SPHEREx at each epoch's mid-time (≤ 8 epochs); objects within 30″.</li>
+<li><strong>Tracklets</strong>: candidates within 20″ from a finished field analysis of the sequence (none are searched here);
+   unidentified ones are re-identified against known objects with bracketed positions. A mover at the point
+   suppresses the proper-motion claim (its centroid shift is not a proper motion); without Gaia a motion needs
+   ≥ 5σ to be called a candidate.</li>
+<li><strong>Verdict</strong>: explicit rules turn the slots into findings with a confidence and a novelty contribution;
+   novelty = 0.1 + Σ contributions, clipped to [0, 1]. Unexplained motion (+0.55), an unidentified high-quality
+   intra-visit mover (+0.5), red excess without Gaia (+0.35) and brown-dwarf or composite spectra raise it;
+   SIMBAD (−0.3), Gaia (−0.15) or a known asteroid (−0.1) lower it.</li>
+</ol>
+<p>Each step is independent: a failing upstream service leaves <code>{"error"}</code> in its slot and the rest still runs.</p>
+<h2>Long-baseline light curves (ADR-0059)</h2>
+<p><code>POST /api/sequences/{id}/long-baseline</code> measures the target, or any position in the field, on the archival
+frames themselves. SPHEREx is then put on the same band scales, and the 1997–2026 light curve is analysed
+(<code>spherex_core.longbaseline</code>).</p>
+<ol>
+<li><strong>Frames.</strong> Native-pixel windows are read around the target's 2018 position, with a 150″ radius (the
+   request's <code>field_radius</code>, 60–360″; wider for fast movers), from every 2MASS Atlas image, the AllWISE Atlas tile and up to 12 NEOWISE L1b frames per visit
+   and band. NEOWISE windows carry the msk-1b mask: saturation bits 10–18 and the bad-pixel bits. Windows are
+   cached, so a repeat reads nothing.</li>
+<li><strong>Photometry per frame</strong>, at the position moved to the frame's MJD:
+   - <strong>Aperture.</strong> The survey's standard aperture (WISE 8.25″, 2MASS 4″) with a 3σ-clipped annulus (WISE
+     50–70″, 2MASS 14–20″), corrected to the catalogue scale with the measured enclosed energy. Bad pixels in
+     the aperture take the mean of the good pixels at the same radius; frames with more than 10% of the PSF
+     weight masked are flagged.
+   - <strong>Saturated cores.</strong> When at least half of a band's frames saturate at the source, every frame is measured
+     in one ring outside the core and scaled by the ring's enclosed-energy fraction. The ring starts 1 px outside
+     the 95th percentile of the core radii and is 4 px wide in NEOWISE and 2MASS, 8 px in AllWISE. A NEOWISE
+     core is a pixel with saturation bits 10–18, or a NaN that no bad-pixel bit explains (L1b sets dead and
+     noisy pixels to NaN too). AllWISE Atlas tiles have no mask and their co-added cores are only partly NaN, so
+     an AllWISE ring starts no closer than the NEOWISE ring of the same band.
+   - <strong>Combining.</strong> Frames are combined per NEOWISE visit (a new visit after a 20 d gap), per 2MASS night and
+     once for AllWISE: a 3σ-clipped weighted mean whose error is at least the scatter error, plus a floor of 1.5%
+     (aperture) or 3% (ring).
+   - <strong>2MASS saturation.</strong> Bands saturated in 2MASS use the PSC magnitude (read-1 photometry) when the PSC has one.</li>
+<li><strong>Enclosed energy.</strong> Measured with <code>analysis/validation/long_baseline_calibration.py</code> on the five validation
+   fields (61 2MASS, 31 W1 and 22 W2 stars). Each frame's growth curve of an isolated, unsaturated star is divided
+   by the star's catalogue flux in that frame's DN, minus the expected flux of faint field sources (far-annulus
+   mean − median per pixel). The aperture corrections are:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Survey and band</th>
+<th>EE at the standard aperture</th>
+<th>Correction</th>
+<th>Star-to-star scatter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NEOWISE W1 / W2</td>
+<td>0.858 / 0.827</td>
+<td>0.167 / 0.207 mag</td>
+<td>0.005 / 0.008 mag</td>
+</tr>
+<tr>
+<td>AllWISE W1 / W2</td>
+<td>0.780 / 0.743</td>
+<td>0.270 / 0.323 mag</td>
+<td>0.008 / 0.009 mag</td>
+</tr>
+<tr>
+<td>2MASS J / H / Ks</td>
+<td>0.955</td>
+<td>0.050 mag</td>
+<td>0.012 / 0.026 / 0.015 mag</td>
+</tr>
+</tbody>
+</table>
+<p>Beyond about 10 px (NEOWISE) or 30 px (AllWISE) the curves exceed 1 by up to 10%: PSF wings beyond the
+   catalogue's profile-fit normalisation, plus residual neighbour light. The ring scale is therefore approximate.
+   Two isolated saturated AllWISE stars (W1 5.8 and 6.3, rings at 6–10 px) give ring − catalogue offsets of
+   −0.13 mag in W1 and +0.47 mag in W2, consistent between the two stars to 0.02 mag.
+4. <strong>Cross-calibration.</strong> Up to 16 field stars within <code>field_radius</code> − 10″ (140″ by default) are measured
+   exactly like the target, on the frames
+   and in every SPHEREx exposure. They are CatWISE2020 stars (AllWISE from a VizieR mirror when IRSA fails),
+   isolated (no neighbour within 16″ brighter than W1 + 2.5), with W1 9–14 and W2 7.5–13.5.
+   - <strong>Frames → catalogue</strong> (median and robust scatter per survey and band): applied to aperture points with
+     ≥ 4 stars.
+   - <strong>SPHEREx synthetic → NEOWISE mean (W1/W2) or PSC (J/H/Ks):</strong> uses stars constant in both, applied with
+     ≥ 3 stars, else the default.
+5. <strong>Synthetic bands.</strong> Each SPHEREx time bin (epochs cut into ≤ 15-day chunks) is a binned spectrum,
+   integrated as</p>
+<pre><code>   ⟨Fν⟩ = ∫Fν R/λ / ∫R/λ
+</code></pre>
+<p>with SVO responses, log-linear interpolation and power-law extrapolation, and ≥ 75% of the photon weight
+   covered. The error comes from the band's Jacobian with respect to each spectral bin, plus a 2% floor. Ring
+   targets give relative synthetic points. D1–D6 per-bin fluxes are the bin over the all-epoch spectrum, times
+   the detector's mean flux.
+6. <strong>Analysis.</strong>
+   - <strong>Period search.</strong> Multiband generalised Lomb–Scargle over W1, W2 and D1–D6, with a free zero point per
+     offset group and per-band sinusoids. The grid runs from 50 d to baseline/1.5 at 10 samples per peak.
+   - <strong>Significance.</strong> FAP from an F-test times the number of independent frequencies; σ_P from the χ² curvature
+     with χ²/dof rescaled to 1. Significant when FAP &lt; 10⁻³ and the power is ≥ 0.3.
+   - <strong>Final model</strong> with 2 harmonics, giving peak-to-peak amplitudes per band and phase-folded points.
+   - <strong>From the residuals:</strong>
+     - trends over ≥ 3 yr;
+     - era means per survey;
+     - events: runs of ≥ 2 archival visits or ≥ 3 SPHEREx bins beyond max(3σ, 0.1 mag), or one point
+       confirmed within 5 d by an independent survey or archival band (SPHEREx bands never confirm each other).
+   - <strong>Cadence aliases.</strong> NEOWISE alternates its scan direction every visit, so a neighbour's diffraction
+     spikes, ghosts and latents come and go with a 1-yr pattern that the 6-monthly sampling aliases to
+     365.25/k d. A best period within half the NEOWISE frequency resolution of 365.25/k d (k = 1–7) is reported
+     with <code>cadence_alias: k</code> and is not significant.
+   - <strong>Verdict.</strong> "Variable" needs, in one band of W1/W2, a constant-model χ²/dof ≥ 5 and a 5–95% range
+     ≥ max(0.1 mag, 5 median errors); pure noise gives a range of about 3.3 errors. The other band, when it has
+     ≥ 8 points, must not be flat (χ²/dof ≥ 2), and the variability must not be the scan pattern (a cadence
+     alias as best period at power ≥ 0.5). "Periodic" also needs a significant period, and a period ≥ 100 d
+     makes it a long-period variable.
+7. <strong>Field search</strong> (<code>/long-period-search</code>). Up to 150 CatWISE sources with W1 ≤ 15 within <code>radius_arcsec</code>
+   − 10″ (140″ by default) of the field centre are measured on the same NEOWISE/AllWISE frames, normalised per
+   NEOWISE visit by the ensemble of unsaturated sources with S/N &gt; 20. SPHEREx adds relative aperture points on
+   the epoch co-adds. Each source goes through the same model, and sources are ranked by log χ²/dof + 2 × range
+   (+ 1 + power when periodic). Contaminated sources are measured but listed after the clean ones and left out
+   of the summary: an AllWISE W1/W2 contamination flag (<code>ccf</code>: halo, diffraction spike, ghost, latent); within
+   20″ (60″ for a saturated target) of a moving sequence target's 1997–2027 track, since CatWISE splits fast
+   movers into several entries; or a median NEOWISE W1 more than 0.5 mag off the catalogue (the aperture also
+   measures a neighbour). In the validation they carry almost all spurious variability.</p>
+<h3>Validation (2026-11-15)</h3>
+<p><code>analysis/validation/long_baseline_validation.py</code>, run on the dev server with 16 CPU workers and
+<code>field_radius</code> 360″. Six targets have light curves; five fields were searched.</p>
+<p><strong>Periods and classifications</strong></p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Expected</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R Dra (Mira)</td>
+<td>VSX P = 246.1 d</td>
+<td>P = 247.0 ± 0.5 d, power 0.76, FAP 2·10⁻³¹; W1/W2 peak-to-peak 0.58/0.54 mag; long-period variable</td>
+</tr>
+<tr>
+<td>V1968 Cyg (carbon Mira)</td>
+<td>VSX 395.5 d (ZTF r); Gaia DR3 long-period 645 ± 66 d</td>
+<td>P = 670.5 ± 2.5 d, power 0.92, FAP 5·10⁻²⁹ (669.4 d from WISE alone); W1/W2 1.47/1.34 mag; W1 trend −0.049 mag/yr (6σ)</td>
+</tr>
+<tr>
+<td>RW Aur (CTTS, optical dimmings 2014–2018)</td>
+<td>infrared brightening during the dimmings</td>
+<td>variable, aperiodic (best 3300 d, FAP 0.12); W2 4.75 → 3.55 and W1 6.06 → 5.23 between 2014.2 and 2017.7, back by 2019–2021</td>
+</tr>
+<tr>
+<td>Barnard's Star (10.4″/yr)</td>
+<td>constant</td>
+<td>constant; W1/W2 robust σ 0.036/0.021 mag, χ²/dof 0.4/0.2</td>
+</tr>
+<tr>
+<td>eps Indi B (4.7″/yr)</td>
+<td>constant</td>
+<td>constant; W1/W2 robust σ 0.011/0.021 mag</td>
+</tr>
+<tr>
+<td>WISE 0855−0714 (8.1″/yr)</td>
+<td>constant</td>
+<td>constant; best period 73.1 d flagged as cadence alias k = 5; W2 trend +0.024 mag/yr (5.4σ), not checked against the literature</td>
+</tr>
+</tbody>
+</table>
+<p>The V1968 Cyg infrared period disagrees with VSX but agrees with Gaia DR3. No event is flagged for RW Aur:
+its change is a broad brightening, not a run of faint points.</p>
+<p><strong>Zero points.</strong> Each entry below is the median over the field's calibration stars, with the robust scatter
+between stars. The fields are RW Aur, V1968 Cyg, Barnard's Star, eps Indi B and WISE 0855 (10–16 stars each).
+R Dra has no calibration stars even at 360″: CatWISE lists 24 sources there, nearly all with W1 &gt; 15.</p>
+<p>Frames → catalogue (applied in each field):</p>
+<table>
+<thead>
+<tr>
+<th>Survey and band</th>
+<th>Offsets over fields</th>
+<th>Scatter between stars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NEOWISE W1 / W2</td>
+<td>+0.002 … +0.013 / +0.004 … +0.016 mag</td>
+<td>0.011–0.022 / 0.006–0.017 mag</td>
+</tr>
+<tr>
+<td>AllWISE W1 / W2</td>
+<td>−0.021 … +0.011 / −0.007 … +0.010 mag</td>
+<td>0.014–0.033 / 0.009–0.042 mag</td>
+</tr>
+<tr>
+<td>2MASS J / H / Ks (3 fields)</td>
+<td>−0.001 … +0.034 mag</td>
+<td>0.007–0.073 mag</td>
+</tr>
+</tbody>
+</table>
+<p>SPHEREx synthetic → archive:</p>
+<table>
+<thead>
+<tr>
+<th>Band</th>
+<th>RW Aur</th>
+<th>V1968 Cyg</th>
+<th>Barnard's Star</th>
+<th>eps Indi B</th>
+<th>WISE 0855</th>
+<th>Median</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W1</td>
+<td>−0.026 (0.012)</td>
+<td>−0.033 (0.016)</td>
+<td>−0.018 (0.008)</td>
+<td>−0.003 (0.023)</td>
+<td>−0.018 (0.011)</td>
+<td>−0.018</td>
+</tr>
+<tr>
+<td>W2</td>
+<td>+0.013 (0.019)</td>
+<td>+0.008 (0.041)</td>
+<td>−0.002 (0.021)</td>
+<td>+0.013 (0.015)</td>
+<td>+0.010 (0.028)</td>
+<td>+0.010</td>
+</tr>
+<tr>
+<td>J</td>
+<td>−0.030 (0.060)</td>
+<td>−0.029 (0.020)</td>
+<td>—</td>
+<td>+0.002 (0.045)</td>
+<td>+0.001 (0.013)</td>
+<td>−0.014</td>
+</tr>
+<tr>
+<td>H</td>
+<td>−0.003 (0.024)</td>
+<td>+0.002 (0.030)</td>
+<td>—</td>
+<td>+0.013 (0.033)</td>
+<td>+0.031 (0.032)</td>
+<td>+0.008</td>
+</tr>
+<tr>
+<td>Ks</td>
+<td>−0.028 (0.014)</td>
+<td>−0.011 (0.015)</td>
+<td>—</td>
+<td>+0.003 (0.051)</td>
+<td>+0.009 (0.031)</td>
+<td>−0.004</td>
+</tr>
+</tbody>
+</table>
+<p>Each SPHEREx offset is measured with 5–15 constant stars. The medians are the defaults
+(<code>calibrate.DEFAULT_SPHEREX_OFFSETS</code>) for fields with fewer than 3 stars. The offsets scatter by 0.01–0.02 mag
+between fields, so a field on the defaults is on the archival scale to about that.</p>
+<p><strong>Error calibration.</strong> The median NEOWISE χ²/dof of clean field sources is about 1.0–1.1 at W1 13–15 and 1.3
+for faint W2. For bright stars it is about 0.15: the 1.5% floor dominates, and the true visit-to-visit
+repeatability is about 0.007 mag.</p>
+<p><strong>Ring scale.</strong> R Dra's NEOWISE ring mean is W1 2.40, against Ks 2.44 from 2MASS, which is plausible for a Mira.
+Its single AllWISE point (3.03) lies within the 0.58 mag pulsation. For V1968 Cyg, the NEOWISE W2 ring lies at
+49.5–60.5″ and holds 0.27% of the PSF. It gives W2 = −0.71, against 1.48 from AllWISE and W1 2.73: the scale is
+off by about 2 mag. Such rings (&lt; 0.5% of the PSF) are now marked <code>scale_uncertain</code>. The period is unaffected,
+since ring groups have free zero points.</p>
+<p><strong>False positives.</strong> Five fields were searched at 360″: R Dra, RW Aur, eps Indi B, Barnard's Star and WISE 0855.
+- <strong>Contamination.</strong> 182 of 421 measured sources carry a contamination flag. That is 93 of 150 around Barnard's
+  Star, which saturates the field, and the one source in the R Dra field.
+- <strong>False positives.</strong> A clean source flagged variable or periodic that VSX does not list counts as a false
+  positive. There is 1 among 227 clean non-VSX sources: 0.44%, with a 95% upper bound of 1.3%. It is CatWISE
+  J175745.63+044653.9 (W1 13.8, Gaia G 17.6, BP−RP 2.5, an M dwarf at about 700 pc). We found P = 174 d and
+  W1/W2 amplitudes of 0.41/0.69 mag, which is implausible for such a star. It lies 70–110″ from Barnard's Star
+  (W1 ≈ 4) during the NEOWISE years.
+- <strong>Recall.</strong> Only one of the 12 VSX entries in the searched fields was flagged: RW Aur itself. The other
+  entries were not checked one by one; many are optical variables, faint in W1, or contaminated.
+- <strong>Earlier version.</strong> A version that still applied AllWISE motions and had neither these flags nor the
+  cadence-alias rule flagged 15 of 270 sources falsely (5.6%).</p>
+<p><strong>Runtimes</strong> on the dev server, which was shared with other jobs (load 30):</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Frames already cached</th>
+<th>First run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R Dra</td>
+<td>11 s</td>
+<td>55 s and 494 MB of windows at 150″</td>
+</tr>
+<tr>
+<td>eps Indi B</td>
+<td>36 s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>WISE 0855−0714</td>
+<td>38 s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>RW Aur</td>
+<td>49 s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Barnard's Star</td>
+<td>50 s</td>
+<td>—</td>
+</tr>
+<tr>
+<td>V1968 Cyg</td>
+<td>68 s</td>
+<td>149 s and 777 MB at 360″</td>
+</tr>
+</tbody>
+</table>
+<p>The field searches at 360″ took 124–367 s for 56–150 sources: eps Indi B 124 s, WISE 0855 216 s, RW Aur 328 s
+and Barnard's Star 367 s.</p>
+<p>IRSA's image search was down (502) during the validation, so the V1968 Cyg frame list was built by hand: NEOWISE
+frames from the single-exposure source table on S3, and the AllWISE tile from the S3 listing. The pixels were
+read as usual.</p>
+<h3>Limitations</h3>
+<ul>
+<li><strong>Ring scale.</strong> The absolute scale of ring points (heavily saturated stars) rests on the enclosed-energy curve
+  at 5–20 px, which is uncertain at the 0.1–0.5 mag level. The analysis fits ring groups' zero points, so periods,
+  amplitudes and shapes do not depend on it. Era-to-era comparisons of an all-ring star do: one ring per survey
+  means a different radius in each survey. Rings far out in the wings (&lt; 0.5% of the PSF, <code>scale_uncertain</code>)
+  can be off by a magnitude or more (V1968 Cyg W2).</li>
+<li><strong>Blends.</strong> WISE's 6″ PSF blends close pairs (RW Aur A+B at 1.4″). The aperture photometry is not deblended,
+  and neighbours within the 8.25″ aperture add their flux.</li>
+<li><strong>Calibration stars.</strong> Fields at high latitude or around very bright stars have few isolated catalogue stars
+  within <code>field_radius</code> − 10″. R Dra has none even at 360″ (CatWISE is nearly empty around it). Its SPHEREx
+  points then use the default offsets (±0.02 mag) and its frames the enclosed-energy correction.</li>
+<li><strong>Sampling.</strong> NEOWISE visits every ~6 months alias periods near 1 yr and 6 months. SPHEREx bins and AllWISE /
+  2MASS points break the aliases only when the period is significant on its own. A real period within the
+  resolution of 365.25/k d is reported as a cadence alias, not as significant. Periods &lt; 50 d are not searched.</li>
+<li><strong>Image lists need IRSA.</strong> Finding new archival frames uses IRSA's CAOM search (cached per field for a week).
+  The catalogues fall back to VizieR mirrors and Gaia DR3, but with IRSA down a field without cached image lists
+  cannot get a long-baseline light curve.</li>
+</ul></main></body></html>

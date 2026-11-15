@@ -19,7 +19,7 @@ A request gives a target and processing options:
 
 ### 1. Search
 
-Propagate the target to 2026.0 and query IRSA TAP for every `science` image whose footprint contains that position in the configured collections. Keep one image per (observation id, detector), preferring DR1 over QR3 ([ADR-0003](adr/0003-tap-image-discovery.md)). Results are cached for 12 hours.
+Propagate the target to 2026.0 and query our local index of SPHEREx Level 2 files (a mirror of the archive's file catalogue, re-synced every hour; [ADR-0057](adr/0057-data-access-mirror-and-fallbacks.md)) for every `science` image whose footprint contains that position in the configured collections. IRSA TAP and SIA are fallbacks. Keep one image per (observation id, detector), preferring DR1 over QR3 ([ADR-0003](adr/0003-tap-image-discovery.md)). Results are cached for 12 hours.
 
 ### 2. Output grid
 

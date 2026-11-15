@@ -20,6 +20,8 @@ import argparse
 import importlib.util
 import json
 import math
+
+from scipy.stats import beta
 import os
 import time
 import urllib.parse
@@ -193,7 +195,8 @@ def main() -> None:
         n_fp = sum(r["false_positives"] for r in s)
         out["false_positive_rate"] = {"sources": n_const, "false_positives": n_fp,
                                       "rate": n_fp / n_const if n_const else None,
-                                      "upper_95": (n_fp + 1.96 * math.sqrt(max(n_fp, 1))) / n_const if n_const
+                                      # exact one-sided 95 % Clopper-Pearson bound (1 of 227 gives 2.07 %)
+                                      "upper_95": float(beta.ppf(0.95, n_fp + 1, n_const - n_fp)) if n_const
                                       else None}
         print("false-positive rate:", out["false_positive_rate"])
     with open(f"{a.out_dir}/summary.json", "w") as f:
