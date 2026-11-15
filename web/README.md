@@ -227,8 +227,14 @@ The loading screen names what was drawn.
 ## Keyboard
 
 Space play/pause · ← → previous/next epoch · 1–6 detector · 0 all detectors · b d s r e modes · g coordinate grid ·
-v 3D on/off · c type coordinates · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south · Esc closes the card, then the drawer.
+v 3D on/off · c type coordinates · f full screen · Shift + ← ↑ → ↓ new field half a field to the east, north, west, south ·
+Esc closes the card, then the drawer.
 ⌘K / Ctrl+K or / opens search · ↑ ↓ choose · Tab or → accepts the inline completion · Enter opens · Esc clears, then closes.
+
+Full screen (`f` or the last rail button) keeps Esc for the viewer: in Chrome and Edge the Keyboard Lock API hands
+Esc to the page, so it closes the card or drawer and leaves full screen only when held down. Safari and Firefox have no
+keyboard lock and still leave full screen on Esc, and so does the browser's own full screen (⌃⌘F, F11), which a page
+cannot lock.
 
 ## Exploring
 

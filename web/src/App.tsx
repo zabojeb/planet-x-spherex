@@ -26,7 +26,7 @@ import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
-import { safeStorage, useMediaQuery } from "./hooks";
+import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
 import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
 import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
@@ -142,6 +142,7 @@ export default function App() {
   const keepView = useRef(initial.hasParams);
   const metaId = useRef<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  const fullscreen = useFullscreen();
   const [planesTick, setPlanesTick] = useState(0);
   const [planesBusy, setPlanesBusy] = useState(false);
   const [tablesTick, setTablesTick] = useState(0);
@@ -508,6 +509,7 @@ export default function App() {
       } else if (e.key === "0") set({ band: "all" });
       else if (e.key.toLowerCase() === "v") toggle3d();
       else if (e.key.toLowerCase() === "g") toggleOverlay("grid");
+      else if (e.key.toLowerCase() === "f") fullscreen.toggle();
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -1108,6 +1110,7 @@ export default function App() {
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
         on3d={meta ? toggle3d : undefined}
+        fullscreen={fullscreen.supported ? fullscreen : undefined}
       />
       {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
