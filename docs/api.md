@@ -640,14 +640,19 @@ unavailable ...` instead of being waited for again. The result's `timings` block
 Result (every step slot is either its object or `{"error": "<Type>: <message>"}`):
 
 ```text
-{ id, sequence, version: 1,
+{ id, sequence, version: 2,
   request: {ra, dec, pmra, pmdec, ref_epoch, name},
-  point: {ra, dec, x, y, inside, motion_used: {pmra, pmdec, ref_epoch, source}},
+  point: {ra, dec, x, y, inside,                     # x, y, inside: at the mean epoch (moved with the request's motion)
+          epoch_position: {ra, dec, year},           # where a request with a motion is at the sequence's mean epoch
+          motion_used: {pmra, pmdec, ref_epoch, source}},
   identification: {radius_arcsec: 15, reference_year,
                    gaia|catwise|2mass|simbad: {matches: [{id, ra, dec, epoch, pmra, pmdec, mag, mag_band,
                                                            otype?, sptype?, parallax?, sep_arcsec, pm_total,
                                                            track: [{epoch, ra, dec, x, y}]}],   # ≤ 3, nearest first
-                                               n_in_radius, counterpart}            # counterpart: nearest ≤ 4″
+                                               n_in_radius, counterpart,            # counterpart: nearest ≤ 4″
+                                               truncated}   # cone hit the 3000-row limit: "no counterpart" not claimed
+                                    # sources with a motion are compared with the point at the mean epoch, sources
+                                    # without one (2MASS) at their own epoch (ADR-0062)
                                     | {error}},
   photometry: {sequence, target, photometry: [records as meta.photometry], rings, stats,
                summary: {n, n_flagged, n_saturated, n_relative, methods: {psf|aperture|ring: n},

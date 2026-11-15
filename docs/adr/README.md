@@ -75,3 +75,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0058](0058-sky-map-aladin-lite.md) | Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both | Accepted | 2026-11-15 |
 | [0059](0059-long-baseline-light-curves.md) | Measure 2MASS, AllWISE and NEOWISE frames like the target and tie SPHEREx to them with field stars | Accepted (extends 0020, 0023) | 2026-11-15 |
 | [0060](0060-solar-system-science-on-comoving-sequences.md) | Subtract the static sky from co-moving sequences with SPHEREx's own other visits; comet, asteroid and unknown-mover analyses as jobs | Accepted (extends 0045, 0048, 0049, 0052) | 2026-11-15 |
+| [0062](0062-catalogue-matching-at-the-points-epoch.md) | Match catalogue counterparts at the point's own epoch position; claim "no Gaia counterpart" only after a complete Gaia answer | Accepted (amends 0053) | 2026-11-15 |
