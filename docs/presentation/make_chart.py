@@ -8,8 +8,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 d = json.loads((HERE / "epsind-spectrum.json").read_text())
-W, H = 1040, 560
-L, R, T, B = 96, 24, 56, 72          # plot margins
+W, H = 844, 540
+L, R, T, B = 84, 20, 56, 72          # plot margins
 X0, X1 = 0.75, 5.0                   # µm
 Y0, Y1 = -1.0, 2.0                   # log10 mJy
 
