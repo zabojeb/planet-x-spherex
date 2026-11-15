@@ -11,7 +11,7 @@ import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
 import type { AnalysisSubject } from "./components/chart/PointAnalysisPanel";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
-import { formatDate, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
+import { formatDate, formatDec, formatRA, formatRange, mjdToYear, pixelToWorld, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
 import { CATALOG_IDS, type CatalogId } from "./colors";
 import { DetectorControl, DetectorPanel, DisplayPanel, LayersPanel, ModeControl, View3DBar, type CatalogStatus } from "./components/Controls";
 import type { Layer, Object3D, TrackPoint3D } from "./components/Sky3D";
@@ -87,14 +87,16 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
 
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
-const MOBILE_FRAME = { top: 108, bottom: 290 };
-const MID_FRAME = { top: 160, bottom: 264 }; // top: below the coordinate box
+const MOBILE_FRAME = { top: 108, bottom: 254 }; // bottom: dock + compact HUD, plus a line for the cursor/selection readout
+const MID_FRAME = { top: 160, bottom: 168 }; // top: below the coordinate box; bottom: lifted HUD + readout line
+/** The HUD's left edge and the clearance it keeps from the dock before it moves above it. */
+const HUD_LEFT = 20;
+const HUD_DOCK_GAP = 16;
 
 export default function App() {
   const initial = useMemo(() => parseUrl(), []);
   const embed = initial.embed;
   const mobile = useMediaQuery("(max-width: 760px)");
-  const mid = useMediaQuery("(min-width: 761px) and (max-width: 1400px)");
   const [presets, setPresets] = useState<Target[]>([]);
   const [presetsError, setPresetsError] = useState<string | null>(null);
   const [spec, setSpec] = useState<TargetSpec>(initial.target ?? { kind: "preset", id: "barnard" });
@@ -106,24 +108,43 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [playing, setPlaying] = useState(!initial.hasParams);
   const [hero, setHero] = useState(!initial.hasParams && !embed && safeStorage(INTRO_KEY) !== "1");
-  // The landing index sits above the HUD (epoch, target, coordinates), whose height depends on the width
-  // and the mode: track the HUD's top and expose the clearance as --hud-clear for the .hero rule.
+  // Two things follow the HUD (compass, scale, date) in the bottom-left corner, measured rather than guessed
+  // from breakpoints because its width and height change with the mode and the date label:
+  // - hudLifted: on screens wider than a phone the HUD moves above the dock only when it would actually
+  //   reach it (its right edge within HUD_DOCK_GAP of the dock's left edge);
+  // - hudClear: the landing index stays above the HUD (--hud-clear for the .hero rule).
+  const [hudLifted, setHudLifted] = useState(false);
+  const downWidth = useRef(0); // the HUD's width when last measured in its unlifted place
   const [hudClear, setHudClear] = useState(0);
   useEffect(() => {
-    if (!hero) return;
     let hud: Element | null = null;
-    const measure = () => {
-      const el = document.querySelector(".hud-min");
-      if (el !== hud) {
-        if (hud) ro.unobserve(hud);
-        hud = el;
-        if (hud) ro.observe(hud);
+    let dock: Element | null = null;
+    const watch = (prev: Element | null, sel: string) => {
+      const el = document.querySelector(sel);
+      if (el !== prev) {
+        if (prev) ro.unobserve(prev);
+        if (el) ro.observe(el);
       }
-      const r = hud?.getBoundingClientRect();
-      setHudClear(r && r.height ? Math.ceil(window.innerHeight - r.top) : 0);
+      return el;
+    };
+    const measure = () => {
+      hud = watch(hud, ".hud-min");
+      dock = watch(dock, ".dock");
+      const h = hud?.getBoundingClientRect();
+      const d = dock?.getBoundingClientRect();
+      // The HUD's unlifted left edge is the gutter. Lifting shrinks the image frame, which can change the scale
+      // bar's length and so the HUD's width; to drop back down it must fit with the width it last had down there
+      // (or its current width, if larger), so it does not flip between the two places at the threshold.
+      setHudLifted((was) => {
+        if (mobile || !h || !d || !h.width) return false;
+        if (!was) downWidth.current = h.width;
+        const width = was ? Math.max(h.width, downWidth.current) : h.width;
+        return HUD_LEFT + width + HUD_DOCK_GAP > d.left;
+      });
+      setHudClear(hero && h && h.height ? Math.ceil(window.innerHeight - h.top) : 0);
     };
     const ro = new ResizeObserver(measure);
-    const mo = new MutationObserver(measure); // the HUD mounts once the first sequence is in
+    const mo = new MutationObserver(measure); // the HUD and the dock mount once the first sequence is in
     mo.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", measure);
     measure();
@@ -132,7 +153,7 @@ export default function App() {
       mo.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [hero]);
+  }, [hero, mobile]);
   const [objectIndex, setObjectIndex] = useState<ObjectIndex | null>(null);
   const [recents, setRecents] = useState<Recent[]>(() => loadRecents());
   const [catalogs, setCatalogs] = useState<Record<string, CatalogSource[]>>({});
@@ -178,11 +199,23 @@ export default function App() {
 
   const target: Target | null = spec.kind === "coords" ? spec.target : presets.find((t) => t.id === spec.id) ?? null;
   const fov = fovOverride ?? target?.fov_arcmin ?? 6;
+  // What a build is for, and the last target that loaded: when a new search fails, the error offers to go back to it
+  // (its sequence is still on screen, so going back needs no new build).
+  const loadKey = target
+    ? [target.ra, target.dec, target.pmra, target.pmdec, target.ref_epoch, target.moving?.object_name, target.moving?.naif_id, fov].join("|")
+    : null;
+  const loaded = useRef<{ key: string; spec: TargetSpec; fovOverride: number | null; name: string } | null>(null);
   const unknownPreset = spec.kind === "preset" && presets.length > 0 && !target;
 
   // ---- server build + arrays
   useEffect(() => {
     if (!target) return;
+    if (loaded.current && loaded.current.key === loadKey && metaId.current) {
+      // back to the sequence that is still loaded: just clear the failed attempt
+      setError(null);
+      setProgress(null);
+      return;
+    }
     const ctrl = new AbortController();
     setError(null);
     setProgress({ stage: "queued", done: 0, total: 0, elapsed: 0 });
@@ -193,6 +226,7 @@ export default function App() {
     )
       .then((data) => {
         metaId.current = data.meta.id;
+        loaded.current = { key: loadKey!, spec, fovOverride, name: target.name || data.meta.target.name || `${formatRA(target.ra)} ${formatDec(target.dec)}` }; // unnamed fields by position
         rememberPlace({ name: target.name ?? null, ra: target.ra, dec: target.dec, pmra: target.pmra, pmdec: target.pmdec, ref_epoch: target.ref_epoch, preset: spec.kind === "preset" ? spec.id : null });
         setCatalogs({});
         setCatalogStatus({});
@@ -754,6 +788,18 @@ export default function App() {
   const overlays = useMemo(() => new Set(view.overlays), [view.overlays]);
   const canPlay = sequenceItems.length > 1 || (view.mode === "exp" ? nExp > 1 : view.mode !== "stack" && playable.length > 1);
   const errorText = error ?? presetsError ?? (unknownPreset ? `Unknown target "${spec.kind === "preset" ? spec.id : ""}"` : null);
+  // Back to the last target that loaded, when the current one failed (not offered for the first load).
+  const back =
+    error && loaded.current && loaded.current.key !== loadKey
+      ? {
+          label: loaded.current.name,
+          go: () => {
+            const prev = loaded.current!;
+            setSpec(prev.spec);
+            setFovOverride(prev.fovOverride);
+          },
+        }
+      : null;
 
   const dateLabel = hud ? `${hud.epoch}${hud.extra ? ` · ${hud.extra}` : ""}` : "";
   const bandShort = view.mode === "rgb" ? "RGB" : view.band === "all" ? "All" : view.band;
@@ -918,6 +964,7 @@ export default function App() {
         progress={progress}
         error={errorText}
         onRetry={() => setReloadKey((k) => k + 1)}
+      back={back}
         lockKey={meta?.id ?? "none"}
         onPick={(key) => {
           if (expCube) return setExpIndex(Number(key.slice(1)));
@@ -957,6 +1004,7 @@ export default function App() {
       lockKey={meta?.id ?? "none"}
       error={errorText}
       onRetry={() => setReloadKey((k) => k + 1)}
+      back={back}
       onZoom={(zoom) => set({ zoom })}
       onInteract={() => hero && setHero(false)}
       selection={sel}
@@ -974,7 +1022,7 @@ export default function App() {
       focus={focus}
       onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
-      frame={drawer ? undefined : mobile ? MOBILE_FRAME : mid ? MID_FRAME : undefined}
+      frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
     />
   );
 
@@ -1037,7 +1085,7 @@ export default function App() {
 
   return (
     <div
-      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}`}
+      className={`app earth${mobile ? " is-mobile" : ""}${drawer ? " drawer-open" : ""}${hero ? " hero-on" : ""}${hudLifted ? " hud-lifted" : ""}`}
       style={hudClear ? ({ "--hud-clear": `${hudClear}px` } as React.CSSProperties) : undefined}
     >
       <ProgressBar progress={progress ?? (planesBusy ? { stage: "download", done: 0, total: 0, elapsed: 0 } : null)} />

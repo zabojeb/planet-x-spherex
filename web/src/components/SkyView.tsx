@@ -5,7 +5,7 @@
  * Overlays are SVG in data units on the same transformed layer as the canvas; labels and the coordinate
  * grid's captions live in screen space so text stays crisp at any zoom. Blinking repaints only the canvas.
  */
-import { LocateFixed, RotateCcw } from "lucide-react";
+import { LocateFixed, RotateCcw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Progress } from "../api";
 import { formatAngle, formatDec, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, totalPm, worldToPixel } from "../astro";
@@ -60,6 +60,8 @@ interface Props {
   lockKey: string;
   error: string | null;
   onRetry: () => void;
+  /** When a new search failed: go back to the last target that loaded. */
+  back?: { label: string; go: () => void } | null;
   onZoom: (zoom: number) => void;
   onInteract: () => void;
   selection: Selection | null;
@@ -808,6 +810,11 @@ export function SkyView(p: Props) {
       {d?.kind === "empty" && !p.progress && n > 0 && <div className="sky-note glass">{d.message}</div>}
       {p.error && !p.progress && (
         <div className="sky-note glass error" role="alert" onPointerDown={stop} onPointerUp={stop}>
+          {p.back && (
+            <button className="btn ghost icon sky-note-close" onClick={p.back.go} title={`Close and go back to ${p.back.label}`} aria-label={`Close and go back to ${p.back.label}`}>
+              <X size={14} />
+            </button>
+          )}
           <span>{p.error}</span>
           <button className="btn" onClick={p.onRetry}>
             <RotateCcw size={14} /> Try again

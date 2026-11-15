@@ -372,6 +372,9 @@ canvas.smooth { image-rendering: auto; }
 .hud-loader-bar.indeterminate span { width: 30%; animation: indet 1.2s var(--ease) infinite; }
 .sky-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 16px; color: var(--text-2); text-align: center; max-width: 80%; }
 .sky-note.error { color: var(--err); }
+.sky-note.error:has(.sky-note-close) { padding-right: 40px; padding-left: 40px; } /* room for the close button, text stays centred */
+.sky-note-close { position: absolute; top: 6px; right: 6px; color: var(--text-2); }
+.sky-note-close:hover { color: var(--text-1); }
 .pick { position: absolute; z-index: 20; width: 240px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; animation: pop var(--t) var(--ease); cursor: default; }
 .pick-title { font-size: 15px; font-weight: 500; color: var(--text-1); word-break: break-word; }
 .pick-title.mono { font-family: var(--mono); font-size: 12px; }
@@ -505,7 +508,7 @@ canvas.smooth { image-rendering: auto; }
   .search-row .cmdk-list { width: calc(100vw - 24px); }
   .cmdk-shortcut { display: none; }
   .random-main { padding: 0 6px 0 12px; }
-  .random-menu { left: auto; right: 0; }
+  .random-menu.popover { left: auto; right: 0; max-width: calc(100vw - 2 * var(--gutter, 12px)); } /* opens leftwards from the button, beats .popover.left */
   .rail { right: 10px; top: 112px; transform: none; }
   .rail-btn { width: 36px !important; height: 36px; }
   .drawer-open .rail { display: none; } /* the drawer is a focused mode on phones; close it to get the controls back */
@@ -661,17 +664,10 @@ canvas.smooth { image-rendering: auto; }
   .readout { min-width: 0; }
   .pick { left: 10px !important; right: 10px; top: auto !important; bottom: 150px; width: auto; max-height: 52vh; }
 }
-/* the dock is centred and up to 760px wide: below ~1260px it would cover the readout, so lift the HUD above it */
-@media (min-width: 761px) and (max-width: 1260px) {
-  .hud-min { bottom: 84px; }
-}
 /* with the drawer open the HUD sits above it, reduced to the date and α δ */
 @media (min-width: 761px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 28px); }
   .drawer-open .hud-fit, .drawer-open .hud-compass { display: none; }
-}
-@media (min-width: 761px) and (max-width: 1260px) {
-  .app.earth.drawer-open .hud-min { bottom: calc(46vh + 92px); }
 }
 
 /* ---- 3D views (Sky3D): the canvas fills the sky; the bar floats top-right */
@@ -696,13 +692,13 @@ canvas.smooth { image-rendering: auto; }
 }
 
 /* ---- field-centre coordinates under the search row: click (or C) to type a new position */
-.coordfield { position: relative; display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 34px; padding: 0 8px 0 12px; border-radius: 17px; color: var(--text-1); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.coordfield { position: relative; display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 34px; padding: 0 12px; border-radius: 17px; color: var(--text-1); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 button.coordfield { cursor: text; transition: border-color var(--t) var(--ease); }
 button.coordfield:hover:not(:disabled) { border-color: var(--hair-3); }
 .coordfield i { font-style: normal; color: var(--text-3); margin-right: 5px; }
 .coordfield .cf-icon { color: var(--text-3); flex: none; }
-.coordfield .cf-edit, .coordfield .cf-kbd { color: var(--text-3); opacity: 0; transition: opacity var(--t) var(--ease); }
-button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordfield:focus-visible .cf-edit, button.coordfield:focus-visible .cf-kbd { opacity: 1; }
+.coordfield .cf-hint { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); opacity: 0; pointer-events: none; transition: opacity var(--t) var(--ease); }
+button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opacity: 1; }
 .coordfield-wrap { position: relative; align-self: flex-start; }
 .coordfield.editing { width: 340px; max-width: calc(100vw - 40px); padding-right: 4px; border-color: var(--accent-ring); background: rgba(8, 8, 8, 0.82); }
 .coordfield.editing input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: var(--text-1); font: inherit; outline: none; }
@@ -812,12 +808,12 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
   .dock .segmented button { font-size: 14px; }
 }
 
-/* ---- mid widths (tablets, small windows): the dock and the HUD no longer fit side by side.
-   The dock takes the width, the HUD sits above it, and the date goes when even the dock is tight. */
-@media (min-width: 761px) and (max-width: 1400px) {
+/* ---- wider than a phone: the dock is centred and up to 760 px wide. When the HUD (bottom left) would reach it,
+   App sets .hud-lifted (measured, see hudLifted) and the HUD sits above the dock, aligned with its left edge. */
+@media (min-width: 761px) {
   .floating-bottom { width: min(760px, calc(100vw - 40px)); }
-  /* left edge of the HUD = left edge of the centred dock */
-  .hud-min { bottom: 90px; left: max(20px, calc(50% - 380px)); }
+  .app.hud-lifted .hud-min { bottom: 90px; left: max(20px, calc(50% - 380px)); }
+  .app.earth.drawer-open.hud-lifted .hud-min { bottom: calc(46vh + 92px); }
 }
 @media (min-width: 761px) and (max-width: 900px) {
   .dock-date { display: none; }
@@ -1013,3 +1009,6 @@ button.coordfield:hover .cf-edit, button.coordfield:hover .cf-kbd, button.coordf
 .goto-here-body .muted { font-size: 11px; }
 .goto-step { display: flex; align-items: center; gap: 12px; }
 .goto-step .nav-pad { display: grid; }
+
+/* menus that drop down from the top bar (search suggestions, Random, the coordinate box) stay above the tool rail */
+.topleft { z-index: 33; }
