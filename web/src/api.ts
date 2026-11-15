@@ -14,7 +14,7 @@ import type {
   ArchivalMeta, ArrayName, BandId, CatalogSource, ClassifyResult, Exposure, ExposureStack, Job, Meta, MovingChoice,
   MovingRequest, MovingSearch, PeriodogramResult, Photometry, PlaneArray, PlaneKey, PlaneSource, SequenceData,
   SourcePhotometry, SpectralAnalysis, SpectrumResult, Target, VariabilityResult, PointAnalysis, FieldResult,
-  KnownObjects, StackSearch, VerifyResult,
+  KnownObjects, StackSearch, VerifyResult, MotionFit,
 } from "./types";
 import { parseIndex, type ObjectIndex } from "./search";
 
@@ -143,7 +143,18 @@ export interface SequenceRequest {
 }
 
 /** stage "busy" = rate-limited by the server; retryIn says when the client tries again (seconds). */
-export type Progress = { stage: string; done: number; total: number; elapsed: number; retryIn?: number; ahead?: number | null };
+export type Progress = {
+  stage: string;
+  done: number;
+  total: number;
+  elapsed: number;
+  retryIn?: number;
+  ahead?: number | null;
+  /** Results a job already knows while the rest runs (e.g. the located source of a point analysis). */
+  partial?: unknown;
+  /** Per-step state of a job whose steps run side by side (point analysis): pending | running | done | error. */
+  steps?: Record<string, string>;
+};
 
 // ------------------------------------------------------------------ helpers
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -583,6 +594,10 @@ export function fetchPeriodogram(id: string, source?: { key: string; photometry:
   return p;
 }
 
+/** Proper motion from per-epoch co-add centroids of the source nearest (ra, dec) (422: seen in < 2 epochs). */
+export const fetchMotion = (id: string, ra: number, dec: number, signal?: AbortSignal) =>
+  json<MotionFit>(`/api/sequences/${id}/motion?ra=${ra.toFixed(7)}&dec=${dec.toFixed(7)}`, { signal }, 0);
+
 const sourcePhot = new Map<string, Promise<SourcePhotometry>>();
 
 /** Forced photometry of any (optionally moving) position in every exposure of the sequence. */
@@ -734,7 +749,7 @@ export const analyzeSpectrum = (key: string, photometry: Photometry[], target: T
  * POST a job, then poll it (each poll is a heartbeat) until it is done. 410 (cancelled) re-POSTs. Aborting
  * withdraws this tab's interest with DELETE, so a job nobody waits for is cancelled on the server.
  */
-async function runJob<T>(post: { path: string; body: unknown }, pollBase: string, onProgress?: (p: Progress) => void, signal?: AbortSignal): Promise<T> {
+async function runJob<T>(post: { path: string; body: unknown }, pollBase: string, onProgress?: (p: Progress) => void, signal?: AbortSignal, fresh = false): Promise<T> {
   const start = async () => {
     const r = await withBackoff(
       () => request(post.path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post.body), signal }, 0),
@@ -754,8 +769,8 @@ async function runJob<T>(post: { path: string; body: unknown }, pollBase: string
   window.addEventListener("pagehide", onHide);
   try {
     for (;;) {
-      onProgress?.({ stage: job.stage ?? "queued", done: job.done ?? 0, total: job.total ?? 0, elapsed: job.elapsed ?? 0, ahead: job.position ?? null });
-      const r = await withBackoff(() => request(`${pollBase}/${id}`, { signal }), onProgress ?? (() => undefined), signal);
+      onProgress?.({ stage: job.stage ?? "queued", done: job.done ?? 0, total: job.total ?? 0, elapsed: job.elapsed ?? 0, ahead: job.position ?? null, partial: (job as { partial?: unknown }).partial, steps: (job as { steps?: Record<string, string> }).steps });
+      const r = await withBackoff(() => request(`${pollBase}/${id}`, { signal, cache: fresh ? "reload" : "default" }), onProgress ?? (() => undefined), signal);
       if (r.status === 200) {
         finished = true;
         return (await r.json()) as T;
@@ -783,11 +798,14 @@ export async function analyzePoint(
   pos: { ra: number; dec: number; pmra?: number; pmdec?: number; ref_epoch?: number; name?: string | null },
   onProgress?: (p: Progress) => void,
   signal?: AbortSignal,
+  force = false,
 ): Promise<PointAnalysis> {
   const key = `${seqId}|${pos.ra.toFixed(6)}|${pos.dec.toFixed(6)}|${pos.pmra ?? 0}|${pos.pmdec ?? 0}`;
-  const hit = pointCache.get(key);
+  const hit = force ? undefined : pointCache.get(key);
   if (hit) return hit;
-  const res = await runJob<PointAnalysis>({ path: `/api/sequences/${seqId}/analyze`, body: pos }, "/api/analyses", onProgress, signal);
+  // force: measure again instead of returning the server's saved result (e.g. one cut short by an outage). The
+  // result keeps its job id, which the browser caches as immutable, so the polls of a re-run bypass that cache.
+  const res = await runJob<PointAnalysis>({ path: `/api/sequences/${seqId}/analyze`, body: force ? { ...pos, force: true } : pos }, "/api/analyses", onProgress, signal, force);
   pointCache.set(key, res);
   return res;
 }
