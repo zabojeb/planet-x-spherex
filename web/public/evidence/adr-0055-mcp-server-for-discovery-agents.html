@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0055 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0055-mcp-server-so-an-ai-agent-can-run-a-discovery-search">ADR-0055: MCP server so an AI agent can run a discovery search</h1>
+<ul>
+<li>Status: Accepted</li>
+<li>Date: 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The team wants Claude (or any MCP client) to search SPHEREx for new stars, brown dwarfs, asteroids and comets by
+itself: choose fields, build sequences, look at the images, run the automated searches, verify candidates
+against catalogs and known objects, and write a report. Every capability already exists behind
+<code>spherex_core.services</code> (the facade the HTTP API uses), but agents need it as tools with LLM-friendly
+descriptions, compact outputs, images they can see, and protection against flooding the build queue.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li>A package <code>spherex_mcp</code> built with the official <code>mcp</code> Python SDK (v2 <code>MCPServer</code>, with a fallback to v1
+  <code>FastMCP</code>). Tools call <code>spherex_core.services</code> directly, with no HTTP round trips.</li>
+<li>Transports: stdio (<code>python -m spherex_mcp</code>) for a local Claude Code, and streamable HTTP mounted in the
+  FastAPI app at <code>/mcp</code> (stateless sessions, DNS-rebinding Host check off for a public site) so a remote agent
+  can connect to the deployed viewer. <code>SPHEREX_MCP=0</code> disables the endpoint; a missing <code>mcp</code> package only logs.</li>
+<li>20 tools: targets and coverage (<code>list_presets</code>, <code>resolve_target</code>, <code>search_observations</code>), builds
+  (<code>build_sequence</code>, <code>sequence_status</code>, <code>cancel_job</code>, <code>describe_sequence</code>), images (<code>get_image</code> with coadd /
+  difference / rgb, <code>get_blink_strip</code>, <code>track_and_stack_image</code>) returned as PNG image content, analysis
+  (<code>analyze_point</code>, <code>spectrum_classify</code>, <code>analyze_field</code>, <code>known_objects</code>, <code>track_and_stack_search</code>,
+  <code>job_result</code>), context (<code>catalog_cone</code>, <code>archival_epochs</code>, <code>moving_object_search</code>) and <code>export_report</code>. A
+  <code>spherex://overview</code> resource and a <code>discovery_report</code> prompt describe the workflow and the evidence needed
+  before calling anything new.</li>
+<li>Long work is start/poll. The server heartbeats the jobs an agent starts (every 10 s, up to 30 min), so a
+  slow-thinking agent does not lose its build to the "nobody is waiting" cancellation (ADR-0032); <code>cancel_job</code>
+  withdraws explicitly.</li>
+<li>Caps per server process: 3 active builds, 30 builds per hour, 2 active analyses, field of view ≤ 20′, on top of
+  the queue's own per-client limits.</li>
+<li>Outputs are compacted: floats rounded to 4 significant digits, lists truncated with a count, arrays omitted.
+  Images are rendered with numpy + zlib only (PNG), north up, with the predicted target marked.</li>
+<li><code>analyze_point</code> uses the point-analysis service when it exists (parallel PR) and otherwise composes position
+  photometry, spectral analysis, motion fit, periodogram and a Gaia cone.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>An agent can do a full discovery loop with only this server; <code>scripts/mcp_discovery_demo.py</code> is a scripted
+  example and a smoke test over HTTP.</li>
+<li>Keep-alive tasks and caps live in one process; with several API replicas each replica has its own caps.</li>
+<li>Tool docstrings are part of the interface: changes to service payloads should be reflected in them.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li>An MCP server that calls the public HTTP API: simpler to deploy separately, but doubles serialisation and
+  cannot reuse the process pool and caches; it can still be added on top of <code>scripts/mcp_discovery_demo.py</code>.</li>
+<li>Pinning agent builds (no cancellation): robust but lets an abandoned agent hold workers forever.</li>
+</ul></main></body></html>

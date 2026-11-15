@@ -12,7 +12,58 @@ code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; backgr
 code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
 img { max-width: 100%; }
 .top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
-</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1>Validation on the five challenge targets</h1>
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="validation-on-the-five-challenge-targets">Validation on the five challenge targets</h1>
+<h2 id="current-results-pipeline-algo_version-3-2026-11-15">Current results (pipeline ALGO_VERSION 3, 2026-11-15)</h2>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>What we measured</th>
+<th>Reference</th>
+<th>Limitations</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Barnard's Star</td>
+<td>Three visit centroids within 0.5″ of the linear Gaia proper-motion prediction (residuals 0.36/0.29, 0.11/−0.06, −0.06/−0.27″)</td>
+<td>Gaia DR3 motion</td>
+<td>Saturated: relative ring photometry; parallax not modelled; spectral variability correctly reported as within systematics</td>
+</tr>
+<tr>
+<td>ε Indi B</td>
+<td>T-dwarf-like spectrum, closest standard T3, CH₄(3.3)/4 µm index 0.19; motion 4.42 ± 0.29″/yr</td>
+<td>Gaia 4.68″/yr; T1+T6 unresolved binary</td>
+<td>Template weights are relative, not probabilities</td>
+</tr>
+<tr>
+<td>WISE 0855−0714</td>
+<td>Moving 3.8–5 µm excess (S/N 6.7–10.2), deblended D6 flux ≈ 0.46 mJy</td>
+<td>~285 K Y dwarf</td>
+<td>Blended with a G = 16.3 star 8″ away at short wavelengths</td>
+</tr>
+<tr>
+<td>R Draconis</td>
+<td>Periods 235.7 d (single band) and 246.9 d (multiband) from 2,452 ring measurements; long baseline 247.0 ± 0.5 d</td>
+<td>VSX 246.1 d</td>
+<td>~2 cycles with gaps; formal FAPs are not empirical significances</td>
+</tr>
+<tr>
+<td>RW Aurigae</td>
+<td>D5/D6 relative flux fell 1.88× / 1.86× between the first and last visits</td>
+<td>—</td>
+<td>Saturated: ring systematics up to ~15 % per detector</td>
+</tr>
+<tr>
+<td>433 Eros</td>
+<td>Rotation 5.27029 ± 0.00019 h from 308 ePSF points</td>
+<td>5.27026 h</td>
+<td>16 Psyche's period was not recovered (one visit at the orbital alias)</td>
+</tr>
+</tbody>
+</table>
+<p>Calibration: synthetic J/H/Ks photometry of one isolated comparison star agrees with 2MASS within ~2 %; broader absolute calibration is still being validated. The sections below are the full history, starting with the first pipeline version and its failures; <a href="#algo_version-3-ring-photometry-in-the-pipeline">ALGO_VERSION 3</a> is where the current ring-photometry results begin.</p>
+<h2 id="history">History</h2>
 <p>Date: 2026-11-14. Data: SPHEREx DR1 + QR3 Level 2 images through the pipeline at <code>ALGO_VERSION = 1</code>.
 Scripts in this folder ran on the dev server against the cached sequences listed below.</p>
 <table>
@@ -63,14 +114,14 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tr>
 </tbody>
 </table>
-<h2>Summary</h2>
+<h2 id="summary">Summary</h2>
 <ul>
 <li><strong>Motion is measured correctly.</strong> Alignment holds to ≤ 0.27″ between epochs, and predicted positions match the data for Barnard's Star, ε Indi B and WISE 0855.</li>
 <li><strong>Wavelengths are right.</strong> The T-dwarf absorption bands of ε Indi B land where expected.</li>
 <li><strong>Unsaturated photometry is stable to about 1 %</strong> between epochs (1.004 / 1.000 / 1.017 / 0.993 for the field star).</li>
 <li><strong>Bright stars saturate</strong> (about 0.1–0.2 Jy in D1–D3, about 1 Jy in D5–D6). Barnard's Star, RW Aur and R Dra have almost all photometry flagged, so their light curves need PSF fits to the unsaturated wings.</li>
 </ul>
-<h2>WISE 0855−0714</h2>
+<h2 id="wise-08550714">WISE 0855−0714</h2>
 <ul>
 <li>The preset (challenge position at ref epoch 2010.4, μ = −8118 / +677 mas/yr) is correct. It lands 0.2″ from AllWISE J085510.74−071442.5 (133.7947597, −7.2451456, epoch 2010.59, W1 = 16.23, W2 = 13.70).</li>
 <li>It looked missing because Gaia DR3 5756956644387831296 (G = 16.3, BP−RP = 0.72) sits 8″ from the predicted 2025.9 position. That star produces the D1–D3 flux and hides the dwarf from a simple "red-only" peak search.</li>
@@ -80,7 +131,7 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 <li>CatWISE2020 (including the reject table) has no source moving faster than 0.5″/yr within 4′, so it does not carry this object.</li>
 <li>Figure: <code>wise0855_blend.png</code>.</li>
 </ul>
-<h2>ε Indi B</h2>
+<h2 id="indi-b">ε Indi B</h2>
 <ul>
 <li>At 16′ both stars are in the field: B at the centre, A 403″ away, 13 px from the edge. A is saturated.</li>
 <li>Twelve field stars move ≤ 0.27″ between epochs with ~0.1″ scatter; the 2025-06-10 mini-epoch is worse (0.8″ in RA).</li>
@@ -88,18 +139,18 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 <li>Methane absorption is obvious. Flux ratios for B, then the comparison field star in brackets: F(3.3 µm)/F(4.1 µm) = 0.18 (1.51); F(2.3 µm)/F(K) = 0.43 (0.82); F(1.7 µm)/F(H) = 0.80 (0.94). The 4 µm peak is brighter than J (54 vs 36 mJy).</li>
 <li>Figure: <code>eps_indi_spectrum.png</code>.</li>
 </ul>
-<h2>Barnard's Star</h2>
+<h2 id="barnards-star">Barnard's Star</h2>
 <ul>
 <li>The three main epochs (108–117 frames each) match the proper motion to within 0.6″: residuals (−0.29, −0.05), (+0.46, +0.39), (−0.59, +0.17) arcsec.</li>
 <li>The 2025.75 mini-epoch (10 frames, 2 detectors) is off by +15.8″ / −19.9″ because of the empty hole at the saturated centre (issue a).</li>
 <li>All photometry is flagged as saturated. Figure: <code>barnard_core.png</code>.</li>
 </ul>
-<h2>RW Aur and R Dra</h2>
+<h2 id="rw-aur-and-r-dra">RW Aur and R Dra</h2>
 <ul>
 <li><strong>RW Aur:</strong> 315 of 333 points are flagged, with OVERFLOW in every detector (0.18–1.7 Jy). Ring photometry around the saturated centre (r = 3–6 px) shows D5 at 1.25 → 1.00 → 0.61 and D6 at 1.46 → 1.00 → 0.71, about a 2× fade at 4–5 µm over the year. The same method varies ≤ 15 % on the constant Barnard's Star, so the fade is likely real but not quotable yet.</li>
 <li><strong>R Dra:</strong> all 2479 points are flagged. D3 and D4 median flux is 0 because the masked centre empties the aperture. A Lomb–Scargle peak at 254 d has power 0.04 (noise). Ring photometry works only in D1 at 3 epochs (0.88 / 1.00 / 1.48): clearly variable, but the period is not recoverable yet.</li>
 </ul>
-<h2>Pipeline issues and fixes</h2>
+<h2 id="pipeline-issues-and-fixes">Pipeline issues and fixes</h2>
 <table>
 <thead>
 <tr>
@@ -141,8 +192,8 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tr>
 </tbody>
 </table>
-<h2>After fixes (ALGO_VERSION 2)</h2>
-<p>Changes (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/analysis/validation/../../docs/adr/0016-epsf-psf-photometry.md">ADR-0016</a> to <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/analysis/validation/../../docs/adr/0019-merge-small-epochs.md">ADR-0019</a>):</p>
+<h2 id="after-fixes-algo_version-2">After fixes (ALGO_VERSION 2)</h2>
+<p>Changes (<a href="adr-0016-epsf-psf-photometry.html">ADR-0016</a> to <a href="adr-0019-merge-small-epochs.html">ADR-0019</a>):</p>
 <ul>
 <li><strong>ePSF photometry.</strong> Photometry now fits the detector's ePSF and skips saturated and masked pixels, with a 3 % systematic error floor; the aperture value is kept as <code>flux_ap_mjy</code>.</li>
 <li><strong>Co-adds.</strong> Resampling is NaN-aware, and pixels masked in every exposure are filled and flagged <code>FILLED</code> (bit 31).</li>
@@ -213,7 +264,7 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tr>
 </tbody>
 </table>
-<h3>Flux scale</h3>
+<h3 id="flux-scale">Flux scale</h3>
 <p>The comparison star (Gaia DR3 6412593435166417536), median SPHEREx flux over catalogue flux:</p>
 <table>
 <thead>
@@ -252,13 +303,13 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tbody>
 </table>
 <p>The mean ratio is 1.01, against 0.95 in v1. The W1 and W2 differences are within the bandpass mismatch between broad WISE bands and SPHEREx channels.</p>
-<h3>Error bars and flags</h3>
+<h3 id="error-bars-and-flags">Error bars and flags</h3>
 <ul>
 <li><strong>Error bars.</strong> The comparison star's normalised light curve has reduced χ² = <strong>1.2</strong> against a constant (v1: 3.8). Its robust scatter is 3.6 % against a median quoted error of 3.4 %. Epoch levels are 1.000 / 1.000 / 1.009 / 1.000.</li>
 <li><strong>Masked fraction.</strong> Points with more than 20 % of their weight masked deviate by 11.8 % (n = 14), while those with 5–20 % masked deviate by 2.1 % (n = 16). This supports the 0.2 threshold.</li>
 <li><strong>HALO.</strong> Points with <code>HALO</code> deviate by 2.9 %, against 2.1 % without it.</li>
 </ul>
-<h3>Barnard's Star</h3>
+<h3 id="barnards-star_1">Barnard's Star</h3>
 <ul>
 <li><strong>Centroids.</strong> The three epochs now hold 118, 121 and 119 exposures, because the mini-epochs were merged. Residuals from the proper motion are (+0.36, +0.29), (+0.11, −0.06) and (−0.06, −0.27) arcsec. In v1 the three main epochs were within 0.6″ and the mini-epoch was 25″ off.</li>
 <li><strong>Co-add core.</strong> Within 4 px of the star:</li>
@@ -268,7 +319,7 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 <li>Figure: <code>barnard_core_v2.png</code>.</li>
 <li><strong>Photometry.</strong> It stays flagged. Only 90 exposures leave at least 2 % of the ePSF in usable pixels, and none leave 20 %.</li>
 </ul>
-<h3>RW Aur</h3>
+<h3 id="rw-aur">RW Aur</h3>
 <p>ePSF fits, including flagged ones, give these per-detector medians of flux over the median at the same wavelength:</p>
 <table>
 <thead>
@@ -323,7 +374,7 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 <li><strong>Control.</strong> On constant, saturated Barnard's Star the same method stays between 0.94 and 1.09, with a robust scatter of 6.9 %.</li>
 <li><strong>Result.</strong> RW Aur faded by about 2× at 4–5 µm over the year while brightening at 0.75–1.1 µm.</li>
 </ul>
-<h3>R Dra</h3>
+<h3 id="r-dra">R Dra</h3>
 <ul>
 <li><strong>ePSF photometry fails.</strong> There are no ePSF fits at all: the saturated core extends beyond the ePSF's ±3.3 px support in every detector. Lomb–Scargle on the pipeline photometry gives 254 d at power 0.04, which is noise.</li>
 <li><strong>Wing photometry recovers the period</strong> (<code>wing_lightcurve.py</code>, aligned exposures, expected ≈ 245 d):</li>
@@ -365,8 +416,8 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tbody>
 </table>
 <p>The pipeline does not compute this measurement yet. Adding it as a relative "wing" flux for saturated stars is the next step for R Dra's light curve.</p>
-<h2>ALGO_VERSION 3: ring photometry in the pipeline</h2>
-<p>Detectors in which the target saturates in at least half of the exposures now use one fixed ring per detector, 1 px outside the 95th percentile of the saturated-core radii and 3 px wide (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/analysis/validation/../../docs/adr/0020-ring-photometry-for-saturated-stars.md">ADR-0020</a>). The core is the blob of <code>OVERFLOW</code>, <code>NONLINEAR</code>, <code>TRANSIENT</code>, <code>SUR_ERROR</code> and <code>BLOOM</code> pixels around the source. <code>PERSIST</code> is left out: around Barnard's Star in D3 it reaches 16.5 px without being centred on the star. Ring fluxes are relative (<code>relative: true</code>).</p>
+<h2 id="algo_version-3-ring-photometry-in-the-pipeline">ALGO_VERSION 3: ring photometry in the pipeline</h2>
+<p>Detectors in which the target saturates in at least half of the exposures now use one fixed ring per detector, 1 px outside the 95th percentile of the saturated-core radii and 3 px wide (<a href="adr-0020-ring-photometry-for-saturated-stars.html">ADR-0020</a>). The core is the blob of <code>OVERFLOW</code>, <code>NONLINEAR</code>, <code>TRANSIENT</code>, <code>SUR_ERROR</code> and <code>BLOOM</code> pixels around the source. <code>PERSIST</code> is left out: around Barnard's Star in D3 it reaches 16.5 px without being centred on the star. Ring fluxes are relative (<code>relative: true</code>).</p>
 <p>The numbers below come from the pipeline's own <code>meta.json</code> photometry. Each unflagged value is divided by the median of its method and wavelength bin (log step 0.025), as the web client does (<code>pipeline_lightcurves.py</code>).</p>
 <table>
 <thead>
@@ -409,9 +460,9 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tr>
 </tbody>
 </table>
-<h3>R Dra</h3>
+<h3 id="r-dra_1">R Dra</h3>
 <p>Lomb–Scargle on 2,452 ring measurements gives a best period of <strong>236 d</strong> (power 0.29; expected ≈ 245 d, wing script 236–252 d). The D1 medians follow a full pulsation cycle: 1.45 → 1.05 → 0.51 → 0.67 between 2025-04 and 2025-10, then 0.95 → 1.34 in 2026-07/08.</p>
-<h3>RW Aur</h3>
+<h3 id="rw-aur_1">RW Aur</h3>
 <table>
 <thead>
 <tr>
@@ -461,7 +512,7 @@ Scripts in this folder ran on the dev server against the cached sequences listed
 </tbody>
 </table>
 <p>The 4–5 µm fade and the 0.75–1.1 µm brightening of version 2 and of the wing script are reproduced.</p>
-<h3>Barnard's Star (control, constant)</h3>
+<h3 id="barnards-star-control-constant">Barnard's Star (control, constant)</h3>
 <table>
 <thead>
 <tr>

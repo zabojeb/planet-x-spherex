@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0012 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0012-caching-layers-and-cache-keys">ADR-0012: Caching layers and cache keys</h1>
+<ul>
+<li><strong>Status:</strong> Accepted; the native-cutout layer is superseded by <a href="adr-0037-per-file-chunk-cache.html">ADR-0037</a> (one chunk per file, not per request)</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>A first build costs 30–40 s and hundreds of megabytes of reads (ADR-0002). Archive queries take 3–15 s. Users change display settings, epoch settings and fields repeatedly, demos must be instant, and the same exposures are reused across settings. Level 2 files are immutable: a reprocessing produces a new path with a new pipeline version in it.</p>
+<h2 id="decision">Decision</h2>
+<p>All caches live under <code>SPHEREX_CACHE_DIR</code> (on the dev server <code>/workspace/cache</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Path</th>
+<th>Key</th>
+<th>Lifetime</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Archive query results</td>
+<td><code>tap/&lt;key&gt;.json</code></td>
+<td>RA and Dec to 5 decimals + collection list</td>
+<td>12 h (<code>SPHEREX_TAP_CACHE_HOURS</code>)</td>
+</tr>
+<tr>
+<td>Native cutouts</td>
+<td><code>cutouts/&lt;aa&gt;/&lt;sha1&gt;.npz</code></td>
+<td>SHA-1 of file URL, RA, Dec, half-size; also stores "off the frame" results</td>
+<td>permanent</td>
+</tr>
+<tr>
+<td>Wavelength maps</td>
+<td><code>wave/D&lt;n&gt;.npz</code></td>
+<td>detector</td>
+<td>permanent</td>
+</tr>
+<tr>
+<td>Catalogue cones</td>
+<td><code>catalogs/&lt;catalog&gt;_&lt;key&gt;.json</code></td>
+<td>catalogue, RA, Dec, radius</td>
+<td>7 days</td>
+</tr>
+<tr>
+<td>Name lookups</td>
+<td><code>resolve/&lt;sha1[:16]&gt;.json</code></td>
+<td>SHA-1 of the compact name (lower case, no spaces or punctuation); names Sesame did not know are kept in memory for 10 minutes (<a href="adr-0021-local-object-index-for-search.html">ADR-0021</a>)</td>
+<td>30 days</td>
+</tr>
+<tr>
+<td>Sequence results</td>
+<td><code>sequences/&lt;id&gt;/</code></td>
+<td>first 20 hex digits of the SHA-1 of the normalised request (RA/Dec to 6 decimals, proper motion to 0.1 mas/yr, reference epoch, field, epoch parameters, collections, <code>ALGO_VERSION</code>)</td>
+<td>permanent</td>
+</tr>
+</tbody>
+</table>
+<p>Sequence results are written to <code>&lt;id&gt;.tmp/</code> and renamed when complete, so readers never see half-written results. The target's display name is not part of the key.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Rebuilding a sequence with different epoch settings reuses every cutout: Barnard's Star rebuilt from cached cutouts in 5.2 s instead of 37.7 s.</li>
+<li>Bumping <code>ALGO_VERSION</code> invalidates all sequence results after a processing change.</li>
+<li>New weekly data reach users after at most 12 hours (the query cache lifetime).</li>
+<li>There is no eviction yet. The dev server has 150 GB of disk; by array sizes, a cached cutout at a 6′ field (a 91 × 91 window of image, variance and flags) is about 0.1 MB, so ~36 MB for Barnard's Star's 358 exposures, plus the sequence result.</li>
+<li>Requests that differ only by rounding share results; requests with different fields do not share cutouts.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Redis or a database for metadata:</strong> another service to run for no measured gain at our scale (ADR-0004).</li>
+<li><strong>No cutout cache:</strong> every change of epoch settings would re-read hundreds of megabytes.</li>
+</ul></main></body></html>

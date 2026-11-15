@@ -1,0 +1,52 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0020 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0020-measure-saturated-stars-in-a-fixed-ring-outside-the-core-as-relative-fluxes">ADR-0020: Measure saturated stars in a fixed ring outside the core, as relative fluxes</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+<li><strong>Extends:</strong> <a href="adr-0016-epsf-psf-photometry.html">ADR-0016</a></li>
+</ul>
+<h2 id="context">Context</h2>
+<p>After ALGO_VERSION 2, two of the five challenge targets still had no usable light curve:</p>
+<ul>
+<li><strong>R Draconis (K ≈ 0)</strong> saturates beyond the ePSF's ±3.3 px support in every detector, so it got 0 ePSF fits out of 2,479 exposures and every point was a flagged aperture value. A Lomb–Scargle periodogram gave noise (254 d, power 0.04).</li>
+<li><strong>Barnard's Star and RW Aur</strong> got ePSF fits on their few unsaturated pixels, but almost all were flagged because less than 20 % of the PSF was usable.</li>
+</ul>
+<p>The validation script <code>analysis/validation/wing_lightcurve.py</code> showed that the flux in an annulus outside the saturated core, divided by the median of its wavelength bin, recovers R Dra's period (236–252 d for annuli between 3.5 and 9 px; expected ≈ 245 d). The star's wings scale with its total flux, and the wavelength-bin normalisation cancels both the colour and the ring's share of the PSF.</p>
+<p>A diagnostic on Barnard's Star showed what sets the size of the corrupted core. <code>OVERFLOW</code>/<code>NONLINEAR</code> pixels reach only 1.5–2.2 px, <code>TRANSIENT</code>, <code>SUR_ERROR</code> and <code>BLOOM</code> around the star reach 4–6 px, and <code>PERSIST</code> blobs from earlier exposures reach up to 16.5 px in D3, but they are not centred on the star.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong>Per exposure</strong> (<code>photometry.radial_profile</code>): keep background-subtracted sums, variances and pixel counts in 1-px annuli out to 16 px, plus the saturated-core radius. The core is the blob of <code>OVERFLOW</code>, <code>NONLINEAR</code>, <code>TRANSIENT</code>, <code>SUR_ERROR</code> and <code>BLOOM</code> pixels touching the source (<code>flags.RING_CORE</code>, without <code>PERSIST</code>). Pixels with any of <code>flags.RING_BAD</code> (image mask, saturation, bloom) are left out of the sums. The local background is the median of usable pixels at 16–21 px, or the frame background when that annulus does not fit.</li>
+<li><strong>Per detector</strong> (<code>pipeline.assemble.apply_rings</code>): switch to rings when at least 50 % of the exposures are saturated (or failed with a bad-pixel blob over the source). Use one ring for every exposure of that detector: inner radius 1 px outside the 95th percentile of the core radii, 3 px wide, capped at 16 px. Fill masked ring pixels with their annulus mean. Drop the photometry of exposures whose ring is cut by the cutout edge or has under 60 % usable pixels, rather than mixing methods within a detector.</li>
+<li><strong>Records</strong> get <code>method: "ring"</code>, <code>relative: true</code>, <code>ring_r_in</code>, <code>ring_r_out</code> and <code>ab_mag: null</code>. Every other record gets <code>relative: false</code>. The rings chosen are listed in <code>meta.processing.rings</code>. The algorithm version becomes 3.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li><strong>The variable targets work in the pipeline itself.</strong></li>
+<li>R Dra: rings at 9–15 px in all six detectors, and a Lomb–Scargle period of 236 d (power 0.29).</li>
+<li>RW Aur: D5 1.22 → 1.00 → 0.65, D6 1.38 → 1.00 → 0.74, D1 0.84 → 1.00 → 1.24.</li>
+<li>Barnard's Star (constant): flat to within 1–4 % in four detectors.</li>
+<li><strong>Ring fluxes are relative.</strong> They cannot go on an absolute spectrum, and clients must check <code>relative</code>. A saturated star therefore has a light curve but no calibrated spectrum.</li>
+<li><strong>About 10–15 % systematics per detector.</strong> The ring samples the wing profile at 4–15 px, which changes with the position on the detector, so constant Barnard's Star shows per-epoch offsets of up to 14 % in D2 and D3. Amplitudes below ~15 % are not trustworthy with this method.</li>
+<li><strong>A fixed ring per detector</strong> keeps fluxes comparable while the core grows and shrinks with the star's brightness. The cost is that exposures with an unusually large core put some masked pixels at the ring's inner edge.</li>
+<li><strong>Cost:</strong> an extra ~1–2 ms per exposure.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>A ring chosen per exposure from that exposure's core:</strong> the ring moves outward when the star brightens and inward when it fades, so the measured amplitude shrinks.</li>
+<li><strong>Including <code>PERSIST</code> in the core:</strong> it inflated Barnard's Star's D3 core to 12.5 px (95th percentile) and broke its light curve (0.38 → 1.00 → 1.69).</li>
+<li><strong>Sigma-clipping field stars inside each annulus:</strong> tried, did not reduce Barnard's D2/D3 offsets, and moved RW Aur's D2 curve (0.94/1.03/1.03 → 0.80/1.17/1.01), so it was dropped.</li>
+<li><strong>PSF fits to the wings with a wider PSF model:</strong> the ePSF in the files stops at ±3.3 px; a wing model would need its own calibration.</li>
+</ul></main></body></html>

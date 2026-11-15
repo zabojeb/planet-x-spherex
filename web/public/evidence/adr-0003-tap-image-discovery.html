@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0003 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0003-discover-images-with-irsa-tap-not-sia">ADR-0003: Discover images with IRSA TAP, not SIA</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>The tool must find every Level 2 image whose footprint contains a position, and new SPHEREx data arrive weekly. IRSA offers two interfaces. SIA2 is simpler, but the IRSA tutorials state that SIA availability lags ingestion by about a day. TAP exposes the CAOM tables <code>spherex.observation</code>, <code>spherex.plane</code> and <code>spherex.artifact</code> immediately after ingestion. Current collections are <code>spherex_dr1</code>, <code>spherex_dr1_deep</code>, <code>spherex_qr3</code> and <code>spherex_qr3_deep</code>; QR2 is superseded. The challenge asks for a tool that is easy to update as releases arrive.</p>
+<h2 id="decision">Decision</h2>
+<p>Use one TAP query that joins <code>spherex.artifact</code> ⨝ <code>spherex.plane</code> ⨝ <code>spherex.observation</code>, selects images with <code>CONTAINS(POINT('ICRS', ra, dec), p.poly) = 1</code>, restricts to the configured collections and <code>producttype = 'science'</code>, and returns the file URI, detector (<code>energy_bandpassname</code>), time bounds (MJD), wavelength bounds, collection and observation id.</p>
+<ul>
+<li>The S3 URL is derived from the URI by dropping the <code>ibe/data/spherex/</code> prefix.</li>
+<li>Results are de-duplicated per (observation id, detector), keeping the collection listed first. The default order is DR1, DR1 deep, QR3, QR3 deep.</li>
+<li>Collections come from the environment variable <code>SPHEREX_COLLECTIONS</code>, so a new release is a configuration change.</li>
+<li>For moving targets the query uses the position propagated to 2026.0 (ADR-0010). Footprints are about 3.5° wide, so arcminute motions do not change the result except at detector edges.</li>
+<li>Results are cached for 12 hours (ADR-0012).</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>No ingestion lag beyond our own cache lifetime; the newest weekly data appear automatically.</li>
+<li>Measured query times were 2.7–14.7 s, so caching matters for interactive use.</li>
+<li>We depend on IRSA's table and column names (<code>time_bounds_lower</code>, <code>energy_bandpassname</code>, <code>poly</code>).</li>
+<li>For Barnard's Star we saw no exposure in both DR1 and QR3 (DR1 covered the visits up to May 2026, QR3 the August–September 2026 visit). The de-duplication is a safeguard, not a measured necessity.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>SIA2 through astroquery:</strong> less code, but about a day of lag and less control over the returned columns.</li>
+<li><strong>A local metadata index refreshed weekly (for example DuckDB):</strong> would make search instant and give a precise "what's new" feed. Deferred; it fits the release-monitor objective.</li>
+</ul></main></body></html>

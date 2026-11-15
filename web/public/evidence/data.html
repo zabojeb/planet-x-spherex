@@ -1,0 +1,490 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SPHEREx data · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="spherex-data-for-developers">SPHEREx data for developers</h1>
+<p>What you need to know about SPHEREx data to work on this project, with the numbers we measured on 2026-11-14. Authoritative references: the <a href="https://irsa.ipac.caltech.edu/Missions/spherex.html">IRSA SPHEREx page</a>, the <a href="https://irsa.ipac.caltech.edu/data/SPHEREx/docs/SPHEREx_Expsupp.pdf">Explanatory Supplement</a> and the <a href="https://caltech-ipac.github.io/irsa-tutorials/spherex/">IRSA tutorial notebooks</a>.</p>
+<h2 id="the-instrument-in-one-paragraph">The instrument in one paragraph</h2>
+<p>SPHEREx has been mapping the whole sky since May 2025, covering each region about every six months. It has six detector arrays (D1–D6) behind linear variable filters: the transmitted wavelength changes across each detector, so one exposure is a set of narrow-band strips, and a small cutout is effectively a single narrow band. Stepping the field across the filters over a visit gives 17 channels per detector, 102 in total, from 0.75 to 5.0 µm. Pixels are about 6.15″ (pixel solid angle <code>OMEGA_MEDIAN</code> ≈ 37.86 arcsec²). The point-spread function is 1.2–1.5 pixels wide (<code>PSF_FWHM</code> 7.5″ in a D1 exposure, 9.0″ in a D6 exposure we inspected).</p>
+<table>
+<thead>
+<tr>
+<th>Detector</th>
+<th>D1</th>
+<th>D2</th>
+<th>D3</th>
+<th>D4</th>
+<th>D5</th>
+<th>D6</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wavelength (µm)</td>
+<td>0.75–1.11</td>
+<td>1.11–1.64</td>
+<td>1.64–2.42</td>
+<td>2.42–3.82</td>
+<td>3.82–4.42</td>
+<td>4.42–5.00</td>
+</tr>
+<tr>
+<td>Resolving power R</td>
+<td>39</td>
+<td>41</td>
+<td>41</td>
+<td>35</td>
+<td>112</td>
+<td>128</td>
+</tr>
+</tbody>
+</table>
+<p>The detectors work in pairs behind a dichroic: D1 and D4, D2 and D5, D3 and D6 look at the same field. In our coverage counts the images per pair match exactly (for example 584 D1 and 584 D4 images of R Draconis).</p>
+<h2 id="releases-and-collections">Releases and collections</h2>
+<table>
+<thead>
+<tr>
+<th>Release</th>
+<th>Date</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Quick Release (QR)</td>
+<td>July 2025</td>
+<td>first weekly releases</td>
+</tr>
+<tr>
+<td>QR2</td>
+<td>October 2025</td>
+<td>reprocessed; superseded</td>
+</tr>
+<tr>
+<td>QR3</td>
+<td>September 2026</td>
+<td>weekly, current processing</td>
+</tr>
+<tr>
+<td>DR1</td>
+<td>November 2026</td>
+<td>first data release</td>
+</tr>
+</tbody>
+</table>
+<p>Collections searched by default (order = preference when one exposure appears twice): <code>spherex_dr1</code>, <code>spherex_dr1_deep</code>, <code>spherex_qr3</code>, <code>spherex_qr3_deep</code>. The <code>_deep</code> collections hold Deep Survey images near the ecliptic poles. New data are ingested weekly. Override with <code>SPHEREX_COLLECTIONS</code>.</p>
+<h2 id="finding-images">Finding images</h2>
+<p>IRSA TAP (<code>https://irsa.ipac.caltech.edu/TAP/sync</code>) with the CAOM tables, no ingestion lag (<a href="adr-0003-tap-image-discovery.html">ADR-0003</a>):</p>
+<pre><code class="language-sql">SELECT a.uri, p.energy_bandpassname AS band, p.time_bounds_lower AS t0, p.time_bounds_upper AS t1,
+       p.energy_bounds_lower AS wl0, p.energy_bounds_upper AS wl1, o.collection, o.observationid AS obs
+FROM spherex.artifact a
+JOIN spherex.plane p ON a.planeid = p.planeid
+JOIN spherex.observation o ON p.obsid = o.obsid
+WHERE 1 = CONTAINS(POINT('ICRS', 269.4463, 4.7682), p.poly)
+  AND o.collection IN ('spherex_dr1','spherex_dr1_deep','spherex_qr3','spherex_qr3_deep')
+  AND a.producttype = 'science'
+</code></pre>
+<ul>
+<li>Times are MJD; wavelengths are in metres; <code>band</code> is <code>SPHEREx-D1</code> … <code>SPHEREx-D6</code>.</li>
+<li>SIA2 also works (<code>Irsa.query_sia(pos=..., collection=[...])</code>) but lags by about a day.</li>
+</ul>
+<h2 id="getting-pixels">Getting pixels</h2>
+<ul>
+<li><strong>Public S3 bucket:</strong> <code>s3://nasa-irsa-spherex/</code> in us-east-1, anonymous. Over HTTPS: <code>https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com/&lt;path&gt;</code>, where <code>&lt;path&gt;</code> is the TAP <code>uri</code> without the <code>ibe/data/spherex/</code> prefix. HTTP range requests return <code>206</code>.</li>
+<li><strong>Latency:</strong> 67 ms median per request from a server in Pennsylvania; 1.5–10 s from the team's own location.</li>
+<li><strong>IRSA cutout service:</strong> <code>https://irsa.ipac.caltech.edu/&lt;uri&gt;?center=&lt;ra&gt;,&lt;dec&gt;d&amp;size=&lt;deg&gt;</code> returns a multi-extension cutout. During the hackathon it answered <code>503 Server busy</code> to 3 of 4 requests, and the one success took ~95 s for 0.1° (2.06 MB). We do not use it (<a href="adr-0002-s3-range-reads.html">ADR-0002</a>).</li>
+</ul>
+<h2 id="level-2-file-layout">Level 2 file layout</h2>
+<p>One multi-extension FITS file per exposure and detector, 64.2–64.5 MB. Example: <code>level2_2025W35_1A_0432_4D1_spx_l2b-v27-2026-230.fits</code> (DR1, detector D1). Byte offsets as read by astropy:</p>
+<table>
+<thead>
+<tr>
+<th>HDU</th>
+<th>Header at</th>
+<th>Header length</th>
+<th>Data at</th>
+<th>Data size</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PRIMARY</td>
+<td>0</td>
+<td>2,880</td>
+<td>—</td>
+<td>0</td>
+<td><code>VERSION = '7.0.5'</code></td>
+</tr>
+<tr>
+<td>IMAGE</td>
+<td>2,880</td>
+<td>25,920</td>
+<td>28,800</td>
+<td>16,646,400</td>
+<td>float32 2040 × 2040, MJy/sr, zodiacal light <strong>not</strong> subtracted</td>
+</tr>
+<tr>
+<td>FLAGS</td>
+<td>16,675,200</td>
+<td>17,280</td>
+<td>16,692,480</td>
+<td>~10.1 MB</td>
+<td>int32 bitmask, RICE_1 tile-compressed (binary table)</td>
+</tr>
+<tr>
+<td>VARIANCE</td>
+<td>26,789,760</td>
+<td>11,520</td>
+<td>26,801,280</td>
+<td>16,646,400</td>
+<td>float32, (MJy/sr)²</td>
+</tr>
+<tr>
+<td>ZODI</td>
+<td>43,447,680</td>
+<td>11,520</td>
+<td>43,459,200</td>
+<td>16,646,400</td>
+<td>float32 zodiacal-light model</td>
+</tr>
+<tr>
+<td>EPSF</td>
+<td>60,105,600</td>
+<td>5,760</td>
+<td>60,111,360</td>
+<td>3,862,080</td>
+<td>table: 441 effective PSFs (21 × 21 zones of ~97 px, rows x-fast then y; <code>EPSF</code> 33 × 33 float64 oversampled 5×, sum 1; <code>XCENTER</code>/<code>YCENTER</code>, <code>CWAVE</code>, <code>NEFF_MEAN</code>). Identical across DR1 and QR3 files of a detector</td>
+</tr>
+<tr>
+<td>WCS-WAVE</td>
+<td>63,973,440</td>
+<td>2,880</td>
+<td>63,976,320</td>
+<td>2,880</td>
+<td>pixel → wavelength lookup table</td>
+</tr>
+</tbody>
+</table>
+<p>Things that vary between files:</p>
+<ul>
+<li>The <code>IMAGE</code> header is 25,920 bytes for D1 files and 23,040 bytes for the D6 file we checked.</li>
+<li>The compressed <code>FLAGS</code> size varied from 9.4 to 11.1 MB in four files, so every extension after <code>FLAGS</code> moves.</li>
+<li>2040 × 2040 × 4 bytes is exactly 5,780 FITS blocks, so image data units carry no padding.</li>
+</ul>
+<h3 id="flags-compression">FLAGS compression</h3>
+<p><code>FLAGS</code> is stored as a tile-compressed binary table: <code>ZCMPTYPE = 'RICE_1'</code>, <code>ZBITPIX = 32</code>, <code>ZTILE1 = 2040</code>, <code>ZTILE2 = 1</code> (one tile per row), <code>BLOCKSIZE = 32</code>, <code>BYTEPIX = 4</code>, <code>TFORM1 = '1PB(…)'</code>. The table has 2,040 rows of 8 bytes: (byte count, heap offset) per tile, with the heap right after the table. To read rows y0…y1, read the table, then the contiguous heap span of those tiles, and decode each tile. astropy's <code>Rice1</code> codec expects a NumPy <code>uint8</code> array, not <code>bytes</code>.</p>
+<h3 id="useful-image-header-keywords">Useful IMAGE header keywords</h3>
+<table>
+<thead>
+<tr>
+<th>Keyword</th>
+<th>Example</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MJD-AVG</code></td>
+<td>60914.2132</td>
+<td>mid-exposure time</td>
+</tr>
+<tr>
+<td><code>PSF_FWHM</code></td>
+<td>7.53</td>
+<td>median PSF FWHM, arcsec</td>
+</tr>
+<tr>
+<td><code>OMEGA_MEDIAN</code></td>
+<td>37.86</td>
+<td>median pixel solid angle, arcsec² (std 0.20)</td>
+</tr>
+<tr>
+<td><code>XPOSURE</code></td>
+<td>113.58</td>
+<td>exposure time, s</td>
+</tr>
+<tr>
+<td><code>DETECTOR</code></td>
+<td>1</td>
+<td>1–3 short-wave, 4–6 mid-wave</td>
+</tr>
+<tr>
+<td><code>OBSID</code></td>
+<td><code>2025W35_1A_0432_4</code></td>
+<td>exposure id (without detector)</td>
+</tr>
+<tr>
+<td><code>CTYPE1/2</code></td>
+<td><code>RA---TAN-SIP</code></td>
+<td>celestial WCS with SIP distortion</td>
+</tr>
+<tr>
+<td><code>BUNIT</code></td>
+<td><code>MJy / sr</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>IMAGE</code> header has about 300 cards. Building an astropy <code>WCS</code> from all of them costs ~35 ms; we keep only the WCS and the keys above (<a href="adr-0013-process-pool-and-slim-headers.html">ADR-0013</a>).</p>
+<h2 id="flags">Flags</h2>
+<p>Bits defined in the <code>FLAGS</code> header (<code>MSKNnnnn</code> = name, <code>MSKDnnnn</code> = description). The last two columns are our policy (<a href="adr-0018-photometry-flag-policy.html">ADR-0018</a>, which replaced ADR-0008). "Bad for photometry" flags an aperture measurement; an ePSF fit instead leaves saturated pixels out and is flagged by how much of the PSF remains (<a href="adr-0016-epsf-psf-photometry.html">ADR-0016</a>).</p>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Name</th>
+<th>Description</th>
+<th>Masked in images</th>
+<th>Bad for photometry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>TRANSIENT</td>
+<td>Transient detected during SUR</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>1</td>
+<td>OVERFLOW</td>
+<td>Overflow detected during SUR</td>
+<td></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>2</td>
+<td>SUR_ERROR</td>
+<td>Error in onboard processing</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>6</td>
+<td>NONFUNC</td>
+<td>Permanently unusable</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>7</td>
+<td>DICHROIC</td>
+<td>Low efficiency due to dichroic</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>9</td>
+<td>MISSING_DATA</td>
+<td>Onboard data lost</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>10</td>
+<td>HOT</td>
+<td>Hot pixel</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>11</td>
+<td>COLD</td>
+<td>Anomalously low signal</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>12</td>
+<td>FULLSAMPLE</td>
+<td>Pixel full sample history is available</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>14</td>
+<td>PHANMISS</td>
+<td>Phantom correction was not applied</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>15</td>
+<td>NONLINEAR</td>
+<td>Nonlinearity correction cannot be applied reliably</td>
+<td></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>17</td>
+<td>PERSIST</td>
+<td>Persistent charge above threshold</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>19</td>
+<td>OUTLIER</td>
+<td>Pixel flagged by Detect Outliers</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>20</td>
+<td>CROSSTALK</td>
+<td>Pixel affected by crosstalk</td>
+<td></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>21</td>
+<td>SOURCE</td>
+<td>Pixel mapped to a known source</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>22</td>
+<td>GHOST</td>
+<td>Affected by a bright source inside the exposure</td>
+<td></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>23</td>
+<td>GHOST_FPA</td>
+<td>Affected by a bright source on another detector</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>24</td>
+<td>GHOST_EXT</td>
+<td>Pixel affected by a bright source outside FOV</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>25</td>
+<td>STREAK</td>
+<td>Pixel affected by a streak</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>26</td>
+<td>BLOOM</td>
+<td>Pixel part of a bloom artifact</td>
+<td></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>27</td>
+<td>SNOWBALL</td>
+<td>Pixel part of a snowball artifact</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>28</td>
+<td>HALO</td>
+<td>Pixel part of a transient halo</td>
+<td></td>
+<td>(informational)</td>
+</tr>
+<tr>
+<td>31</td>
+<td>FILLED</td>
+<td><em>Pipeline bit in <code>flags.bin</code>, not in the files:</em> co-add pixel masked in every exposure, filled from the masked values</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>IMAGE</code> header also counts flagged pixels per exposure (<code>L2 N_OVERFLOW</code>, <code>L2 N_SOURCE</code>, …).</p>
+<p>A measurement is also flagged when more than 20 % of its aperture or PSF weight sits on masked pixels (it was 5 % in ALGO_VERSION 1; the validation found points with 5–20 % masked no worse than clean ones, and points above 20 % deviating by 12 %). Saturated star cores carry masked bits (<code>SUR_ERROR</code>, <code>TRANSIENT</code>, <code>NONFUNC</code>, <code>PERSIST</code>) together with <code>OVERFLOW</code>, so they are masked in images; the co-adds fill them back and mark them <code>FILLED</code> (<a href="adr-0017-nan-aware-resampling-and-filled-coadds.html">ADR-0017</a>).</p>
+<h2 id="wcs-wave-wavelength-per-pixel">WCS-WAVE: wavelength per pixel</h2>
+<p>The <code>IMAGE</code> header defines an alternate WCS <code>W</code> of type <code>WAVE-TAB</code> (<code>CTYPE1W = CTYPE2W = 'WAVE-TAB'</code>, <code>PS1_0W = PS2_0W = 'WCS-WAVE'</code>). The <code>WCS-WAVE</code> table has one row with columns <code>X</code> (9 values), <code>Y</code> (9 values) and <code>VALUES</code> (<code>TDIM = (2,9,9)</code>, NumPy shape <code>[9 y, 9 x, 2]</code>): central wavelength and bandwidth in µm at a 9 × 9 grid of control points. <code>CRPIX = CDELT = CRVAL = 1</code>: the table is indexed by <strong>raw</strong> 1-based FITS pixel coordinates, with bilinear interpolation.</p>
+<ul>
+<li>The table is identical across the D1 files we compared (two DR1 weeks and one QR3 file), so we read it once per detector and cache it.</li>
+<li>D1 covers 0.735–1.126 µm across the detector; D6 covers 4.402–5.025 µm.</li>
+<li><strong>Gotcha:</strong> <code>astropy.wcs.WCS(header, fobj=hdul, key='W')</code> applies the celestial SIP coefficients to these axes too (astropy warns about SIP keywords) and gets wavelengths wrong by up to 0.006 µm at the corners. Remove the <code>A_*</code>, <code>B_*</code>, <code>AP_*</code>, <code>BP_*</code> keywords first, or interpolate the table yourself.</li>
+</ul>
+<h2 id="coverage-of-the-test-targets">Coverage of the test targets</h2>
+<p>IRSA TAP on 2026-11-14, DR1 and QR3, all detectors. "Visits" are groups separated by gaps longer than 20 days.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Images</th>
+<th>By collection</th>
+<th>Span</th>
+<th>Visits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Barnard's Star</td>
+<td>363</td>
+<td>DR1 240, QR3 123</td>
+<td>2025-08-15 – 2026-09-22</td>
+<td>3 main (110–123 images) + 2 small</td>
+</tr>
+<tr>
+<td>ε Indi B</td>
+<td>465</td>
+<td>DR1 345, QR3 120</td>
+<td>2025-04-24 – 2026-10-02</td>
+<td>4</td>
+</tr>
+<tr>
+<td>WISE 0855−0714</td>
+<td>258</td>
+<td>DR1 258</td>
+<td>2025-05-05 – 2026-05-14</td>
+<td>4 (one with 18 images)</td>
+</tr>
+<tr>
+<td>RW Aurigae</td>
+<td>335</td>
+<td>DR1 226, QR3 109</td>
+<td>2025-09-01 – 2026-09-16</td>
+<td>3</td>
+</tr>
+<tr>
+<td>R Draconis</td>
+<td>2,493</td>
+<td>DR1 deep 1,225, QR3 deep 729, DR1 413, QR3 126</td>
+<td>2025-04-24 – 2026-09-27</td>
+<td>nearly continuous</td>
+</tr>
+</tbody>
+</table>
+<p>R Draconis has far fewer D2/D5 images (89 each) than D1/D3/D4/D6 (~580 each): the Deep Survey pointings there favour the outer detector pairs.</p>
+<h2 id="gotchas-we-hit">Gotchas we hit</h2>
+<ul>
+<li><strong>Coordinates go stale.</strong> Barnard's Star is ~4.5′ from its J2000 position; propagate proper motion before cutting a small field (<a href="adr-0010-proper-motion-aware-targets.html">ADR-0010</a>).</li>
+<li><strong>Bright stars saturate.</strong> All 358 photometric measurements of Barnard's Star are flagged by our policy, and its fluxes (1.3–2.6 Jy median per detector) are far below what its K ≈ 4.5 magnitude implies.</li>
+<li><strong>Zodiacal light is not subtracted</strong> in <code>IMAGE</code>; subtract a model or a local background.</li>
+<li><strong>Wavelength differs across a cutout's parent detector,</strong> so co-adding a detector mixes 17 wavelengths.</li>
+<li><strong>CDS was partly down</strong> during the hackathon (SIMBAD TAP, VizieR TAP); Sesame worked through a mirror (<a href="adr-0011-name-resolution-and-catalogs.html">ADR-0011</a>).</li>
+<li><strong>Motion is small in pixels.</strong> With 6.15″ pixels and ~1.5 years of data, even the fastest test targets move only 1–2 pixels, so the viewer needs difference images, predicted-position overlays and comparisons with older surveys to make motion obvious.</li>
+</ul>
+<h2 id="other-useful-products">Other useful products</h2>
+<ul>
+<li><strong>All-sky HiPS cube (DR1, 102 layers):</strong> <code>https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube</code> — context, not time-resolved.</li>
+<li><strong>IRSA tools:</strong> Spectrophotometry Tool (forced-photometry spectra), Moving Object Search Tool (MOST), Cutout and Mosaic tools, Source Discovery Tool.</li>
+</ul>
+<p><strong>Acknowledgement required when using SPHEREx data:</strong> "This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration."</p></main></body></html>

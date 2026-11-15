@@ -98,9 +98,8 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
 .s3 li b { color: var(--text-1); font-weight: 500; }
 .s3 .right { position: absolute; left: 648px; right: 0; top: 10px; }
 .s3 .shot img { height: auto; }
-.s3 .pair { display: grid; grid-template-columns: 392px 1fr; gap: 28px; }
+.s3 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
 .s3 .pair .shot { aspect-ratio: 1 / 1; }
-.s3 .pair > div + div .shot { aspect-ratio: 16 / 10; }
 .s3 .pair .shot img { height: 100%; }
 .s3 .pair .cap { text-transform: none; letter-spacing: 0; font-family: var(--ui); font-size: 20px; line-height: 1.45; color: var(--text-2); }
 .s3 h2 { font-size: 80px; }
@@ -228,11 +227,9 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
       <div class="micro"><span class="n">02</span> — What it does</div>
       <h2 class="display">Enter coordinates, press play, see what <em>moved.</em></h2>
       <ol>
-        <li><span><b>Type</b> a name or RA/Dec, or click the all-sky map</span></li>
-        <li><span><b>Available visits</b> in the indexed releases are fetched and aligned</span></li>
-        <li><span><b>Blink, subtract or stack</b> the visits; RGB, single exposures, 3D</span></li>
-        <li><span><b>Field 2′–30′</b>, quality flags, Gaia and CatWISE at each visit's date</span></li>
-        <li><span><b>Every view is a link</b>, shareable and embeddable</span></li>
+        <li><span><b>Type</b> a name or RA/Dec, or click the all-sky map; the visits are fetched and aligned</span></li>
+        <li><span><b>Press Play</b> to blink the visits, or choose Difference to subtract them</span></li>
+        <li><span><b>Click the source</b> for its spectrum, light curve and motion</span></li>
       </ol>
     </div>
     <div class="right">
@@ -240,7 +237,7 @@ body { font-family: var(--ui); color: var(--text-1); -webkit-font-smoothing: ant
         <div><div class="shot"><img src="img/barnard-diff.png" alt="Difference of two SPHEREx visits of Barnard's Star"></div>
           <div class="cap"><b>Difference</b>, Aug 2026 minus Aug 2025: blue is the earlier position, red the later one</div></div>
         <div><div class="shot"><img src="img/browser.jpg" alt="The Seek In Space web app showing Barnard's Star in Difference mode"></div>
-          <div class="cap"><b>In the browser</b>: pick Barnard's Star, press Play, then choose Difference; the timeline shows the visit dates</div></div>
+          <div class="cap"><b>In the browser</b>: Difference mode with the visit timeline (Aug 2025 → Aug 2026) and the Play button below</div></div>
       </div>
     </div>
   </div>

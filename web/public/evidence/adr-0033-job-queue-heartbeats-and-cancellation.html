@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0033 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0033-job-queue-with-dedupe-heartbeats-cancellation-priorities-and-limits">ADR-0033: Job queue with dedupe, heartbeats, cancellation, priorities and limits</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>Users switch targets quickly and close tabs; a build nobody waits for still costs minutes of CPU and gigabytes of S3 reads. Many users may also ask for the same target at once, and a single address could flood the queue.</p>
+<h2 id="decision">Decision</h2>
+<p><code>spherex_core.jobs</code> exposes one async interface (<code>submit</code>, <code>status</code>, <code>withdraw</code>, <code>stats</code>, <code>allow_submit</code>) with two backends, <code>InProcessQueue</code> and <code>RedisQueue</code> + <code>worker.py</code>, sharing these rules:</p>
+<ul>
+<li><strong>Dedupe:</strong> one job per <code>SequenceParams.key()</code>; a second request joins the running job. Finished results are reused (local disk, then bucket).</li>
+<li><strong>Interest:</strong> every POST and every status poll is a heartbeat from a client (<code>X-Client-Id</code> header per browser tab, falling back to the IP). <code>DELETE /api/sequences/{id}</code> withdraws that client. A job is cancelled when every client withdrew, or when nobody polled for <code>SPHEREX_INTEREST_TIMEOUT</code> (30 s). Prewarm jobs are <code>pinned</code> and never cancelled for lack of interest.</li>
+<li><strong>Cancelling</strong> a running build (<code>jobs.runner.run_build</code>, checked every second): the build task is cancelled, which aborts in-flight aiohttp range requests and cancels process-pool futures that have not started; the temporary result directory is removed; the job becomes <code>cancelled</code> (HTTP 410). A later POST restarts it, reusing the cutout cache.</li>
+<li><strong>Priorities:</strong> interactive builds (0) run before prewarm builds (10); the Redis queue is a sorted set.</li>
+<li><strong>Limits</strong> (HTTP 429 with <code>Retry-After</code>): <code>SPHEREX_MAX_ACTIVE_PER_IP</code> active builds per address (3), <code>SPHEREX_MAX_QUEUE</code> queued builds in total (40), <code>SPHEREX_POST_RATE_PER_MIN</code> submissions per address and minute (30); <code>SPHEREX_MAX_RUNTIME</code> per build (900 s); <code>SPHEREX_MAX_FRAMES</code> exposures per position (4000). Pinned jobs bypass the per-address and queue limits.</li>
+<li><strong>Worker failure:</strong> workers heartbeat every 10 s; a running job whose worker has been silent for 90 s is reported as failed so the client can resubmit. On SIGTERM a worker requeues its running jobs at the head of the queue.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Abandoned builds stop within about <code>interest_timeout + 1</code> s (measured: 30 s timeout → cancelled; DELETE → cancelled in ~1 s).</li>
+<li>Clients must keep polling while they wait (the web client does) and should send <code>DELETE</code> when they leave a sequence.</li>
+<li>Long synchronous endpoints (catalog cones) use <code>run_until_disconnect</code>: the response slot is released when the client goes away, though the remote call ends on its own timeout.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Cancel on WebSocket close:</strong> cleaner signal, but polling already exists and works through every proxy.</li>
+<li><strong>Never cancel:</strong> simplest, but a burst of quick target switches would queue dozens of useless builds.</li>
+</ul></main></body></html>

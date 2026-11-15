@@ -1,0 +1,79 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0005 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0005-align-and-co-add-on-the-server-display-on-the-client">ADR-0005: Align and co-add on the server, display on the client</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>Users need to blink between epochs, subtract and stack epochs, switch detectors, make false-colour composites and adjust contrast. These interactions should feel instant. Fields are small: the default 6′ field is 59 × 59 pixels at SPHEREx's native scale. Building the aligned frames is expensive (network and CPU) and must happen on a machine near the data.</p>
+<h2 id="decision">Decision</h2>
+<p>The server does the expensive, data-dependent work once per request: reading cutouts, masking, background subtraction, alignment to a common grid, epoch grouping, co-adds and forced photometry. It writes a result directory with raw little-endian arrays and metadata:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Type</th>
+<th>Shape</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>coadds.f32</code></td>
+<td>float32</td>
+<td>[epochs, 6, n, n]</td>
+<td>background-subtracted co-adds in MJy/sr; NaN where there is no data</td>
+</tr>
+<tr>
+<td><code>coverage.u16</code></td>
+<td>uint16</td>
+<td>[epochs, 6, n, n]</td>
+<td>number of frames per pixel</td>
+</tr>
+<tr>
+<td><code>flags.u32</code></td>
+<td>uint32</td>
+<td>[epochs, 6, n, n]</td>
+<td>bitwise OR of the frames' flags</td>
+</tr>
+<tr>
+<td><code>exposures.f16</code></td>
+<td>float16</td>
+<td>[frames, n, n]</td>
+<td>single aligned exposures (stored up to 80 million voxels)</td>
+</tr>
+<tr>
+<td><code>meta.json</code></td>
+<td>JSON</td>
+<td>—</td>
+<td>grid, epochs, frames, photometry, flag definitions, target track, statistics</td>
+</tr>
+</tbody>
+</table>
+<p>The browser fetches the arrays once and does every display operation on typed arrays: stretch, colormap, blink, difference, stack and RGB composites.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Display changes need no round trip.</li>
+<li>Payloads are small at the default field: Barnard's Star (6 epochs × 6 detectors × 59²) is about 0.5 MB of co-adds.</li>
+<li>The same files serve the web client, the CLI quick-look images and future MCP tools.</li>
+<li>Size grows with the square of the field of view; a 30′ field is 293 × 293 pixels per image.</li>
+<li>Clients must parse binary arrays using the shapes in <code>meta.json</code>.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Pre-rendered PNG or GIF frames:</strong> fixed stretch, a request for every change, and no client-side subtraction.</li>
+<li><strong>FITS files to the browser:</strong> larger payloads and FITS parsing in JavaScript for no benefit.</li>
+</ul></main></body></html>

@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0054 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0054-identify-tracklets-against-positions-queried-at-their-first-and-last-detection-not-instantaneous-rates">ADR-0054: Identify tracklets against positions queried at their first and last detection, not instantaneous rates</h1>
+<ul>
+<li><strong>Status:</strong> Accepted (extends ADR-0049)</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>ADR-0049 computes known-object positions from SPHEREx's own position with JPL sb_ident, once per epoch at the mean tracklet time, and propagated them linearly with the RA/Dec rates sb_ident returns. On the 97 Klotho field (sequence <code>5344660567070b76cde7</code>) the moving-object search found Klotho's tracklet T001 (6 detections over 6.5 h, 6.9″/h, PA 108°) but identification matched 0 tracklets.</p>
+<p>Querying sb_ident at each detection time showed that the positions themselves agree with every detection to ≤ 2.4″, but the rates do not describe the motion: they are instantaneous rates seen from SPHEREx and include the spacecraft's ~7.5 km/s orbital velocity — about ±15″/h for an object 2.4 AU away, changing sign every 98-min orbit. Klotho's Dec rate read −11.7″/h at the mid time and +13.9 / +14.2″/h at the first and last detections, while the object drifted south at ~2″/h. Propagating with them put the end detections 25–47″ off and the speed 2.4× too high, so the ±30 % speed criterion rejected the match.</p>
+<h2 id="decision">Decision</h2>
+<p><code>known.identify</code> now queries sb_ident (SPHEREx-centric, two-pass) at each tracklet's first and last detection time — up to 10 tracklets per epoch get their own pair, the rest share the epoch's earliest and latest detection times — and attaches to each object a <code>track</code> of those two positions. <code>position_at</code> interpolates along the track (wrapping RA), and the speed and direction used for Astrometrica's ±15° / ±30 % criteria come from the displacement between the two positions (<code>mean_ra_rate</code>, <code>mean_dec_rate</code>); the instantaneous values are kept as <code>instant_speed_arcsec_per_hr</code> / <code>instant_pa_deg</code>. Objects seen at only one of the two times keep the old behaviour. Stats report <code>positions: "SPHEREx-centric, queried at each tracklet's first and last detection"</code>.</p>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Klotho's T001 is identified (all O−C ≤ 3″, ΔPA ≈ 2°, Δspeed ≈ 7 %); a regression test replays the recorded sb_ident answers.</li>
+<li>Two sb_ident queries per tracklet instead of one per epoch (cached on disk; JPL back-off unchanged).</li>
+<li>The 98-min parallax wobble between the two queried times (amplitude ≈ 9.7″/Δ for an object Δ AU away) is not modelled; it stays inside the 30″ position floor for Δ &gt; 0.5 AU. Near-Earth objects closer than that need per-detection queries (follow-up).</li>
+<li>The overlay endpoint (<code>known-objects</code>) still shows instantaneous motion arrows; their direction can swing over an orbit.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Query at every detection time</strong>: exact, but 6–20 queries per tracklet against a rate-limited service.</li>
+<li><strong>Geocentric rates plus a parallax correction</strong>: needs each object's distance and a careful frame transformation; the bracketed queries give the same accuracy with the existing API.</li>
+<li><strong>Loosen the speed tolerance</strong>: would hide the bug and admit wrong matches.</li>
+</ul></main></body></html>

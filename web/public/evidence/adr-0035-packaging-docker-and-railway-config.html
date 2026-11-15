@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0035 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0035-one-multi-stage-image-docker-compose-for-local-runs-railway-config-as-code">ADR-0035: One multi-stage image, docker compose for local runs, Railway config as code</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong><code>Dockerfile</code></strong> (repo root): a Node 22 stage builds <code>web/dist</code>; a Python 3.11 slim stage installs the backend (non-editable) and copies the built client; non-root user; <code>SPHEREX_WEB_DIST</code>, <code>SPHEREX_CACHE_DIR=/cache</code>, JSON logs; <code>deploy/start.sh</code> picks the role and sizes uvicorn workers from the CPU quota; graceful shutdown (uvicorn 20 s; workers requeue running jobs).</li>
+<li><strong><code>docker-compose.yml</code></strong>: api, two workers, Redis and MinIO (as the bucket) — the same topology as Railway.</li>
+<li><strong><code>deploy/e2e_stack.sh</code></strong>: the same topology without Docker (Redis + an S3 emulator + 2 API replicas + 2 workers) for hosts without a Docker daemon, plus <code>deploy/e2e_check.py</code> and <code>deploy/loadtest.py</code>.</li>
+<li><strong><code>.railway/railway.ts</code></strong>: Redis, the <code>spherex-results</code> bucket in <code>iad</code>, and the <code>api</code> and <code>worker</code> services from the GitHub repo with replicas in <code>us-east4</code>; <code>railway.json</code>/<code>railway.toml</code> are deprecated and not used.</li>
+<li><strong>Health:</strong> <code>/api/health</code> (liveness) and <code>/api/ready</code> (Redis and bucket reachable; Railway health check); <code>/api/queue</code> reports queue depth and live workers.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>The same image runs locally, on the dev box and on Railway.</li>
+<li><code>railway config plan</code> must be reviewed before the first apply; the TypeScript IaC was written from the skill's documented helpers and has not been planned against a real project yet.</li>
+</ul></main></body></html>

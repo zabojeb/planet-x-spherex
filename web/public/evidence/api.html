@@ -1,0 +1,997 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HTTP API · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="http-api">HTTP API</h1>
+<p>Reference for the API in <code>backend/spherex_api</code> as of 2026-11-14. Interactive OpenAPI docs are served by FastAPI at <code>/docs</code> on any running instance. Examples use <code>http://&lt;api-host&gt;</code>; replace it with your server (see <a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/development.md">development.md</a>).</p>
+<p>General behaviour:</p>
+<ul>
+<li>JSON everywhere except the <code>.bin</code> endpoints, which return raw little-endian arrays (<code>application/octet-stream</code>).</li>
+<li>CORS is open to all origins, so the viewer can be embedded and called from other sites.</li>
+<li>Responses larger than 2 KB are gzip-compressed when the client accepts it.</li>
+<li>When <code>web/dist</code> exists, the built web app is served at <code>/</code>.</li>
+</ul>
+<h2 id="health">Health</h2>
+<p><code>GET /api/health</code></p>
+<pre><code class="language-json">{&quot;ok&quot;: true, &quot;version&quot;: &quot;0.1.0&quot;, &quot;collections&quot;: [&quot;spherex_dr1&quot;, &quot;spherex_dr1_deep&quot;, &quot;spherex_qr3&quot;, &quot;spherex_qr3_deep&quot;]}
+</code></pre>
+<h2 id="targets">Targets</h2>
+<p><code>GET /api/targets</code> returns the five challenge presets. Each target:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td><code>barnard</code>, <code>eps-indi-b</code>, <code>wise-0855</code>, <code>rw-aur</code>, <code>r-dra</code></td>
+</tr>
+<tr>
+<td><code>name</code>, <code>description</code>, <code>source</code></td>
+<td>string</td>
+<td>display name, one-line description, where the values come from</td>
+</tr>
+<tr>
+<td><code>ra</code>, <code>dec</code></td>
+<td>float</td>
+<td>degrees, ICRS, at <code>ref_epoch</code></td>
+</tr>
+<tr>
+<td><code>pmra</code>, <code>pmdec</code></td>
+<td>float</td>
+<td>mas/yr (<code>pmra</code> includes cos δ)</td>
+</tr>
+<tr>
+<td><code>ref_epoch</code></td>
+<td>float</td>
+<td>Julian year of the position</td>
+</tr>
+<tr>
+<td><code>parallax</code></td>
+<td>float or null</td>
+<td>mas</td>
+</tr>
+<tr>
+<td><code>fov_arcmin</code></td>
+<td>float or null</td>
+<td>suggested field (16′ for ε Indi B so the star ε Indi A is in view, 6′ otherwise)</td>
+</tr>
+<tr>
+<td><code>default_band</code></td>
+<td>string or null</td>
+<td>detector a preset opens with: <code>all</code> or <code>D1</code>–<code>D6</code> (WISE 0855: <code>D6</code>, RW Aur: <code>D6</code>, R Dra: <code>D1</code>, others <code>all</code>)</td>
+</tr>
+<tr>
+<td><code>default_mode</code></td>
+<td>string or null</td>
+<td>view a preset opens with: <code>blink</code>, <code>diff</code>, <code>stack</code>, <code>rgb</code> or <code>exp</code> (Barnard's Star: <code>diff</code>, WISE 0855: <code>rgb</code>, others <code>blink</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>GET /api/resolve?q=&lt;text&gt;</code> resolves, in this order: a preset id or name; coordinates (<code>269.452 4.693</code>, <code>17:57:48.5 +04:41:36</code>, <code>17h57m48.5s 4d41m36s</code>); an exact name or alias from the local object index (case, spacing and punctuation ignored: <code>alpha Lyr</code>, <code>α Lyr</code>, <code>gliese 699</code>, <code>WISE 0855-0714</code>); earlier Sesame answers cached for 30 days; and finally CDS Sesame, asking all configured mirrors at once. Returns a target as above (<code>pmra</code>/<code>pmdec</code> = 0 when unknown; <code>fov_arcmin</code> is set for extended objects such as M 31). <code>404</code> if the name is unknown (remembered for 10 minutes) or every resolver is unreachable (<a href="adr-0021-local-object-index-for-search.html">ADR-0021</a>).</p>
+<pre><code class="language-bash">curl &quot;http://&lt;api-host&gt;/api/resolve?q=RW%20Aur&quot;
+</code></pre>
+<p><code>GET /api/objects</code> returns the local object index the viewer searches while you type: about 4,500 SIMBAD objects (brown dwarfs, fast-moving and variable stars, young stars, named stars, Messier objects, galaxies, nebulae, clusters) with their search aliases. It is a static file, 712 kB (237 kB gzipped), sent with an <code>ETag</code> and <code>Cache-Control: public, max-age=3600</code>; <code>If-None-Match</code> gives <code>304</code>.</p>
+<pre><code class="language-json">{
+  &quot;version&quot;: 1,
+  &quot;generated&quot;: &quot;2026-11-14&quot;,
+  &quot;source&quot;: &quot;SIMBAD astronomical database (CDS, Strasbourg) via TAP; built by scripts/build_object_index.py&quot;,
+  &quot;fields&quot;: [&quot;name&quot;, &quot;aliases&quot;, &quot;otype&quot;, &quot;cat&quot;, &quot;ra&quot;, &quot;dec&quot;, &quot;pmra&quot;, &quot;pmdec&quot;, &quot;plx&quot;, &quot;vmag&quot;, &quot;kmag&quot;, &quot;sp&quot;, &quot;size&quot;, &quot;fov&quot;, &quot;refs&quot;, &quot;preset&quot;],
+  &quot;categories&quot;: {&quot;brown-dwarf&quot;: &quot;Brown dwarf&quot;, &quot;young&quot;: &quot;Young star&quot;, &quot;...&quot;: &quot;...&quot;},
+  &quot;types&quot;: {&quot;BD*&quot;: &quot;Brown Dwarf&quot;, &quot;Mi*&quot;: &quot;Mira Variable&quot;, &quot;...&quot;: &quot;...&quot;},
+  &quot;rows&quot;: [[&quot;Vega&quot;, [&quot;α Lyr&quot;, &quot;alf Lyr&quot;, &quot;alpha Lyrae&quot;, &quot;alpha Lyr&quot;, &quot;GJ 721&quot;, &quot;GJ 721.0&quot;, &quot;HD 172167&quot;, &quot;HIP 91262&quot;], &quot;dS*&quot;, &quot;nearby&quot;, 279.23473, 38.78369, 200.9, 286.2, 130.23, 0.03, 0.13, &quot;A0V&quot;, null, null, 2817, null]]
+}
+</code></pre>
+<p>Rows are sorted by <code>refs</code> (SIMBAD bibliography count). <code>ra</code>/<code>dec</code> are degrees ICRS at J2000, <code>pmra</code>/<code>pmdec</code> mas/yr, <code>plx</code> mas, <code>size</code> arcmin, <code>fov</code> a suggested field in arcmin for extended objects, <code>preset</code> the id of the challenge preset the row stands for. Rebuild with <code>scripts/build_object_index.py</code> (<a href="https://github.com/zabojeb/planet-x-spherex/blob/main/docs/development.md">development.md</a>).</p>
+<h2 id="sequences">Sequences</h2>
+<h3 id="create-or-reuse">Create or reuse</h3>
+<p><code>POST /api/sequences</code> with a JSON body:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Constraints</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ra</code></td>
+<td>—</td>
+<td>0 ≤ ra &lt; 360</td>
+<td>degrees at <code>ref_epoch</code></td>
+</tr>
+<tr>
+<td><code>dec</code></td>
+<td>—</td>
+<td>−90 ≤ dec ≤ 90</td>
+<td>degrees</td>
+</tr>
+<tr>
+<td><code>pmra</code>, <code>pmdec</code></td>
+<td>0</td>
+<td></td>
+<td>mas/yr</td>
+</tr>
+<tr>
+<td><code>ref_epoch</code></td>
+<td>2000.0</td>
+<td></td>
+<td>Julian year</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>null</td>
+<td></td>
+<td>display name, not part of the cache key</td>
+</tr>
+<tr>
+<td><code>fov_arcmin</code></td>
+<td>6.0</td>
+<td>1–30</td>
+<td>field of view</td>
+</tr>
+<tr>
+<td><code>gap_days</code></td>
+<td>20</td>
+<td>&gt; 0, ≤ 365</td>
+<td>gap that starts a new epoch</td>
+</tr>
+<tr>
+<td><code>max_epoch_days</code></td>
+<td>45</td>
+<td>&gt; 0, ≤ 400</td>
+<td>maximum epoch length</td>
+</tr>
+<tr>
+<td><code>force</code></td>
+<td>false</td>
+<td></td>
+<td>rebuild even if a result exists</td>
+</tr>
+</tbody>
+</table>
+<p>The response is the job:</p>
+<pre><code class="language-json">{&quot;id&quot;: &quot;48006f61db3e73e6ae51&quot;, &quot;status&quot;: &quot;running&quot;, &quot;stage&quot;: &quot;fetch&quot;, &quot;done&quot;: 120, &quot;total&quot;: 358, &quot;error&quot;: null, &quot;position&quot;: null, &quot;preview&quot;: &quot;48006f61db3e73e6ae51p1&quot;, &quot;elapsed&quot;: 9.4}
+</code></pre>
+<p><code>status</code> is <code>queued</code>, <code>running</code>, <code>done</code>, <code>error</code> or <code>cancelled</code>; <code>stage</code> is <code>queued</code>, <code>search</code>, <code>fetch</code> (with <code>done</code>/<code>total</code> exposures), <code>stack</code> or <code>done</code>. While queued, <code>position</code> is the number of builds ahead of this one. The <code>id</code> is a hash of the normalised parameters, so identical requests share one job and one result.</p>
+<p><code>preview</code> is the id of the latest preview while the build runs, else <code>null</code> (ADR-0039). A preview is a complete result of the epochs read so far: the epoch the viewer opens on first, then more at 1/3 and 2/3 of the exposures. Builds of fewer than 40 exposures, or with one epoch, have none. Read it like any finished result (<code>GET /api/sequences/{preview}</code> or <code>/lite</code>, its planes and tables). Its <code>meta.json</code> has <code>preview: {"of": &lt;build id&gt;, "n": &lt;1, 2, …&gt;, "frames": &lt;exposures in it&gt;, "total": &lt;exposures in the build&gt;}</code>. Previews are deleted once the full result is written, so a client should drop a preview's data when the build finishes. Work that is stored with a sequence or handed out answers <code>404</code> with a message for a preview: field and point analyses, known objects, Track &amp; Stack, verification, position photometry, archival epochs and exports. Quick reads (planes, tables, motion, periodogram, spectra) work on it.</p>
+<p>Builds go through the job queue (ADR-0033): <code>SPHEREX_JOBS_PER_WORKER</code> builds run at once per worker (default 2; <code>SPHEREX_MAX_JOBS</code> is accepted as an alias), the rest wait by priority and submission order, and a queued job reports <code>position</code> (builds that start before it). Each POST and each poll is a heartbeat keyed by <code>X-Client-Id</code>; <code>DELETE</code> withdraws the caller. A build is cancelled when every client has withdrawn, or when nobody polled it for <code>SPHEREX_INTEREST_TIMEOUT</code> seconds (default 30; alias <code>SPHEREX_JOB_IDLE</code>); a cancelled job answers 410. A build that runs longer than <code>SPHEREX_MAX_RUNTIME</code> seconds (default 900; alias <code>SPHEREX_JOB_TIMEOUT</code>) fails with an error. Limits answer 429 with <code>Retry-After</code>.</p>
+<pre><code class="language-bash">curl -X POST &quot;http://&lt;api-host&gt;/api/sequences&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;ra&quot;: 269.4520769586, &quot;dec&quot;: 4.6933649666, &quot;pmra&quot;: -801.551, &quot;pmdec&quot;: 10362.394, &quot;ref_epoch&quot;: 2000, &quot;name&quot;: &quot;Barnard'\''s Star&quot;, &quot;fov_arcmin&quot;: 6}'
+</code></pre>
+<h3 id="poll">Poll</h3>
+<p><code>GET /api/sequences/{id}</code></p>
+<table>
+<thead>
+<tr>
+<th>Status code</th>
+<th>Body</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>the finished <code>meta.json</code></td>
+</tr>
+<tr>
+<td><code>202</code></td>
+<td>the job (still queued or running)</td>
+</tr>
+<tr>
+<td><code>500</code></td>
+<td>the job, with <code>error</code> set (failed or timed out)</td>
+</tr>
+<tr>
+<td><code>410</code></td>
+<td>the job, cancelled because nobody was waiting; POST again to restart it</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>unknown id</td>
+</tr>
+</tbody>
+</table>
+<h3 id="stop-waiting">Stop waiting</h3>
+<p><code>DELETE /api/sequences/{id}</code> → <code>204</code>. The caller no longer waits for the build; once no client waits, it is cancelled and its slot goes to the next build in the queue. A finished result is kept. <code>404</code> for an unknown id. The web client sends it when the target or field of view changes and when the page is closed.</p>
+<h3 id="metajson"><code>meta.json</code></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code>, <code>version</code>, <code>created</code>, <code>params</code></td>
+<td>sequence id, algorithm version, creation time (UTC), request parameters</td>
+</tr>
+<tr>
+<td><code>target</code></td>
+<td>the target plus <code>track</code>: predicted position per epoch, <code>{epoch, ra, dec, x, y}</code> with <code>x</code>, <code>y</code> in grid pixels</td>
+</tr>
+<tr>
+<td><code>grid</code></td>
+<td><code>ra</code>, <code>dec</code> (centre), <code>n</code>, <code>pixscale_arcsec</code>, <code>fov_arcmin</code>, <code>projection</code> (<code>TAN</code>), <code>orientation</code> (north up, east left)</td>
+</tr>
+<tr>
+<td><code>bands</code></td>
+<td><code>[{id, wl_min, wl_max, R}]</code> for D1–D6</td>
+</tr>
+<tr>
+<td><code>epochs</code></td>
+<td><code>[{index, n, mjd_mean, mjd_min, mjd_max, date_min, date_max, bands: {D1: {n, wl_min, wl_max, mjd_mean, noise}, …}}]</code></td>
+</tr>
+<tr>
+<td><code>arrays</code></td>
+<td>file, dtype and shape of <code>coadds</code>, <code>coverage</code>, <code>flags</code>, <code>exposures</code> (<code>exposures</code> is null when too large)</td>
+</tr>
+<tr>
+<td><code>exposures</code></td>
+<td>one entry per exposure in array order: <code>index, epoch, band, mjd, date, wl, dwl, rms, psf_fwhm, obs_id, collection, file, flag_counts, target_px</code></td>
+</tr>
+<tr>
+<td><code>photometry</code></td>
+<td>one entry per measured exposure: <code>index, epoch, band, mjd, wl, dwl, flux_mjy, err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight, flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out</code>. <code>method</code> is <code>psf</code> (ePSF fit), <code>aperture</code> (fallback) or <code>ring</code> (detector where the target saturates). Ring entries have <code>relative: true</code> and <code>ab_mag: null</code>: their flux is the ring's share of the light, comparable only within one detector and wavelength (divide by the median of the wavelength bin for a light curve), so do not plot them on an absolute spectrum</td>
+</tr>
+<tr>
+<td><code>processing</code></td>
+<td>pipeline constants, and <code>rings</code>: per detector that uses rings, <code>{saturated_share, core_radius_px, r_in, r_out, exposures}</code></td>
+</tr>
+<tr>
+<td><code>flag_bits</code></td>
+<td><code>[{bit, name, description, masked, phot_bad}]</code> read from the files</td>
+</tr>
+<tr>
+<td><code>stats</code></td>
+<td><code>frames_found</code>, <code>frames_used</code>, <code>errors</code>, <code>requests</code>, <code>bytes</code>, <code>cache_hits</code>, <code>retries</code>, <code>seconds</code> (<code>search</code>, <code>fetch_and_align</code>, <code>assemble</code>, <code>total</code>), <code>timings</code>: per-exposure seconds as <code>{n, p50, p90, max, sum}</code> for <code>slot</code> (waiting to start), <code>read</code> (cutout from S3), <code>tables</code> (wavelength map and ePSF), <code>pool_wait</code> (waiting for a CPU worker), <code>process</code> (align and measure) and <code>work</code> (all of it)</td>
+</tr>
+<tr>
+<td><code>sources</code></td>
+<td>archive, collections and data location</td>
+</tr>
+</tbody>
+</table>
+<p>Wavelengths (<code>wl</code>, <code>dwl</code>) are in µm, times in MJD, fluxes in mJy. Missing values are <code>null</code>.</p>
+<h3 id="arrays">Arrays</h3>
+<p><code>GET /api/sequences/{id}/coadds.bin</code> · <code>coverage.bin</code> · <code>flags.bin</code></p>
+<table>
+<thead>
+<tr>
+<th>Array</th>
+<th>dtype</th>
+<th>Shape</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>coadds</code></td>
+<td>float32</td>
+<td><code>[epochs, 6, n, n]</code></td>
+<td>background-subtracted co-adds, MJy/sr; NaN = no data</td>
+</tr>
+<tr>
+<td><code>coverage</code></td>
+<td>uint16</td>
+<td><code>[epochs, 6, n, n]</code></td>
+<td>exposures contributing to each pixel</td>
+</tr>
+<tr>
+<td><code>flags</code></td>
+<td>uint32</td>
+<td><code>[epochs, 6, n, n]</code></td>
+<td>OR of the exposures' flag bits</td>
+</tr>
+</tbody>
+</table>
+<p>Row-major order with the detector axis in <code>bands</code> order (D1…D6). Within an image, the last axis is x and increases towards the west, the second-to-last is y and increases towards the north, so element <code>[0, 0]</code> is the south-east corner. To draw north up and east left on a canvas, whose row 0 is at the top, flip the rows.</p>
+<p><code>GET /api/sequences/{id}/exposures.bin?epoch=&lt;i&gt;&amp;band=&lt;D1..D6&gt;</code> returns the aligned single exposures of one epoch and detector as float32 <code>[k, n, n]</code>. The response header <code>X-Exposure-Indices</code> lists their indices in <code>meta.exposures</code>. <code>404</code> if single exposures were not stored (very large fields) or the epoch has no exposures in that detector.</p>
+<pre><code class="language-bash">curl -o coadds.bin &quot;http://&lt;api-host&gt;/api/sequences/48006f61db3e73e6ae51/coadds.bin&quot;
+python -c &quot;import numpy as np, json, urllib.request as u; m=json.load(u.urlopen('http://&lt;api-host&gt;/api/sequences/48006f61db3e73e6ae51')); print(np.fromfile('coadds.bin','&lt;f4').reshape(m['arrays']['coadds']['shape']).shape)&quot;
+</code></pre>
+<h2 id="catalogues">Catalogues</h2>
+<p><code>GET /api/catalogs</code> lists the available catalogues: <code>gaia</code> (Gaia DR3, ESA), <code>catwise</code> (CatWISE2020, IRSA), <code>2mass</code> (2MASS point sources, IRSA), <code>simbad</code> (SIMBAD named objects, CDS).</p>
+<p><code>GET /api/catalogs/{name}?ra=&lt;deg&gt;&amp;dec=&lt;deg&gt;&amp;radius_arcmin=&lt;r&gt;</code> (radius default 5, maximum 30) returns up to 3,000 sources:</p>
+<pre><code class="language-json">[{&quot;id&quot;: &quot;Gaia DR3 4472832130942575872&quot;, &quot;ra&quot;: 269.4485, &quot;dec&quot;: 4.7394, &quot;epoch&quot;: 2016.0,
+  &quot;pmra&quot;: -801.55, &quot;pmdec&quot;: 10362.39, &quot;parallax&quot;: 546.98, &quot;mag&quot;: 8.19, &quot;mag_band&quot;: &quot;G&quot;, &quot;color&quot;: 2.83}]
+</code></pre>
+<p>Every source has <code>epoch</code> (Julian year of <code>ra</code>/<code>dec</code>) and <code>pmra</code>/<code>pmdec</code> in mas/yr (null when unknown), so clients can place it at any date.</p>
+<p><code>simbad</code> rows come most-studied first and add <code>type</code> (object type, e.g. <code>BY Dra Variable</code>), <code>otype</code> (its short code), <code>sp_type</code>, <code>z</code> (redshift), <code>refs</code> (number of references) and <code>parallax</code>; <code>mag</code> is V, else Gaia G, else J, else K, named in <code>mag_band</code>; the <code>NAME</code> prefix of SIMBAD identifiers is dropped (<code>Barnard's star</code>). SIMBAD services are tried in order from <code>SPHEREX_SIMBAD_TAP_URLS</code> (default: CDS, then the CfA mirror), so the layer keeps working while one of them is down. <code>502</code> with a readable <code>detail</code> (naming the catalogue) if the upstream service fails, times out or returns something unusable; the client can simply retry. The example values above are illustrative, not a recorded response.</p>
+<h2 id="analyses-of-a-built-sequence">Analyses of a built sequence</h2>
+<p>All return <code>404 {"detail": "sequence not ready"}</code> for an unknown or unfinished id and <code>422</code> for bad parameters.</p>
+<h3 id="post-apisequencesidphotometry"><code>POST /api/sequences/{id}/photometry</code></h3>
+<p>Forced photometry of any position (optionally moving) in every exposure, on the sequence's cached cutouts (ADR-0031). Synchronous, a few seconds. Body: <code>{"ra": deg, "dec": deg, "pmra": 0, "pmdec": 0, "ref_epoch": 2000.0, "name": null}</code> (<code>pmra</code> includes cos dec, mas/yr; <code>ref_epoch</code> is the Julian year of <code>ra</code>/<code>dec</code>, e.g. 2016.0 for Gaia DR3).</p>
+<pre><code class="language-json">{&quot;sequence&quot;: &quot;&lt;id&gt;&quot;, &quot;target&quot;: {&quot;ra&quot;: ..., &quot;dec&quot;: ..., &quot;pmra&quot;: ..., ...},
+ &quot;photometry&quot;: [ /* records exactly like meta.json photometry: index, epoch, band, mjd, wl, dwl, flux_mjy,
+                    err_mjy, ab_mag, flagged, ap_flags, masked_frac, method, saturated, npix, chi2, psf_weight,
+                    flux_ap_mjy, err_ap_mjy, relative, ring_r_in, ring_r_out */ ],
+ &quot;rings&quot;: {&quot;D1&quot;: {&quot;r_in&quot;: 9, &quot;r_out&quot;: 12, ...}},
+ &quot;stats&quot;: {&quot;exposures&quot;: 358, &quot;measured&quot;: 357, &quot;missing_files&quot;: 0, &quot;bytes_downloaded&quot;: 0, &quot;seconds&quot;: 3.1}}
+</code></pre>
+<p><code>502</code> if the sequence's files cannot be read.</p>
+<h3 id="get-apisequencesidmotion"><code>GET /api/sequences/{id}/motion</code></h3>
+<p>Proper motion from per-epoch co-add centroids (ADR-0030). Query: <code>x</code>,<code>y</code> (grid pixels, 0-based) or <code>ra</code>,<code>dec</code>; optional <code>bands=D1,D2</code>, <code>pmra</code>,<code>pmdec</code> (prior motion used to predict where to look).</p>
+<pre><code class="language-json">{&quot;start&quot;: {&quot;x&quot;: 29.0, &quot;y&quot;: 29.0, &quot;ra&quot;: ..., &quot;dec&quot;: ...}, &quot;reference_year&quot;: 2026.15, &quot;prior&quot;: null,
+ &quot;combined&quot;: {&quot;pmra&quot;: 3628, &quot;pmdec&quot;: -2526, &quot;pmra_err&quot;: 305, &quot;pmdec_err&quot;: 260, &quot;pm_total&quot;: 4421,
+              &quot;pm_total_err&quot;: 290, &quot;pa_deg&quot;: 124.8, &quot;chi2_red_ra&quot;: 30.9, &quot;chi2_red_dec&quot;: 22.4,
+              &quot;n_points&quot;: 22, &quot;n_epochs&quot;: 4, &quot;bands&quot;: [&quot;D1&quot;, ...]},
+ &quot;per_band&quot;: {&quot;D1&quot;: { /* same fields */ }},
+ &quot;points&quot;: [{&quot;epoch&quot;: 0, &quot;band&quot;: &quot;D1&quot;, &quot;mjd&quot;: ..., &quot;year&quot;: ..., &quot;x&quot;: ..., &quot;y&quot;: ..., &quot;ra&quot;: ..., &quot;dec&quot;: ...,
+             &quot;dra_arcsec&quot;: ..., &quot;ddec_arcsec&quot;: ..., &quot;sigma_arcsec&quot;: 0.12, &quot;snr&quot;: 2969,
+             &quot;resid_ra_arcsec&quot;: ..., &quot;resid_dec_arcsec&quot;: ...}],
+ &quot;track&quot;: [{&quot;epoch&quot;: 0, &quot;year&quot;: ..., &quot;ra&quot;: ..., &quot;dec&quot;: ..., &quot;x&quot;: ..., &quot;y&quot;: ...}]}
+</code></pre>
+<p>Motions in mas/yr (RA includes cos dec), <code>pa_deg</code> east of north. <code>422</code> if the source is found in fewer than two epochs.</p>
+<h3 id="get-apisequencesidperiodogram-post-apiperiodogram"><code>GET /api/sequences/{id}/periodogram</code> · <code>POST /api/periodogram</code></h3>
+<p>Lomb–Scargle of the target's light curve, with fluxes normalised per wavelength bin exactly as the web client does (ADR-0031). Query (GET) or body fields (POST, plus <code>photometry</code>: records like meta.json's): <code>method=standard|multiband</code>, <code>band</code>, <code>min_period</code> (days, default 0.5), <code>max_period</code> (default the baseline), <code>include_flagged=false</code>.</p>
+<pre><code class="language-json">{&quot;method&quot;: &quot;standard&quot;, &quot;band&quot;: null, &quot;n_points&quot;: 2452, &quot;bands&quot;: [&quot;D1&quot;, ...], &quot;include_flagged&quot;: false,
+ &quot;relative_points&quot;: 2452, &quot;baseline_days&quot;: 520.3, &quot;min_period_days&quot;: 20, &quot;max_period_days&quot;: 520.3,
+ &quot;best&quot;: {&quot;period_days&quot;: 235.7, &quot;frequency_per_day&quot;: 0.00424, &quot;power&quot;: 0.46, &quot;false_alarm_probability&quot;: 8e-321},
+ &quot;peaks&quot;: [{&quot;period_days&quot;: 235.7, &quot;power&quot;: 0.46}, ...],
+ &quot;periodogram&quot;: {&quot;period_days&quot;: [...], &quot;power&quot;: [...]},
+ &quot;t0_mjd&quot;: 60789.8,
+ &quot;folded&quot;: [{&quot;index&quot;: 12, &quot;mjd&quot;: ..., &quot;phase&quot;: 0.31, &quot;rel&quot;: 1.12, &quot;rel_err&quot;: 0.03, &quot;band&quot;: &quot;D1&quot;, &quot;wl&quot;: 0.92,
+             &quot;flagged&quot;: false, &quot;relative&quot;: true}],
+ &quot;model&quot;: {&quot;phase&quot;: [0, ...200 values], &quot;rel&quot;: [...]}}
+</code></pre>
+<p>For <code>multiband</code>, <code>false_alarm_probability</code> is null and the model is <code>{"phase": [...], "rel_by_band": {"D1": [...], ...}}</code>. <code>422</code> with fewer than 6 usable points.</p>
+<h2 id="exports">Exports</h2>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/sequences/{id}/export/coadds.fits</code></td>
+<td>All co-adds as one multi-extension FITS (<code>EXTNAME E&lt;epoch&gt;_&lt;band&gt;</code>); <code>?epoch=0&amp;band=D6</code> for one image; <code>&amp;coverage=true</code> adds coverage images</td>
+</tr>
+<tr>
+<td><code>GET /api/sequences/{id}/export/photometry.csv</code></td>
+<td>Photometry with exposure provenance (CSV)</td>
+</tr>
+<tr>
+<td><code>GET /api/sequences/{id}/export/photometry.vot</code></td>
+<td>The same as a VOTable with units</td>
+</tr>
+<tr>
+<td><code>GET /api/sequences/{id}/export/download.sh</code></td>
+<td>Shell script with one <code>curl</code> per original Level 2 file; <code>?source=s3</code> for the public bucket, <code>?kind=cutout</code> for IRSA cutouts of the field</td>
+</tr>
+</tbody>
+</table>
+<p>All are sent with <code>Content-Disposition: attachment</code>. FITS headers carry the grid WCS, <code>BUNIT = MJy/sr</code>, dates, wavelength range, frame count and provenance (ADR-0030).</p>
+<h2 id="data-freshness">Data freshness</h2>
+<h3 id="get-apireleases"><code>GET /api/releases</code></h3>
+<pre><code class="language-json">{&quot;checked&quot;: &quot;2026-11-14T12:00:00+00:00&quot;, &quot;searched_collections&quot;: [&quot;spherex_dr1&quot;, ...],
+ &quot;collections&quot;: [{&quot;collection&quot;: &quot;spherex_qr3&quot;, &quot;images&quot;: 362124, &quot;oldest_mjd&quot;: 61174.5, &quot;newest_mjd&quot;: 61318.0,
+                  &quot;oldest_date&quot;: &quot;2026-05-14 12:08&quot;, &quot;newest_date&quot;: &quot;2026-10-05 00:01&quot;, &quot;searched&quot;: true}, ...]}
+</code></pre>
+<p>Cached for an hour (the TAP aggregate takes 14–29 s at IRSA). <code>502</code> if IRSA TAP fails.</p>
+<h3 id="get-apisequencesidfreshness"><code>GET /api/sequences/{id}/freshness</code></h3>
+<pre><code class="language-json">{&quot;sequence&quot;: &quot;&lt;id&gt;&quot;, &quot;built&quot;: &quot;...&quot;, &quot;checked&quot;: &quot;...&quot;, &quot;exposures_in_sequence&quot;: 358, &quot;exposures_available&quot;: 358,
+ &quot;new_exposures&quot;: 0, &quot;newest_in_sequence_mjd&quot;: 61305.6, &quot;newest_in_sequence_date&quot;: &quot;2026-09-22 15:05&quot;,
+ &quot;newest_available_mjd&quot;: 61305.6, &quot;newest_available_date&quot;: &quot;2026-09-22 15:05&quot;,
+ &quot;new_by_band&quot;: {}, &quot;new_by_collection&quot;: {}, &quot;rebuild_recommended&quot;: false}
+</code></pre>
+<p>Cached for ten minutes; it refreshes the footprint-search cache, so <code>POST /api/sequences</code> with <code>force: true</code> then includes the new files.</p>
+<h3 id="build-filters">Build filters</h3>
+<p><code>POST /api/sequences</code> also accepts <code>date_min</code>, <code>date_max</code> (UTC dates <code>YYYY-MM-DD</code>, <code>date_max</code> inclusive) and <code>bands</code> (e.g. <code>["D5", "D6"]</code>). Unset filters leave the sequence id unchanged (ADR-0031).</p>
+<h2 id="archival-epochs-2mass-allwise-neowise">Archival epochs (2MASS, AllWISE, NEOWISE)</h2>
+<p>Older-survey images resampled onto a built sequence's own grid, in MJy/sr, so they can be blinked with the
+SPHEREx co-adds over a 1999–2026 baseline (ADR-0023). Not available for solar-system objects.</p>
+<h3 id="get-apisequencesidarchival"><code>GET /api/sequences/{id}/archival</code></h3>
+<p>Query: <code>fov_arcmin</code> (optional, 1–60): a wider concentric grid at the same pixel scale, for targets that were
+far from today's position decades ago (Barnard's Star sits 4.4′ south of its 2026 position in 2MASS).</p>
+<ul>
+<li><code>202</code> while building (the first call starts the build; poll the same URL): <code>{"id", "status": "running",
+  "stage": "search" | "fetch", "done", "total", "error", "elapsed"}</code>.</li>
+<li><code>200</code> when built:</li>
+</ul>
+<pre><code class="language-json">{&quot;sequence&quot;: &quot;&lt;id&gt;&quot;, &quot;version&quot;: 2, &quot;created&quot;: &quot;...&quot;,
+ &quot;grid&quot;: {&quot;ra&quot;: 269.4462, &quot;dec&quot;: 4.7688, &quot;n&quot;: 119, &quot;pixscale_arcsec&quot;: 6.15, &quot;fov_arcmin&quot;: 12.2, ...},
+ &quot;surveys&quot;: [&quot;2mass&quot;, &quot;allwise&quot;, &quot;neowise&quot;],
+ &quot;frames&quot;: [
+   {&quot;index&quot;: 0, &quot;survey&quot;: &quot;2MASS&quot;, &quot;survey_id&quot;: &quot;2mass&quot;, &quot;band&quot;: &quot;H&quot;, &quot;label&quot;: &quot;2MASS H&quot;, &quot;wl_um&quot;: 1.662,
+    &quot;mjd&quot;: 51692.43, &quot;mjd_min&quot;: 51692.42, &quot;mjd_max&quot;: 51692.44, &quot;date&quot;: &quot;2000-05-28 10:17&quot;, &quot;epoch_year&quot;: 2000.41,
+    &quot;native_pixscale_arcsec&quot;: 1.0, &quot;n_images&quot;: 4, &quot;unit&quot;: &quot;MJy/sr&quot;, &quot;coverage&quot;: 1.0, &quot;sources&quot;: [&quot;https://...&quot;],
+    &quot;target_radec&quot;: [269.4502, 4.6966], &quot;target_px&quot;: [55.6, 15.5], &quot;target_in_field&quot;: true},
+   ...],
+ &quot;array&quot;: {&quot;file&quot;: &quot;frames.f32&quot;, &quot;dtype&quot;: &quot;float32&quot;, &quot;shape&quot;: [47, 119, 119], &quot;unit&quot;: &quot;MJy/sr (background subtracted)&quot;},
+ &quot;processing&quot;: {...}, &quot;stats&quot;: {&quot;images_found&quot;: 683, &quot;requests&quot;: 1344, &quot;bytes&quot;: 1080000000, &quot;seconds&quot;: 134.2, &quot;errors&quot;: []},
+ &quot;sources&quot;: {...}}
+</code></pre>
+<p>Frames are sorted by time. NEOWISE frames are per-visit medians (<code>n_images</code> single exposures); <code>coverage</code> is
+the fraction of grid pixels with data. <code>404</code> if the sequence is not built or is a co-moving sequence; <code>500</code>
+with the task if the build failed (a new request after two minutes retries).</p>
+<h3 id="get-apisequencesidarchivalbin"><code>GET /api/sequences/{id}/archival.bin</code></h3>
+<p>Query: <code>fov_arcmin</code> (as above), <code>index</code> (optional). Float32 little-endian, NaN where no data: all frames
+<code>[k, n, n]</code> in the order of <code>frames</code>, or one frame <code>[n, n]</code> with <code>index</code>. <code>404</code> until built.</p>
+<h2 id="solar-system-objects-irsa-most">Solar-system objects (IRSA MOST)</h2>
+<h3 id="get-apimovingsearch"><code>GET /api/moving/search</code></h3>
+<p>Query: <code>name</code> (e.g. <code>3I</code>, <code>Eros</code>, <code>C/2025 N1</code>) or <code>naif_id</code> (JPL NAIF ID; asteroid number N is 20000000 + N);
+<code>type</code> (<code>Asteroid</code> | <code>Comet</code>, guessed from the name when omitted); <code>begin</code>, <code>end</code> (UTC dates, default
+2025-04-01 to today).</p>
+<ul>
+<li><code>202</code> while MOST searches (long windows take minutes; poll the same URL).</li>
+<li><code>200</code>:</li>
+</ul>
+<pre><code class="language-json">{&quot;object&quot;: &quot;ATLAS (C/2025 N1)&quot;, &quot;query&quot;: {...}, &quot;elements&quot;: {&quot;eccentricity&quot;: &quot;6.1396&quot;, ...},
+ &quot;n_files&quot;: 160, &quot;n_exposures&quot;: 84, &quot;date_min&quot;: &quot;2025-08-01 08:00&quot;, &quot;date_max&quot;: &quot;2025-08-15 12:42&quot;,
+ &quot;exposures&quot;: [{&quot;mjd&quot;: 60888.334, &quot;date&quot;: &quot;...&quot;, &quot;ra&quot;: 252.664, &quot;dec&quot;: -17.4905, &quot;band&quot;: &quot;D3&quot;, &quot;obs_id&quot;: &quot;...&quot;,
+                &quot;collection&quot;: &quot;spherex_dr1&quot;, &quot;uri&quot;: &quot;ibe/data/spherex/dr1/level2/...&quot;, &quot;vmag&quot;: 14.04,
+                &quot;sun_dist&quot;: 3.48, &quot;geo_dist&quot;: 2.81, &quot;phase&quot;: 13.9}, ...],
+ &quot;ephemeris&quot;: [[60888.3334, 252.664196, -17.490529], ...],
+ &quot;suggested_request&quot;: {&quot;ra&quot;: 247.109, &quot;dec&quot;: -16.840, &quot;name&quot;: &quot;ATLAS (C/2025 N1)&quot;, &quot;fov_arcmin&quot;: 6.0,
+                       &quot;object_name&quot;: &quot;3I&quot;, &quot;object_type&quot;: &quot;Comet&quot;, &quot;naif_id&quot;: null,
+                       &quot;obs_begin&quot;: &quot;2025-08-01&quot;, &quot;obs_end&quot;: &quot;2025-08-20&quot;}}
+</code></pre>
+<ul>
+<li><code>409</code> for ambiguous names: <code>{"status": "error", "kind": "AmbiguousObject", "error": "...", "choices":
+  [{"name": "16 Psyche", "type": "Asteroid", "naif_id": 20000016, "designation": "A852 FA"}, ...]}</code>; retry with
+  <code>naif_id</code>.</li>
+<li><code>404</code> unknown object, <code>502</code> MOST unavailable, <code>422</code> without <code>name</code> or <code>naif_id</code> or with a bad date.</li>
+</ul>
+<h3 id="co-moving-sequences">Co-moving sequences</h3>
+<p><code>POST /api/sequences</code> with the <code>suggested_request</code> fields (<code>object_name</code>, <code>object_type</code>, <code>naif_id</code>,
+<code>obs_begin</code>, <code>obs_end</code> plus <code>ra</code>, <code>dec</code>, <code>fov_arcmin</code>) builds a sequence in which every exposure is resampled
+on a grid centred on the object at its own time (ADR-0024). Its <code>meta.json</code> adds <code>grid.frame = "comoving"</code>,
+<code>exposures[i].center</code> and <code>epochs[i].center</code> ([ra, dec] of that grid's centre), <code>target.ephemeris</code>, and a
+<code>moving</code> block; <code>target_px</code> and the track sit on the central pixel. Stars trail; catalog overlays and archival
+epochs do not apply.</p>
+<h2 id="comets-asteroids-and-unknown-movers-adr-0060">Comets, asteroids and unknown movers (ADR-0060)</h2>
+<p>"Different background, same comet": a co-moving sequence built with <code>"static_sky": true</code> also subtracts the sky
+behind the object, using SPHEREx's own images of the same patch at the same detector and wavelength from times
+when the object was elsewhere. The analyses below are jobs with the field-analysis lifecycle (next section):
+kinds <code>c</code> (comet), <code>a</code> (asteroid), <code>u</code> (unknown movers), polled with <code>GET /api/field/{id}</code>.</p>
+<h3 id="static-sky-post-apisequences-with-static_sky-post-apisequencesidstatic-sky">Static sky: <code>POST /api/sequences</code> with <code>static_sky</code> · <code>POST /api/sequences/{id}/static-sky</code></h3>
+<p><code>static_sky: true</code> in a sequence request (422 without <code>object_name</code> or <code>naif_id</code>) builds the clean version on the
+build queue (deduplicated, cancellable; a separate sequence id, because the key includes it).
+<code>POST /api/sequences/{id}/static-sky</code> with <code>{"force": false}</code> submits the clean twin of an existing co-moving
+sequence and answers <code>{"sequence": &lt;clean id&gt;, "source": &lt;id&gt;, "status", "job"}</code> (<code>status: "done"</code> and
+<code>sequence = id</code> when it already has clean arrays); poll <code>GET /api/sequences/{sequence}</code> as for any build. 404 for
+a fixed-position sequence; 429 when the queue is full.</p>
+<p>The clean sequence's <code>meta.json</code> adds:</p>
+<ul>
+<li><code>arrays.clean</code> (<code>clean.f32</code>, float32 <code>[epochs, 6, n, n]</code>, MJy/sr), <code>arrays.clean_coverage</code> (<code>clean_coverage.u16</code>)
+  and <code>arrays.clean_exposures</code> (<code>clean_exposures.f16</code>, <code>[frames, n, n]</code>, same order as <code>exposures</code>; <code>null</code> when
+  single exposures are not stored). NaN = masked star residual or no template.</li>
+<li>per exposure: <code>ss_method</code> (<code>median | interp | single | nearest | none</code>), <code>ss_n</code> (templates combined),
+  <code>ss_candidates</code>, <code>ss_dl</code> (wavelength offsets used, in resolution elements), <code>ss_offset</code>, <code>ss_eps</code> (star
+  residual fraction), <code>ss_masked</code>, <code>ss_p99_before</code>, <code>ss_p99_after</code> (99th percentile of |pixel| / noise).</li>
+<li><code>static_sky</code>: version, method, object type, exclusion radius, tolerances, footprint clusters and search sources
+  (<code>tap</code>, <code>most</code>, <code>failed</code>), <code>failed_searches</code>, exposures with a template, counts per method, templates read,
+  medians of ε / masked fraction / p99 before and after, errors (first 20), network bytes and seconds per phase.</li>
+</ul>
+<h3 id="get-apisequencesidcleanbin-clean_coveragebin-clean_exposuresbinepochband"><code>GET /api/sequences/{id}/clean.bin</code> · <code>clean_coverage.bin</code> · <code>clean_exposures.bin?epoch=&amp;band=</code></h3>
+<p>The clean co-adds through the generic array route (same headers and caching as <code>coadds.bin</code>), and the clean
+single exposures of one epoch and detector, float32 <code>[k, n, n]</code>, with <code>X-Exposure-Indices</code>. 404 (<code>this sequence
+has no static-sky subtraction</code>) on a sequence without them.</p>
+<h3 id="get-apisequencesidclean-summaryepoch"><code>GET /api/sequences/{id}/clean-summary?epoch=</code></h3>
+<p>What a client needs for a clean view: <code>{sequence, object, static_sky, arrays, epochs: [{epoch, band, noise_clean,
+noise_plain, noise_ratio, centre_clean, centre_snr}]}</code> (robust noise beyond 0.6 of the half-width, mean of the
+central 3 × 3 px). 404 without static sky.</p>
+<h3 id="post-apisequencesidcomet"><code>POST /api/sequences/{id}/comet</code></h3>
+<p>Body <code>{"rho_km": [1e4, 2e4, 5e4, 1e5], "use_clean": true, "force": false}</code> (1–8 radii, ≤ 5·10⁶ km; 422 otherwise).
+Needs a co-moving sequence with single exposures (the job fails with <code>NotFound</code> otherwise). Result:</p>
+<pre><code class="language-json">{&quot;kind&quot;: &quot;comet&quot;, &quot;version&quot;: 1, &quot;sequence&quot;: &quot;...&quot;, &quot;object&quot;: &quot;ATLAS (C/2025 N1)&quot;, &quot;options&quot;: {...},
+ &quot;static_sky&quot;: true, &quot;image_source&quot;: &quot;clean_exposures (static sky subtracted)&quot;, &quot;geometry_source&quot;: [&quot;most&quot;],
+ &quot;solar_spectrum&quot;: &quot;CALSPEC sun_mod_001&quot;, &quot;km_per_arcsec_per_au&quot;: 725.27, &quot;features&quot;: [...],
+ &quot;spectrum&quot;: [{&quot;index&quot;, &quot;epoch&quot;, &quot;band&quot;, &quot;mjd&quot;, &quot;wl&quot;, &quot;dwl&quot;, &quot;r_au&quot;, &quot;delta_au&quot;, &quot;phase_deg&quot;,
+               &quot;ap&quot;: [{&quot;rho_km&quot;, &quot;theta_arcsec&quot;, &quot;psf_limited&quot;, &quot;flux_mjy&quot;, &quot;err_mjy&quot;, &quot;masked_frac&quot;}]}],
+ &quot;afrho_exposures&quot;: [{&quot;index&quot;, &quot;band&quot;, &quot;wl&quot;, &quot;rho_km&quot;, &quot;afrho_cm&quot;, &quot;err_cm&quot;, &quot;a0frho_cm&quot;, &quot;a0err_cm&quot;}],
+ &quot;afrho_summary&quot;: {&quot;20000&quot;: {&quot;afrho_cm&quot;: 204.0, &quot;err_cm&quot;: 3.1, &quot;n&quot;: 31}},
+ &quot;epochs&quot;: [{&quot;epoch&quot;: 0, &quot;date_min&quot;, &quot;date_max&quot;, &quot;r_au&quot;: 3.22, &quot;delta_au&quot;: 2.71, &quot;phase_deg&quot;: 17.1,
+             &quot;afrho&quot;: {&quot;20000&quot;: {&quot;D1&quot;: {&quot;afrho_cm&quot;, &quot;err_cm&quot;, &quot;a0frho_cm&quot;, &quot;a0err_cm&quot;, &quot;n&quot;}}},
+             &quot;bands&quot;: {&quot;20000&quot;: [{&quot;id&quot;: &quot;co2&quot;, &quot;kind&quot;: &quot;emission&quot;, &quot;value&quot;: 1.1e14, &quot;err&quot;: 2e12, &quot;snr&quot;: 55,
+                                  &quot;detected&quot;: true, &quot;unit&quot;: &quot;W m-2&quot;, &quot;value_w_m2&quot;, &quot;err_w_m2&quot;,
+                                  &quot;q_proxy&quot;: 8.7e26, &quot;q_err&quot;: 1.6e25, &quot;q_upper_3sigma&quot;: null, &quot;molecule&quot;: &quot;CO2&quot;},
+                                 {&quot;id&quot;: &quot;h2o_ice_3.0&quot;, &quot;kind&quot;: &quot;absorption&quot;, &quot;value&quot;: 0.75, &quot;err&quot;: 0.07, ...}]},
+             &quot;dust_colour&quot;: {&quot;slope_pct_per_100nm&quot;, &quot;err&quot;, &quot;rho_km&quot;, &quot;n&quot;},
+             &quot;band_images&quot;: {&quot;co2&quot;: {&quot;n_window&quot;, &quot;n_side&quot;, &quot;profile&quot;: {&quot;r_px&quot;, &quot;sb&quot;, &quot;err&quot;, &quot;npix&quot;}}}}],
+ &quot;profiles&quot;: [{&quot;epoch&quot;, &quot;band&quot;, &quot;source&quot;, &quot;fwhm_px&quot;, &quot;km_per_px&quot;, &quot;profile&quot;, &quot;slope&quot;: {&quot;slope&quot;, &quot;err&quot;}}],
+ &quot;activity_trend&quot;: {&quot;rho_km&quot;, &quot;k&quot;, &quot;err&quot;, &quot;points&quot;, &quot;r_au&quot;, &quot;a0frho_cm&quot;}, &quot;caveats&quot;: [...]}
+</code></pre>
+<p><code>value</code> is the integrated band flux in mJy·Hz for emission bands (<code>value_w_m2</code> in W m⁻²) and the fractional
+depth for absorption bands; <code>q_proxy</code> / <code>q_upper_3sigma</code> are molecules s⁻¹. See docs/methods.md.</p>
+<h3 id="post-apisequencesidasteroid"><code>POST /api/sequences/{id}/asteroid</code></h3>
+<p>Body <code>{"min_period_h": 1.5, "max_period_h": null, "use_clean": true, "force": false}</code>. Result: <code>{kind:
+"asteroid", flux_source, geometry_source, solar_spectrum, n_points, points: [{index, epoch, band, wl, t, mag, err,
+alpha}], period: {best_period_h, period_err_h, periodogram_peak_h, nterms, rotation: {rule, maxima_per_cycle,
+odd_harmonics_p, double_peak_confirmed}, aliases_h, peaks_h, epochs: [{epoch, n, used, span_days,
+best_period_h, period_err_h, amplitude_mag, chi2_red}], folded, periodogram, grid}, spectra: [{epoch, n,
+phase_deg, r_au, delta_au, wl, reflectance, err, binned, features: {thermal, slope, band_1um, band_2um,
+band_3um}, taxonomy}], taxonomy: {complex, rule, hydrated}, taxonomy_epoch, taxonomy_rules, caveats}</code>. <code>t</code> is the
+light-time corrected MJD and <code>mag</code> the reduced reflectance magnitude.</p>
+<h3 id="post-apisequencesidunknown-movers"><code>POST /api/sequences/{id}/unknown-movers</code></h3>
+<p>Body <code>{"vmag_lim": 21.0, "field_job": null, "force": false}</code> on a fixed-position sequence (a co-moving one fails:
+its stars move). <code>field_job</code> reuses a finished <code>f</code> job of the same sequence (422 for another sequence's or kind's
+job, 404 if not finished). Result: <code>{kind: "unknown_movers", source, identification, counts: {tracklets, known,
+unidentified, unverified, strong}, unidentified: [{id, trk_sub, status, tier, epoch, n, mjd_first, mjd_last,
+span_hours, ra, dec, ecliptic_latitude_deg, rate_arcsec_per_hr, pa_deg, angle_from_ecliptic_deg, retrograde,
+rms_arcsec, mean_snr, mean_rb, partner_fraction, bands, population_hint, repeats_in_other_visits,
+nearest_known}], others: [...],
+candidates: {tracklets}, ades, caveats}</code>. <code>GET /api/field/{id}/ades.psv</code> exports the strong ones
+(<code>?all=true</code>: all), station 288, "follow-up data, not a submission".</p>
+<h2 id="spectral-analysis">Spectral analysis</h2>
+<p>All spectral endpoints work on photometry records shaped like <code>meta.photometry</code> (<code>wl</code>, <code>band</code>, <code>flux_mjy</code>,
+<code>err_mjy</code>, <code>epoch</code>, <code>flagged</code>, <code>relative</code>). Sequence endpoints are memoised per process and sent with
+<code>Cache-Control: public, max-age=86400</code>; every payload carries <code>version</code> (the analysis version). Method:
+<a href="methods.html#spectral-analysis">methods</a>, ADRs 0040–0044.</p>
+<h3 id="get-apisequencesidspectruminclude_flaggedfalse"><code>GET /api/sequences/{id}/spectrum?include_flagged=false</code></h3>
+<pre><code class="language-json">{
+  &quot;sequence&quot;: &quot;d651cb1431ed20027191&quot;, &quot;target&quot;: &quot;ε Indi B&quot;, &quot;version&quot;: 1,
+  &quot;grid&quot;: {&quot;bins_per_detector&quot;: 17, &quot;n_bins&quot;: 102},
+  &quot;n_measurements&quot;: 458,
+  &quot;bins&quot;: [{&quot;band&quot;: &quot;D1&quot;, &quot;bin&quot;: 3, &quot;wl&quot;: 0.861, &quot;wl_lo&quot;: 0.852, &quot;wl_hi&quot;: 0.873, &quot;flux_mjy&quot;: 1.92,
+            &quot;err_mjy&quot;: 0.03, &quot;n&quot;: 5, &quot;n_rejected&quot;: 0, &quot;chi2&quot;: 0.8, &quot;relative&quot;: false, &quot;epochs&quot;: [0, 1],
+            &quot;continuum_mjy&quot;: 2.10}],
+  &quot;relative_bins&quot;: [ ...same shape, ring fluxes of saturated stars (relative: true)... ],
+  &quot;epochs&quot;: [{&quot;epoch&quot;: 0, &quot;bins&quot;: [...], &quot;indices&quot;: {...}}],
+  &quot;features&quot;: [{&quot;id&quot;: &quot;ch4_3.3&quot;, &quot;name&quot;: &quot;CH₄ 3.3 µm&quot;, &quot;species&quot;: &quot;CH4&quot;, &quot;kind&quot;: &quot;absorption&quot;, &quot;phase&quot;: &quot;gas&quot;,
+                &quot;center&quot;: 3.3, &quot;band&quot;: [3.15, 3.45], &quot;blue&quot;: null, &quot;red&quot;: [3.85, 4.15], &quot;depth&quot;: 0.80,
+                &quot;depth_err&quot;: 0.003, &quot;ew_um&quot;: 0.24, &quot;significance&quot;: 243.4, &quot;detected&quot;: true, &quot;n_band&quot;: 5}],
+  &quot;detections&quot;: [{&quot;kind&quot;: &quot;absorption&quot;, &quot;wl_min&quot;: 1.33, &quot;wl_max&quot;: 1.47, &quot;wl_center&quot;: 1.40, &quot;depth_max&quot;: 0.85,
+                  &quot;ew_um&quot;: 0.11, &quot;significance&quot;: 48.5, &quot;n_bins&quot;: 4, &quot;identified_as&quot;: [&quot;h2o_1.4&quot;]}],
+  &quot;continuum&quot;: {&quot;available&quot;: true, &quot;fraction_bins_below_3sigma&quot;: 0.31, &quot;reliable&quot;: false, &quot;note&quot;: &quot;...&quot;},
+  &quot;indices&quot;: {&quot;ch4_3.3&quot;: {&quot;value&quot;: 0.19, &quot;err&quot;: 0.004, &quot;numerator_um&quot;: [3.2, 3.4],
+                          &quot;denominator_um&quot;: [3.9, 4.1], &quot;description&quot;: &quot;...&quot;}},
+  &quot;notes&quot;: [&quot;...&quot;]
+}
+</code></pre>
+<p><code>bins</code> is the absolute spectrum (calibrated, unflagged points); it is empty for saturated stars, whose
+measurements are all relative (<code>relative_bins</code>, see <code>notes</code>). <code>features[].detected</code> means ≥ 3σ in the
+feature's sense (absorption below, emission above the continuum). Use <code>detections</code> only when
+<code>continuum.reliable</code> is true. Indices: <code>h2o_1.4</code>, <code>ch4_1.6</code>, <code>h2o_1.9</code>, <code>ch4_2.2</code>, <code>ch4_3.3</code>, <code>co_2.3</code>,
+<code>peak_4um_J</code>, <code>slope_K_4.5</code> (value <code>null</code> when the denominator is not detected).</p>
+<h3 id="get-apisequencesidclassifycatalogsfalse"><code>GET /api/sequences/{id}/classify?catalogs=false</code></h3>
+<pre><code class="language-json">{
+  &quot;sequence&quot;: &quot;...&quot;, &quot;target&quot;: &quot;...&quot;, &quot;version&quot;: 1, &quot;available&quot;: true,
+  &quot;summary&quot;: {&quot;label&quot;: &quot;T3.0V (methane at 3.3 µm)&quot;, &quot;family&quot;: &quot;brown_dwarf&quot;,
+              &quot;notes&quot;: [&quot;Methane: CH4(3.3)/4 µm = 0.19 ...&quot;, &quot;...&quot;], &quot;context_suppressed&quot;: [&quot;h2o_ice_3.05&quot;]},
+  &quot;templates&quot;: {&quot;best&quot;: {&quot;name&quot;: &quot;spex_T3.0&quot;, &quot;sptype&quot;: &quot;T3.0V&quot;, &quot;family&quot;: &quot;dwarf_standard&quot;,
+                         &quot;source&quot;: &quot;SpeX Prism standard (SPLAT)&quot;, &quot;chi2_red&quot;: 8.6, &quot;probability&quot;: 1.0, &quot;n_bins&quot;: 50},
+                &quot;ranked&quot;: [ ...top 8, same shape... ],
+                &quot;class_probabilities&quot;: {&quot;T&quot;: 1.0, &quot;L&quot;: 0.0},
+                &quot;max_wl_um&quot;: 2.45, &quot;n_bins&quot;: 50},
+  &quot;template_error&quot;: null,
+  &quot;blackbody&quot;: {&quot;teff_k&quot;: 1752, &quot;teff_range_k&quot;: [1700, 1800], &quot;a_k_mag&quot;: 0.0, &quot;chi2_red&quot;: 235.7, &quot;n_bins&quot;: 102,
+                &quot;max_wl_um&quot;: null, &quot;scale&quot;: 1.2e-9},
+  &quot;blackbody_short&quot;: { ...same, fitted to ≤ 2.45 µm... },
+  &quot;ir_index&quot;: {&quot;alpha&quot;: -0.14, &quot;alpha_err&quot;: 0.02, &quot;range_um&quot;: [2.0, 5.0], &quot;lada_class&quot;: &quot;flat spectrum&quot;,
+               &quot;note&quot;: &quot;Indicative: ...&quot;},
+  &quot;ir_excess&quot;: {&quot;3_3.8um&quot;: {&quot;observed_mjy&quot;: 14.5, &quot;predicted_mjy&quot;: 11.3, &quot;ratio&quot;: 1.29, &quot;significance&quot;: 3.2},
+                &quot;3.8_5um&quot;: {&quot;...&quot;: &quot;...&quot;}, &quot;reference_fit&quot;: &quot;blackbody to 2.45 um (...)&quot;},
+  &quot;model_curves&quot;: {&quot;best_template&quot;: {&quot;source&quot;: &quot;spex_T3.0&quot;, &quot;wl&quot;: [...], &quot;flux_mjy&quot;: [... null beyond 2.45 µm]},
+                   &quot;blackbody&quot;: {&quot;wl&quot;: [...], &quot;flux_mjy&quot;: [...]}},
+  &quot;synthetic_photometry&quot;: {&quot;J&quot;: {&quot;coverage&quot;: 1.0, &quot;extrapolated&quot;: false, &quot;flux_mjy&quot;: 36.1, &quot;mag&quot;: 12.1,
+                                 &quot;mag_err&quot;: 0.01}, &quot;H&quot;: {...}, &quot;Ks&quot;: {...}, &quot;W1&quot;: {...}, &quot;W2&quot;: {...}},
+  &quot;catalog_comparison&quot;: {&quot;bands&quot;: {&quot;J&quot;: {&quot;synthetic&quot;: 12.1, &quot;catalog&quot;: 11.9, &quot;delta_mag&quot;: 0.21,
+                                         &quot;flux_ratio&quot;: 0.82, &quot;catalog_id&quot;: &quot;2MASS J...&quot;}},
+                         &quot;matches&quot;: {&quot;2mass&quot;: {...source + separation_arcsec...}, &quot;catwise&quot;: {...}},
+                         &quot;errors&quot;: null},
+  &quot;notes&quot;: []
+}
+</code></pre>
+<p><code>family</code> is one of <code>star</code>, <code>late_m_dwarf</code>, <code>brown_dwarf</code>, <code>composite</code> (star + cold methane source),
+<code>yso</code> (rising continuum with 3 µm ice), <code>yso_candidate</code> (star with a 3.8–5 µm excess), <code>nonstellar</code> (no stellar
+template fits, rising red power law: AGN/QSO or YSO) or <code>null</code>. <code>catalog_comparison.bands[].suspect</code> is true
+when synthetic and catalogue magnitudes differ by &gt; 0.75 mag (wrong match, blend, variability, or catalogue
+photometry of a fast mover).
+Without calibrated measurements: <code>{"available": false, "reason": "...", "synthetic_photometry": {},
+"catalog_comparison": null, "notes": [...]}</code>. <code>catalogs=true</code> matches 2MASS and CatWISE within 4″ after
+proper motion (seconds; catalogue failures land in <code>catalog_comparison.errors</code>). W2 extends past 5 µm and is
+computed with a power-law extension (<code>extrapolated: true</code>, <code>coverage</code> &lt; 1).</p>
+<h3 id="get-apisequencesidspectral-variabilityreference"><code>GET /api/sequences/{id}/spectral-variability?reference=</code></h3>
+<pre><code class="language-json">{
+  &quot;sequence&quot;: &quot;...&quot;, &quot;version&quot;: 1, &quot;available&quot;: true, &quot;reference_epoch&quot;: 1,
+  &quot;kinds&quot;: [&quot;relative&quot;], &quot;systematic&quot;: 0.03, &quot;ring_systematic&quot;: 0.15,
+  &quot;epochs&quot;: [{&quot;epoch&quot;: 0, &quot;variable&quot;: true, &quot;significant_bands&quot;: [&quot;D5&quot;, &quot;D6&quot;],
+              &quot;systematics_limited&quot;: false, &quot;systematics_limited_bands&quot;: [&quot;D2&quot;],
+              &quot;chi2_red_constant&quot;: 14.2,
+              &quot;per_band&quot;: {&quot;D5&quot;: {&quot;ratio&quot;: 1.53, &quot;err&quot;: 0.02, &quot;z&quot;: 26.5, &quot;z_total&quot;: 3.0, &quot;systematic&quot;: 0.15,
+                                  &quot;systematics_limited&quot;: false, &quot;n_bins&quot;: 17, &quot;kind&quot;: &quot;relative&quot;}},
+              &quot;ratios&quot;: [{&quot;band&quot;: &quot;D5&quot;, &quot;bin&quot;: 70, &quot;wl&quot;: 3.9, &quot;kind&quot;: &quot;relative&quot;, &quot;ratio&quot;: 1.2, &quot;err&quot;: 0.04,
+                          &quot;z&quot;: 5.1}]}]
+}
+</code></pre>
+<p><code>z</code> is the statistical significance of a detector's mean ratio. For ring (relative) photometry, <code>z_total</code> adds a
+correlated 15 % per-detector drift (<code>ring_systematic</code>, seen on the constant Barnard's Star) in log ratio, and
+<code>variable</code> / <code>significant_bands</code> use <code>z_total</code>. A detector significant on <code>z</code> alone is listed in
+<code>systematics_limited_bands</code>; <code>systematics_limited</code> is true when such detectors exist and none is significant.</p>
+<p>Unavailable: <code>{"available": false, "reason": "fewer than two epochs with measurements", "epochs": [...]}</code>.</p>
+<h3 id="post-apispectrumanalyze"><code>POST /api/spectrum/analyze</code></h3>
+<p>Body: <code>{"photometry": [records...], "target": {"ra", "dec", "pmra", "pmdec", "ref_epoch", "name"} | null,
+"catalogs": false, "reference": null}</code> (records e.g. from <code>POST /api/sequences/{id}/photometry</code>). Returns
+<code>{"version", "spectrum": &lt;as /spectrum without sequence/target&gt;, "classification": &lt;as /classify&gt;,
+"variability": &lt;as /spectral-variability&gt;, "epochs": [..]}</code>. 422 for an empty list.</p>
+<h3 id="get-apispectralreference"><code>GET /api/spectral/reference</code></h3>
+<p>The bin grid (<code>grid[]</code>: bin, band, wl_lo, wl_hi, wl_center), the curated <code>features</code>, the <code>indices</code>
+definitions and the template library listing (<code>templates[]</code>: name, sptype, family, source).</p>
+<h2 id="automated-field-analysis-moving-objects-track-stack">Automated field analysis, moving objects, Track &amp; Stack</h2>
+<p>Jobs below share one lifecycle. <code>POST</code> starts or joins the job and returns the job JSON
+<code>{id, status, stage, done, total, error, elapsed}</code> (status <code>queued|running|done</code>); poll <code>GET /api/field/{id}</code>:
+200 with the result (immutable, <code>ETag "&lt;id&gt;"</code>), 202 with the job while it runs (every poll is a heartbeat),
+500 if it failed, 410 if cancelled (POST again). <code>DELETE /api/field/{id}</code> withdraws this client (200 job / 204);
+a job nobody polls for 60 s is cancelled. Send <code>X-Client-Id</code>. Job ids are <code>&lt;sequence&gt;-&lt;kind&gt;&lt;hash&gt;</code> with kind
+<code>f</code> (field analysis), <code>k</code> (known objects), <code>s</code> (stack search), and <code>c</code> / <code>a</code> / <code>u</code> (comet, asteroid, unknown
+movers; previous section). 404 for an unknown or unfinished sequence.</p>
+<h3 id="post-apisequencesidfield"><code>POST /api/sequences/{id}/field</code></h3>
+<p>"Analyze this field". Body (all optional): <code>snr_min</code> (5), <code>max_sources</code> (300), <code>catalogs</code>, <code>motion</code>,
+<code>shift_stack</code>, <code>transients</code>, <code>known_objects</code>, <code>variability</code>, <code>colours</code> (all true), <code>vmag_lim</code> (21), <code>force</code>.
+Result: <code>{id, sequence, version, created, options, target, grid, epochs[{index, year, date_min, date_max}],
+reference_year, sources[], candidates{movers, faint_movers, tracklets, pairs, variables, red, anomalies},
+stats{sources, catalogs, transients, anomaly, seconds}, realbogus{model, validation, importance}, notes[]}</code>.</p>
+<ul>
+<li><code>sources[]</code>: <code>id, x, y</code> (grid px), <code>ra, dec, snr, bands_detected, epochs_detected, flux_mjy{D1..}</code>,
+  <code>flux_err_mjy, snr_band, saturated, blended_with, matches{gaia|catwise|2mass: {id, mag, mag_band, pmra,
+  pmdec, sep_arcsec} | null}</code>, and when fitted <code>motion{pmra, pmdec, pmra_err, pmdec_err, pm_total,
+  significance, n_epochs, bands, chi2_red, supporting_bands}</code>, <code>variability{n, chi2_red, stetson_j,
+  amplitude, method}</code>.</li>
+<li><code>movers[]</code>: <code>id, source, x, y, ra, dec, category</code> (<code>known_mover|discrepant_motion|unknown_mover</code>),
+  <code>score, motion, catalog_motion{catalog, id, pmra, pmdec} | null, catalog_discrepancy_sigma, saturated,
+  track[{epoch, year, ra, dec, x, y}]</code>.</li>
+<li><code>faint_movers[]</code> (shift-and-stack): <code>id, x, y, ra, dec, snr, gain_over_static, pmra, pmdec, pm_total,
+  at_speed_limit, mover, nearest_source, score</code>.</li>
+<li><code>tracklets[]</code> (≥ 3 detections in one visit) and <code>pairs[]</code>: <code>id, epoch, n, mjd_mid, rate_arcsec_per_hr,
+  pa_deg, rms_arcsec, mean_snr, mean_rb, partner_fraction, score, detections[{exposure, mjd, band, x, y, ra,
+  dec, snr, rb, partner_seen}], known</code> (best identification or null), <code>identification[{name, kind, vmag,
+  sep_arcsec, pos_tolerance_arcsec, dpa_deg, dspeed_frac, speed_arcsec_per_hr, pa_deg,
+  o_minus_c_arcsec[{dra, ddec}], score}]</code>.</li>
+<li><code>variables[]</code>: <code>id, source, x, y, ra, dec, method</code> (<code>aperture|ring</code>), <code>n, chi2_red, stetson_j, amplitude,
+  epoch_medians[{epoch, rel, n}], period{best_period_days, power, false_alarm_probability, peaks} | null, score</code>.</li>
+<li><code>red[]</code>: <code>id, source, x, y, ra, dec, ratio_long_short, snr_long, snr_short, short_absent, no_gaia,
+  method</code> (<code>source|map</code>), <code>excess_snr</code> (map), <code>score</code>.</li>
+<li><code>anomalies[]</code>: <code>id, source, x, y, ra, dec, score</code> (isolation forest, 0.5 ordinary → 1),
+  <code>explain[{ratio, z, direction}], no_gaia</code>.</li>
+</ul>
+<h3 id="post-apisequencesidmoving-objects"><code>POST /api/sequences/{id}/moving-objects</code></h3>
+<p>Moving Object Detection only (tracklets + identification). Body <code>{vmag_lim: 21, force: false}</code>; result
+shape as above with the other searches off.</p>
+<h3 id="post-apisequencesidknown-objects"><code>POST /api/sequences/{id}/known-objects</code></h3>
+<p>Known asteroids and comets seen from SPHEREx. Body <code>{times: "epochs" | "exposures", epoch: null, vmag_lim: 21}</code>.
+Result: <code>{sequence, times_mode, epoch, vmag_lim, observer, times[{mjd, objects[{name, kind, mjd, ra, dec, vmag,
+ra_rate, dec_rate, err_ra, err_dec, x, y, inside, speed_arcsec_per_hr, pa_deg}]}]}</code> (rates in ″/h).</p>
+<h3 id="post-apisequencesidtrackstacksearch"><code>POST /api/sequences/{id}/trackstack/search</code></h3>
+<p>Synthetic tracking in one visit. Body <code>{epoch, rate_min: 0.3, rate_max: 10, window_hours: 48, bands: null,
+snr_min: 6}</code>. Result: <code>{sequence, epoch, window_mjd, t_ref, frames, trials, rate_range_arcsec_per_hr,
+velocity_step_arcsec_per_hr, candidates[{id, x, y, ra, dec, mjd_ref, snr, rate_arcsec_per_hr, pa_deg,
+sub_snr[3], sub_detections, score}]}</code> (a candidate needs S/N ≥ 3 in two of three time thirds).</p>
+<h3 id="get-apisequencesidtrackstackbin"><code>GET /api/sequences/{id}/trackstack.bin</code></h3>
+<p>Track &amp; Stack of one visit, synchronous. Query: <code>epoch</code>, <code>rate</code> (″/h), <code>pa</code> (deg east of north), <code>combine</code>
+(<code>mean|median|sum</code>), <code>bands</code> (comma list), <code>subtract_static</code>, <code>parts</code> (1–3), <code>part</code>. Body: float32 LE <code>[n, n]</code>;
+headers <code>X-Array-Shape</code>, <code>X-Array-Dtype</code>, <code>X-Track-Tref</code> (MJD), <code>X-Track-Frames</code>, <code>X-Track-Bands</code>. 422 for bad
+detectors or <code>part ≥ parts</code>.</p>
+<h3 id="post-apisequencesidverify"><code>POST /api/sequences/{id}/verify</code></h3>
+<p>Body <code>{ra, dec, mjd_ref?, rate: 0, pa: 0, epoch?, max_exposures: 40}</code>. Result <code>{sequence, input, summary{exposures,
+fitted, detected_snr3, median_snr, median_offset_arcsec, median_sigma_arcsec, median_chi2_red},
+exposures[{index, mjd, band, wl, predicted_ra, predicted_dec, fit{flux_mjy, err_mjy, snr, bkg, chi2_red, npix,
+sigma_x, sigma_y, ra, dec, sigma_arcsec, offset_arcsec} | null}], strips{half_size_px, stare[{index, pixels}],
+track[{index, pixels}]}}</code> (pixels: 11×11 lists, null for no data).</p>
+<h3 id="get-apifieldidadespsv"><code>GET /api/field/{id}/ades.psv</code></h3>
+<p>The tracklets of a finished field / moving-objects job as ADES PSV for station 288 with SPHEREx's geocentric
+position per observation (<code>sys</code> ICRF_KM, <code>ctr</code> 399), <code>astCat</code> Gaia3, note Z. Follow-up data, not a submission.
+502 if Horizons fails.</p>
+<p>Tracklet identification (ADR-0054) queries known-object positions at each tracklet's first and last detection;
+each <code>identification[]</code> candidate is <code>{name, kind, vmag, sep_arcsec, pos_tolerance_arcsec, dpa_deg, dspeed_frac,
+motion_ok, speed_arcsec_per_hr, pa_deg, o_minus_c_arcsec[{dra, ddec}], score}</code> with speed and direction from the
+displacement between the two queried positions; <code>stats.known_objects.positions</code> says so.</p>
+<h2 id="point-analysis-click-a-point-analyze">Point analysis ("click a point → Analyze")</h2>
+<p>Every automatic analysis of one position of a finished sequence in one job (ADR-0053). Same lifecycle as field
+jobs: deduplicated per sequence and position rounded to 1e-4° (motion to 1 mas/yr); send <code>X-Client-Id</code>.</p>
+<h3 id="post-apisequencesidanalyze"><code>POST /api/sequences/{id}/analyze</code></h3>
+<p>Body <code>{ra, dec, pmra?: null, pmdec?: null, ref_epoch: 2000.0, name?: null, force: false}</code> (deg ICRS; motion in
+mas/yr with cos dec; without a motion the analysis follows a Gaia DR3 — else SIMBAD — counterpart within 4″
+that has a motion, else a static position). Returns the job <code>{id, status, stage, done, total, error, elapsed}</code> — <code>id</code> is
+<code>&lt;sequence&gt;-p&lt;hash&gt;</code>, <code>status</code> <code>done</code> straight away when the result exists. 404 unknown or unfinished sequence,
+422 bad body.</p>
+<h3 id="get-apianalysesjob_id-delete-apianalysesjob_id"><code>GET /api/analyses/{job_id}</code> · <code>DELETE /api/analyses/{job_id}</code></h3>
+<p>GET: 200 with the result (immutable, <code>ETag: "&lt;job_id&gt;"</code>), 202 with the job while it runs, 500 failed, 410
+cancelled (POST again), 404 unknown; every GET is a heartbeat. The steps run concurrently (ADR-0056): <code>stage</code> lists
+the steps running now (e.g. <code>"photometry, known_objects"</code>, then <code>"verdict"</code>), <code>done</code>/<code>total</code> count finished steps,
+and <code>steps</code> gives each step's state: <code>{"identification": "done", "photometry": "running", ...}</code> with values
+<code>pending | running | done | error</code>. DELETE withdraws this client (200 job / 204 unknown); a job nobody polls for
+60 s is cancelled. <code>force: true</code> re-runs a finished analysis.</p>
+<p>The whole analysis returns within 60 s: a step still running then becomes <code>{"error": "TimeoutError: not finished
+within 60 s; ..."}</code> (repeat later — downloads and catalogue answers are cached). Remote services use short timeouts
+and a circuit breaker: a service that just failed is reported at once as <code>ServiceUnavailable: &lt;host&gt; is
+unavailable ...</code> instead of being waited for again. The result's <code>timings</code> block shows
+<code>{total_s, steps_s: {step: seconds}, timed_out: [steps], services_unavailable: {host: {retry_in_s, error}}}</code>.</p>
+<p>Result (every step slot is either its object or <code>{"error": "&lt;Type&gt;: &lt;message&gt;"}</code>):</p>
+<pre><code class="language-text">{ id, sequence, version: 2,
+  request: {ra, dec, pmra, pmdec, ref_epoch, name},
+  point: {ra, dec, x, y, inside,                     # x, y, inside: at the mean epoch (moved with the request's motion)
+          epoch_position: {ra, dec, year},           # where a request with a motion is at the sequence's mean epoch
+          motion_used: {pmra, pmdec, ref_epoch, source}},
+  identification: {radius_arcsec: 15, reference_year,
+                   gaia|catwise|2mass|simbad: {matches: [{id, ra, dec, epoch, pmra, pmdec, mag, mag_band,
+                                                           otype?, sptype?, parallax?, sep_arcsec, pm_total,
+                                                           track: [{epoch, ra, dec, x, y}]}],   # ≤ 3, nearest first
+                                               n_in_radius, counterpart,            # counterpart: nearest ≤ 4″
+                                               truncated}   # cone hit the 3000-row limit: &quot;no counterpart&quot; not claimed
+                                    # sources with a motion are compared with the point at the mean epoch, sources
+                                    # without one (2MASS) at their own epoch (ADR-0062)
+                                    | {error}},
+  photometry: {sequence, target, photometry: [records as meta.photometry], rings, stats,
+               summary: {n, n_flagged, n_saturated, n_relative, methods: {psf|aperture|ring: n},
+                         per_band: {D1..D6: {n, n_good, median_flux_mjy}}}},
+  spectrum: {spectrum: &lt;GET /spectrum body without sequence/version&gt;,
+             classification: &lt;GET /classify body without sequence/version&gt;,
+             variability: &lt;GET /spectral-variability body without sequence/version&gt;},
+  motion: &lt;GET /motion body: {start, reference_year, prior, combined, per_band, points, track}&gt;,
+  periodogram: &lt;POST /api/periodogram body, curve trimmed to ≤ 400 samples&gt;,
+  colours: {long_um, short_um, long_flux_mjy, long_err_mjy, short_flux_mjy, short_err_mjy, n_long, n_short,
+            ratio, long_snr, short_snr, red_excess},
+  known_objects: {radius_arcsec: 30, observer, epochs: [{epoch, mjd, n_in_box, near: [...]}],
+                  matches: [{name, kind, vmag, sep_arcsec, ra, dec, epoch}]},
+  tracklets: {available, reason?, field_job?,
+              candidates: [{category, kind: &quot;tracklet&quot;|&quot;source&quot;, id, sep_arcsec, ...}]},   # ≤ 20 within 20″
+  verdict: {novelty: 0..1, headline,
+            findings: [{kind: identity|motion|spectrum|variability|colour|solar_system|data,
+                        text, confidence: 0..1, novelty: -0.3..0.55, evidence: {...}}]} }
+</code></pre>
+<pre><code class="language-bash">curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' \
+  -d '{&quot;ra&quot;: 269.4462, &quot;dec&quot;: 4.7688}' https://&lt;host&gt;/api/sequences/&lt;id&gt;/analyze
+</code></pre>
+<h2 id="data-sources-and-the-file-catalogue-mirror-adr-0057">Data sources and the file-catalogue mirror (ADR-0057)</h2>
+<h3 id="get-apistatusupstreams"><code>GET /api/status/upstreams</code></h3>
+<p>Every remote source per kind of data, in the order it is asked now, plus the local mirror:</p>
+<pre><code class="language-json">{&quot;kinds&quot;: {&quot;gaia&quot;: [{&quot;rank&quot;: 0, &quot;name&quot;: &quot;mast-gaia&quot;, &quot;label&quot;: &quot;MAST (STScI)&quot;, &quot;service&quot;: &quot;mast.stsci.edu&quot;, &quot;note&quot;: &quot;&quot;,
+                     &quot;samples&quot;: 12, &quot;success_rate&quot;: 1.0, &quot;p50_s&quot;: 0.31, &quot;p90_s&quot;: 0.6, &quot;last_ok_s_ago&quot;: 4,
+                     &quot;last_fail_s_ago&quot;: null, &quot;last_error&quot;: null, &quot;breaker&quot;: null, &quot;state&quot;: &quot;ok&quot;},
+                    {&quot;rank&quot;: 1, &quot;name&quot;: &quot;esa-gaia&quot;, &quot;...&quot;: &quot;...&quot;, &quot;state&quot;: &quot;down&quot;}],
+           &quot;spherex-files&quot;: [&quot;...&quot;], &quot;spherex-cutouts&quot;: [&quot;...&quot;], &quot;spherex-meta&quot;: [&quot;...&quot;], &quot;catwise&quot;: [&quot;...&quot;],
+           &quot;2mass&quot;: [&quot;...&quot;], &quot;simbad&quot;: [&quot;...&quot;], &quot;solar-system&quot;: [&quot;...&quot;]},
+ &quot;breakers&quot;: {&quot;gea.esac.esa.int&quot;: {&quot;retry_in_s&quot;: 211, &quot;error&quot;: &quot;timed out&quot;}},
+ &quot;mirror&quot;: {&quot;path&quot;: &quot;...&quot;, &quot;bytes&quot;: 312000000, &quot;files&quot;: 1628230, &quot;releases&quot;: {&quot;dr1&quot;: {&quot;files&quot;: 1179406, &quot;complete&quot;: true}},
+            &quot;synced_at&quot;: &quot;1794739000.1&quot;, &quot;age_hours&quot;: 0.4, &quot;last_sync&quot;: {&quot;...&quot;: &quot;...&quot;}},
+ &quot;cluster&quot;: {&quot;host:pid&quot;: {&quot;aws-s3&quot;: {&quot;samples&quot;: 50, &quot;success_rate&quot;: 1.0, &quot;p50_s&quot;: 0.08}}}}
+</code></pre>
+<p><code>state</code> is <code>ok</code> (last call succeeded), <code>degraded</code> (last call failed), <code>down</code> (circuit breaker open, skipped by
+interactive calls) or <code>unknown</code> (not used since the process started). <code>cluster</code> appears only with Redis: what every
+API/worker process reported in its last 15-s summary. Kinds: <code>spherex-files</code> (range reads: AWS S3, IRSA ibe,
+optional <code>SPHEREX_FILE_MIRROR_BASE</code>), <code>spherex-cutouts</code> (IRSA cutout service vs range reads), <code>spherex-meta</code>
+(local mirror, IRSA TAP, IRSA SIA), <code>gaia</code> (ESA, MAST, IRSA, VizieR), <code>catwise</code>/<code>2mass</code> (IRSA, VizieR), <code>simbad</code>
+(CDS, Harvard), <code>solar-system</code> (JPL, IRSA MOST, SkyBoT — geocentric).</p>
+<p><code>GET /api/releases</code> answers from the mirror when it is complete (with <code>"source": "local mirror (synced … h ago)"</code>)
+and falls back to it when IRSA TAP fails; <code>GET /api/catalogs</code> labels no longer name one archive, since the answer
+may come from any source of that catalogue.</p>
+<h2 id="long-baseline-light-curves-2mass-allwise-neowise-spherex">Long-baseline light curves (2MASS, AllWISE, NEOWISE + SPHEREx)</h2>
+<p>A homogeneous 1997–2026 light curve of the sequence target, or of any position inside its field, and a field-wide
+long-period variability search (ADR-0059). Both are field jobs with the usual lifecycle: deduplicated per sequence
+and request, <code>force: true</code> re-runs, a job nobody polls for 60 s is cancelled. Send <code>X-Client-Id</code>.</p>
+<h3 id="post-apisequencesidlong-baseline"><code>POST /api/sequences/{id}/long-baseline</code></h3>
+<p>Body (all optional):</p>
+<pre><code class="language-text">{ra, dec,              # deg ICRS at ref_epoch; omit both for the sequence target (one without the other: 422)
+ pmra, pmdec,          # mas/yr (pmra with cos dec); omitted: a Gaia DR3 counterpart's motion within 3&quot;, else 0
+ ref_epoch: 2000.0, name,
+ calibrate: true,      # cross-calibrate with field stars (CatWISE2020 / AllWISE / 2MASS PSC)
+ min_period: 50,       # days
+ max_period,           # days, default baseline / 1.5 (&lt;= 6000)
+ field_radius: 150,    # arcsec (60-360): frame windows and calibration stars around the target; larger finds
+                       # more calibration stars near bright targets but reads more frame rows the first time
+ force: false}
+</code></pre>
+<p>Returns the job <code>{id, status, stage, done, total, error, elapsed}</code>, with <code>id</code> = <code>&lt;sequence&gt;-l&lt;hash&gt;</code>. 404: the
+sequence is unknown or unfinished. 422: a bad body, or a position outside the field or on a solar-system
+sequence (the job fails with the reason). Stages run in order: <code>archive search</code>, <code>catalogues</code>, <code>frames</code>
+(done/total = windows read), <code>photometry</code>, <code>calibrate</code>, <code>analysis</code>.</p>
+<h3 id="post-apisequencesidlong-period-search"><code>POST /api/sequences/{id}/long-period-search</code></h3>
+<p>Body <code>{w1_max: 15, max_sources: 150 (1-400), min_points: 8, min_period: 50, max_period: null,
+radius_arcsec: 150 (30-360), force: false}</code>. Returns the job, with <code>id</code> = <code>&lt;sequence&gt;-w&lt;hash&gt;</code>. Job ids include
+the result version, so a new pipeline version does not serve old results.</p>
+<h3 id="get-apilong-baselinejob_id-delete-apilong-baselinejob_id"><code>GET /api/long-baseline/{job_id}</code> · <code>DELETE /api/long-baseline/{job_id}</code></h3>
+<p>GET answers:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>200</td>
+<td>The result (immutable, <code>ETag: "&lt;job_id&gt;"</code>).</td>
+</tr>
+<tr>
+<td>202</td>
+<td>The job, while it runs; every GET is a heartbeat.</td>
+</tr>
+<tr>
+<td>500</td>
+<td>The job failed.</td>
+</tr>
+<tr>
+<td>410</td>
+<td>The job was cancelled; POST again.</td>
+</tr>
+<tr>
+<td>404</td>
+<td>Unknown job, or not an <code>l</code> / <code>w</code> job.</td>
+</tr>
+</tbody>
+</table>
+<p>DELETE withdraws this client: 200 with the job, or 204 if the job is unknown.</p>
+<p>Light-curve result:</p>
+<pre><code class="language-text">{ version: 2, kind: &quot;long-baseline light curve&quot;, sequence, created,
+  target: {ra, dec, name, pmra, pmdec, ref_epoch, source}, is_sequence_target, request,
+  coverage: {first_year, last_year, baseline_years, bands: {J|H|Ks|W1|W2|D1..D6: {n, surveys, first, last}}},
+  points: [{band, survey: 2MASS|AllWISE|NEOWISE|SPHEREx, survey_id, date, mjd, mjd_min, mjd_max, year,
+            flux_mjy, err_mjy,               # null for relative points
+            mag, mag_err, mag_system,        # Vega (J..W2), AB (D1..D6), &quot;relative&quot; (-2.5 log10 rel)
+            rel, rel_err, relative,          # relative points (ring photometry of saturated targets)
+            method,                          # aperture | ring | psc | synthetic | synthetic-relative | narrow | narrow-relative
+            group,                           # zero-point group: band, or &quot;&lt;band&gt;:&lt;survey&gt;-ring|-relative&quot;
+            mag_anchored, flux_anchored_mjy, anchored,   # on the band's reference group (see analysis.anchoring)
+            n, n_rejected, saturated, flagged, calibrated, coverage, extrapolated, wl_um}],
+  methods: {&quot;NEOWISE W1&quot;: {method: aperture|ring, saturated_share, frames, apcorr | r_in_px, r_out_px,
+                           ring_fraction, r_in_arcsec, r_out_arcsec, core_from, scale_uncertain}, ...},
+                           # core_from: &quot;NEOWISE&quot; when an AllWISE ring starts at the NEOWISE ring's radius;
+                           # scale_uncertain: the ring holds &lt; 0.5% of the PSF (absolute scale off by up to ~2 mag)
+  calibration: {references: {wise: CatWISE2020|AllWISE|Gaia DR3|&quot;&quot;, 2mass},
+                stars: [{id, ra, dec, w1, mag, g}],
+                frames: {&quot;neowise:W1&quot;: {offset_mag, scatter_mag, err_mag, n, applied, reference, stars}, ...},
+                spherex: {W1|W2|J|H|Ks: {offset_mag, scatter_mag, n, applied, used_offset_mag,
+                                         source: &quot;field stars&quot;|&quot;default&quot;, rejected_variable, stars}},
+                star_photometry: {&lt;star id&gt;: {neowise: {W1, W2}, spherex_synthetic: {...}, catalogue: {...}}}},
+  analysis: {n_points, bands, groups, baseline_days, first_mjd, last_mjd,
+             constant_model: {chi2_red, offsets: {group: mag}},
+             period: {period_days, period_err_days, frequency_per_day, power, false_alarm_probability, significant,
+                      cadence_alias,                     # k when P = 365.25/k d (k &lt;= 7): not significant
+                      n_points, bands, nterms, chi2_red, min_period_days, max_period_days, baseline_days,
+                      amplitudes_mag: {band: peak-to-peak}, offsets: {group: mag}, t0_mjd,
+                      peaks: [{period_days, power}],                    # up to 5, independent
+                      periodogram: {period_days: [...], power: [...]},  # &lt;= 1500 samples
+                      model: {phase: [0..1], mag_by_band: {band: [...]}}} | null,
+             folded: [{band, survey, group, phase, mag, mag_err, mjd}],  # when the period is significant
+             trends: {band: {slope_mag_per_year, slope_err, significance, span_years, n}},   # spans &gt;= 3 yr
+             era_means: {band: [{survey, group, mean_mag, err_mag, n, first_mjd, last_mjd}]},
+             events: [{kind: dimming|brightening, start_mjd, end_mjd, peak_mag, bands, surveys, n_points,
+                       significance}],
+             band_stats: {band: {n, chi2_red_constant, range_5_95_mag, robust_sigma_mag, median_err_mag}},
+             anchoring: {group: {band, reference, shift_mag, fitted, absolute_scale}},
+             classification: {label: constant|variable (aperiodic)|periodic variable|long-period variable,
+                              variable, periodic, trend_bands, dimming_events, reasons: [...]}} | {error},
+  processing: {window_centre: {ra, dec}, window_radius_arcsec, max_visit_frames, spherex_bin_days, period_bands,
+               mag_floor},
+  stats: {images, frames: {frames, cached, read, not_covered, requests, bytes, errors}, spherex, seconds: {stage: s},
+          total_seconds},
+  notes: [...] }
+</code></pre>
+<p>Long-period search result:</p>
+<pre><code class="language-text">{ version: 3, kind: &quot;long-period search&quot;, sequence, created, options, field: {ra, dec, radius_arcsec},
+  summary: {sources, measured, contaminated, labels: {label: n}, variable_fraction,    # over clean sources
+            long_period_candidates: [id]},
+  candidates: [{id, ra, dec, w1, w2, n_points, saturated,
+                contamination,            # AllWISE W1/W2 ccf (&quot;hh&quot;, &quot;d0&quot;, ...), &quot;track&quot; (on the moving target's
+                                          # track), &quot;blend&quot; (W1 &gt; 0.5 mag off the catalogue) or null
+                score, label, variable, periodic, reasons, chi2_red: {W1, W2}, range_mag: {W1, W2},
+                period_days, period_power, period_fap, cadence_alias, amplitudes_mag, trends, events,
+                baseline_years, points: [{band, survey, mjd, mag, mag_err, group}]}],   # ranked, best first
+  ensemble: {&quot;neowise:W1&quot;: {applied, visits, zero_point_scatter_mag}, ...},
+  stats: {images, frames, seconds: {frames, photometry, total}}, notes }
+</code></pre>
+<h3 id="get-apilong-baselinejob_idlightcurvecsv"><code>GET /api/long-baseline/{job_id}/lightcurve.csv</code></h3>
+<p>The finished light curve, one row per point, with three <code>#</code> comment lines first. The columns are:</p>
+<pre><code class="language-text">band, survey, date, mjd, mjd_min, mjd_max, year, flux_mjy, err_mjy, mag, mag_err, mag_system, mag_anchored,
+flux_anchored_mjy, anchored, group, method, relative, rel, rel_err, saturated, flagged, calibrated, n, coverage
+</code></pre>
+<p>404 for an unknown or unfinished job.</p>
+<pre><code class="language-bash">curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' -d '{}' \
+  https://&lt;host&gt;/api/sequences/&lt;id&gt;/long-baseline
+</code></pre>
+<pre><code class="language-bash">curl -s -H 'X-Client-Id: tab1' https://&lt;host&gt;/api/long-baseline/&lt;job_id&gt;
+</code></pre>
+<p>MCP: <code>long_baseline_lightcurve(sequence_id, ra?, dec?, pmra?, pmdec?, ref_epoch?)</code> and
+<code>long_period_search(sequence_id, limit?)</code> submit or join the same jobs. They return a compact summary once
+done, the job status while running, and <code>job_result(job_id)</code> works too. From the command line:
+<code>python scripts/long_baseline.py &lt;sequence&gt; [--ra --dec] [--png curve.png] [--out result.json] [--search]</code>.</p>
+<h2 id="sky-map-hips-cache-coverage-and-footprints-adr-0061">Sky map: HiPS cache, coverage and footprints (ADR-0061)</h2>
+<h3 id="get-hipssurveypath"><code>GET /hips/{survey}/{path}</code></h3>
+<p>The SPHEREx DR1 all-sky HiPS cube (<code>survey</code> = <code>spherex-dr1</code>), served from the server's disk and fetched from IRSA
+the first time a file is asked for. <code>path</code> is a HiPS file name: <code>properties</code>, <code>Moc.fits</code>, <code>Norder3/Allsky_{frame}.png</code>
+or <code>Norder{k}/Dir{d}/Npix{n}_{frame}.png</code>; anything else is 404.</p>
+<table>
+<thead>
+<tr>
+<th>Response</th>
+<th>When</th>
+<th><code>Cache-Control</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>200 tile / <code>Allsky</code> (PNG)</td>
+<td>on disk, or fetched now</td>
+<td><code>public, max-age=31536000, immutable</code>, with <code>ETag</code></td>
+</tr>
+<tr>
+<td>200 <code>properties</code> / <code>Moc.fits</code></td>
+<td>refreshed after an hour; the stale copy when IRSA is down</td>
+<td><code>public, max-age=3600</code></td>
+</tr>
+<tr>
+<td>304</td>
+<td><code>If-None-Match</code> matches</td>
+<td>as above</td>
+</tr>
+<tr>
+<td>404</td>
+<td>unknown survey or path, or IRSA has no such file (remembered for a day)</td>
+<td><code>public, max-age=86400</code></td>
+</tr>
+<tr>
+<td>502</td>
+<td>not on disk and every source failed</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="get-apicoverageradec"><code>GET /api/coverage?ra=&amp;dec=</code></h3>
+<p>What SPHEREx has at a position, from the local file-catalogue mirror (milliseconds; an IRSA image search when the
+mirror is not built). <code>{ra, dec, n_exposures, n_visits, per_detector: {D1: n, …}, per_collection, date_min, date_max,
+visits: [{from, to, n, mjd_min, mjd_max}], deep, source, seconds}</code>; <code>n_exposures: 0</code> where there is nothing yet.</p>
+<h3 id="get-apifootprintsradecradius3limit600"><code>GET /api/footprints?ra=&amp;dec=&amp;radius=3&amp;limit=600</code></h3>
+<p>Outlines of SPHEREx exposures whose footprint lies within <code>radius</code> degrees (at most 12), newest first, one detector of
+each dichroic pair (D1–D3; D4–D6 see the same sky): <code>{available, total, shown, radius_deg, footprints: [{obs_id, band,
+mjd, collection, corners: [ra1, dec1, … ra4, dec4]}]}</code>. Without a mirror: <code>{available: false, reason, footprints: []}</code>.
+Cached for 10 minutes.</p>
+<h2 id="comet-discovery-adr-0063">Comet discovery (ADR-0063)</h2>
+<h3 id="post-apisequencesidcomet-search"><code>POST /api/sequences/{id}/comet-search</code></h3>
+<p>A job (kind <code>h</code>, polled with <code>GET /api/field/{job}</code> like the field analysis). Body (all optional): <code>{field_job:
+null, slow: true, stack: true, vmag_lim: 21, window_days: 6, stack_rate_max: 2.0, identify: true, force: false}</code>.
+<code>field_job</code> reuses a finished field analysis of the same sequence for its tracklets. 404 unknown sequence, 422 bad
+options.</p>
+<p>On a fixed-position sequence (<code>mode: "field"</code>): <code>{kind: "comet_search", mode, version, sequence, options,
+observer: "SPHEREx" | "geocentre", counts{candidates, tracklet, slow, stack, unidentified, comet_like}, stats{fast,
+slow{links, stack_hits, unconfirmed, groups, stack[{epoch, windows, trials, coarsened, thresholds}]}, identification,
+psf, seconds}, candidates{comets[...], tracklets[...ADES layout...]}, caveats}</code>. Each <code>comets[]</code> row, best first:
+<code>{id: "H001", kind: tracklet | slow | stack, epoch, ra, dec, mjd, x, y, rate_arcsec_per_hr, pa_deg, span_hours,
+n_exposures, bands, model{x0, y0, vx, vy, w, t_ref, t_lo, t_hi}, ecliptic_latitude, elongation_deg,
+antisolar_pa_deg, status: known | unidentified | unverified, known, identification, distance_au (slow links with
+a significant parallax), comet_likeness{score 0-100, log_odds, terms{orbit, morphology, spectrum}, why[]},
+coma{verdict, coma_score, extent_sigma, snr, size{fwhm_arcsec, psf_fwhm_arcsec, intrinsic_fwhm_arcsec},
+concentration, tail{pa_deg, sigma, detected, aligned, antisolar_pa_deg, offset_from_antisolar_deg, trail_pa_deg,
+offset_from_trail_deg}, stamp, psf_stamp}, spectrum{verdict, gas_sigma, bands[{id, snr, detected, ...}],
+long_excess, per_detector[], points[[wl, flux_mjy, err_mjy]]}, orbit{most_likely, comet_like, probabilities,
+median_distance_au, constrained}, path[[x, y]], forced[], detections[], strip[{mjd, band, x, y, image 15x15}]}</code>
+(stamps north up in grid rows, null for no data; strips for the first 20 only).</p>
+<p>On a co-moving sequence (<code>mode: "object"</code>): the same measurements for the sequence's own object, one row per visit
+(<code>kind: "object"</code>, <code>id: "V1"</code>, plus <code>dates</code>, <code>r_au</code>, <code>delta_au</code>, <code>registration</code>), and <code>summary{visits, max_score,
+median_score, extended_visits, gas_visits}</code>.</p>
+<p><code>GET /api/field/{job}/ades.psv</code> exports the measured candidates (tracklets and slow links scoring &gt;= 30;
+<code>?all=true</code> adds the rest), station 288, follow-up data, not a submission.</p>
+<h3 id="get-apicometswatchlimit30"><code>GET /api/comets/watch?limit=30</code></h3>
+<p><code>{updated, watched[{designation, name, stage, sequence, now{ra, dec, r_au, delta_au, elongation_deg, mag},
+most{object, n_exposures, dates}, comet_job, search_job, activity{visits[{epoch, mjd, dates, r_au, delta_au,
+phase_deg, afrho_cm, afrho_err_cm, co2_snr, co2_w_m2, q_co2, q_co2_upper}], trend, outbursts[{epoch, ratio,
+delta_mag, sigma}]}, latest, comet_likeness, coma[], error, checked}], now[{name, designation, ra, dec, r_au,
+delta_au, elongation_deg, mag, days_from_perihelion, pinned}], refresh{status, stage, done, total, error}, pinned,
+max_watch, error, note}</code>. <code>now</code> lists JPL SBDB comets with perihelion within 2 years, positions from two-body
+propagation (about a degree), sorted pinned first, then by predicted magnitude (cached a day).</p>
+<h3 id="post-apicometswatchrefresh"><code>POST /api/comets/watch/refresh</code></h3>
+<p>Starts the watch refresh in the background (idempotent while it runs, one at a time across workers): for each
+watched comet (<code>SPHEREX_COMET_WATCH</code>, default <code>3I,C/2025 A6,29P</code>, plus the brightest up to
+<code>SPHEREX_COMET_WATCH_MAX</code> = 8) an IRSA MOST search, a 6′ co-moving sequence at prewarm priority (pinned), the comet
+analysis and the comet-search object check. Returns the task status; poll <code>GET /api/comets/watch</code>.</p></main></body></html>

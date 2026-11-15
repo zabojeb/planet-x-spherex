@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0028 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0028-fit-proper-motion-to-per-epoch-co-add-centroids-with-per-detector-zero-points">ADR-0028: Fit proper motion to per-epoch co-add centroids with per-detector zero points</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>Users need a number, not only a blink: how fast does this source move? WiseView and the IRSA tools do not measure motion. Our co-adds are aligned on one grid per epoch and detector.</p>
+<h2 id="decision">Decision</h2>
+<p><code>GET /api/sequences/{id}/motion</code> centroids the source near a grid pixel (or sky position) in every epoch and detector: flux-weighted within 2.5 px above a median background in a 4–7 px annulus, iterated, SNR ≥ 5, following the source with the running fit (or a supplied prior motion). It fits a straight line in tangent-plane offsets with one shared motion and one zero point per detector, by weighted least squares, with per-centroid errors FWHM/(2.355·SNR) floored at 0.02 px and the covariance scaled by sqrt(reduced χ²) when the scatter is larger. It returns the combined fit, per-detector fits, every centroid with residuals, and the fitted track.</p>
+<h2 id="consequences">Consequences</h2>
+<p>Validation (3–4 epochs, 1.1–1.4 yr): ε Indi B 3628 ± 305 / −2526 ± 260 mas/yr vs Gaia 3982 / −2467; Barnard's Star −1316 ± 325 / 9557 ± 385 vs −802 / 10362 (within 1.6σ / 2.1σ; its saturated, filled core scatters by ~0.5″ per detector); three static Gaia stars give −98…+57 mas/yr, all within 1.4σ of zero. Precision is ~300 mas/yr with today's baseline and will improve with every new visit. Reduced χ² of 20–30 says the per-centroid errors are underestimated for bright stars; the scaling keeps the quoted errors honest.</p>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li>PSF fitting on the co-adds: the co-add PSF is a mix of wavelengths and resampling, not a known model.</li>
+<li>One common zero point for all detectors: blends with sources of other colours (WISE 0855) shift centroids per detector.</li>
+<li>Fitting single exposures: many more points but each with a different PSF and wavelength; a later option.</li>
+</ul></main></body></html>

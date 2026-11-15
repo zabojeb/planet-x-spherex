@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ADR 0017 · Seek In Space</title><style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #050505; color: #ece8df; font: 17px/1.6 "Geist", system-ui, -apple-system, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 48px 20px 96px; }
+h1, h2, h3 { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; line-height: 1.15; }
+h1 { font-size: 46px; margin: 0 0 8px; } h2 { font-size: 32px; margin-top: 48px; } h3 { font-size: 24px; margin-top: 32px; }
+a { color: #ffc845; } p, li { color: #d8d3c8; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid rgba(236,232,223,.14); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { color: #b8b3a7; font-weight: 500; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: rgba(236,232,223,.06); border-radius: 3px; }
+code { padding: 1px 4px; } pre { padding: 12px; overflow-x: auto; }
+img { max-width: 100%; }
+.top { color: #858074; font-size: 14px; margin-bottom: 32px; } .top a { margin-right: 18px; }
+</style></head><body><main><div class="top"><a href="./">Evidence</a><a href="methods.html">Methods</a><a href="validation.html">Validation</a><a href="adr.html">Decisions</a><a href="presentation.pdf">Presentation (PDF)</a><a href="/">Open the app</a></div><h1 id="adr-0017-nan-aware-resampling-and-filled-co-add-holes">ADR-0017: NaN-aware resampling and filled co-add holes</h1>
+<ul>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-11-14</li>
+<li><strong>Extends:</strong> <a href="adr-0006-common-output-grid.html">ADR-0006</a>, <a href="adr-0007-epochs-and-coadds.html">ADR-0007</a></li>
+</ul>
+<h2 id="context">Context</h2>
+<p>Masked pixels are set to NaN before an exposure is aligned to the output grid (<a href="adr-0018-photometry-flag-policy.html">ADR-0018</a> keeps the image mask). ALGO_VERSION 1 resampled with plain bilinear interpolation, so every NaN wiped out the output pixels that touched it, and each masked area grew by about one pixel.</p>
+<p>The cores of saturated stars carry masked bits (<code>SUR_ERROR</code>, <code>TRANSIENT</code>, <code>NONFUNC</code>, <code>PERSIST</code>) in every exposure, not only <code>OVERFLOW</code>. Together with the growth, this left Barnard's Star with a 6–7 px hole of zero coverage in the D1–D4 co-adds. The hole showed as a dark spot in the viewer and moved its per-epoch centroid by up to 20″ in a partial epoch.</p>
+<h2 id="decision">Decision</h2>
+<ul>
+<li><strong>Resampling</strong> (<code>processing.grid.resample</code>) interpolates <code>data × valid</code> and <code>valid</code> separately and divides. An output pixel is NaN only where less than half of its bilinear weight falls on valid input, so masked areas keep their size.</li>
+<li><strong>Each exposure is also aligned without masking</strong> (<code>aligned_raw</code>, background-subtracted).</li>
+<li><strong>Holes are filled</strong> (<code>processing.coadd.fill_holes</code>). Where a co-add pixel has coverage 0 although unmasked values exist, it gets the median of those values.</li>
+<li><strong>Filled pixels are marked.</strong> They get pipeline bit 31 <code>FILLED</code> in <code>flags.bin</code>, which <code>meta.flag_bits</code> lists with <code>pipeline: true</code>. <code>coverage</code> stays 0 there, so the client still knows that no clean exposure covered them. <code>meta.epochs[i].bands[b].filled_pixels</code> counts them.</li>
+</ul>
+<h2 id="consequences">Consequences</h2>
+<ul>
+<li>Saturated stars look like stars in every co-add, and blink and difference images no longer show artificial holes.</li>
+<li>Filled values come from flagged pixels, so they are unreliable for photometry. Photometry is done on native pixels with its own masks (<a href="adr-0016-epsf-psf-photometry.html">ADR-0016</a>), never on co-adds.</li>
+<li>The per-exposure CPU work resamples one more array (one extra <code>map_coordinates</code> call), which is small next to the WCS evaluation.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<ul>
+<li><strong>Not masking <code>SUR_ERROR</code> / <code>TRANSIENT</code> when <code>OVERFLOW</code> is set:</strong> this depends on how the onboard processing sets bits around saturation, which we have not seen documented, and it would let real cosmic-ray hits next to bright stars through.</li>
+<li><strong>Inpainting holes from neighbouring pixels:</strong> it invents structure where the real values exist, flagged but informative.</li>
+</ul></main></body></html>
