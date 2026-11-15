@@ -1224,6 +1224,7 @@ export default function App() {
       onStep={embed ? undefined : stepField}
       shiftX={hero && !mobile && presets.length ? 180 : 0}
       frame={drawer ? undefined : mobile ? MOBILE_FRAME : hudLifted ? MID_FRAME : undefined}
+      label={targetName}
     />
   );
 
