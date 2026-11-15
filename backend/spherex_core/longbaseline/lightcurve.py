@@ -26,7 +26,7 @@ from ..bands import BANDS
 from ..targets import Target
 from ..timeutil import mjd_to_iso, mjd_to_year, utc_now_iso, year_to_mjd
 from . import calibrate, model, refcat
-from .archival_lc import Position, lightcurves, measure_all
+from .archival_lc import RING_MIN_FRACTION, Position, lightcurves, measure_all
 from .frames import read_windows
 from .instruments import INSTRUMENTS, VEGA_F0_JY
 from .spherex_lc import BIN_DAYS, mean_synthetic, measure_positions, narrowband_points, synthetic_points
@@ -281,6 +281,10 @@ def run(ctx, req: LongBaselineRequest, progress, check) -> dict:
         arch[p.key], methods[p.key] = lightcurves(per_frame.get(p.key, []), INSTRUMENTS)
     timings["photometry"] = time.perf_counter() - t0 - sum(timings.values())
     check()
+    weak = [k for k, v in methods.get("target", {}).items() if v.get("scale_uncertain")]
+    if weak:
+        notes.append(f"ring photometry of {', '.join(weak)} holds < {RING_MIN_FRACTION:.1%} of the PSF: its absolute "
+                     "scale is uncertain by up to ~1-2 mag (periods and amplitudes are not affected)")
 
     progress("calibrate", 0, 0)
     target_pts = arch["target"]

@@ -23,21 +23,48 @@ import numpy as np
 from ..archival.build import visits
 from ..bands import BANDS
 from ..pipeline import results
-from ..timeutil import mjd_to_iso, mjd_to_year, utc_now_iso
+from ..timeutil import mjd_to_iso, mjd_to_year, utc_now_iso, year_to_mjd
 from . import calibrate, model, refcat
 from .archival_lc import Position, lightcurves, measure_all
 from .frames import read_windows
 from .instruments import INSTRUMENTS
-from .lightcurve import (MAX_WINDOW_RADIUS_ARCSEC, PERIOD_BANDS, WINDOW_RADIUS_ARCSEC, archival_images,
-                         assign_groups)
+from .lightcurve import (MAX_WINDOW_RADIUS_ARCSEC, PERIOD_BANDS, WINDOW_RADIUS_ARCSEC, _sequence_target,
+                         archival_images, assign_groups)
 
-SEARCH_VERSION = 2
+SEARCH_VERSION = 3
 COADD_R_PX = 2.0
 COADD_ANNULUS_PX = (4.0, 7.0)
 MIN_COADD_SNR = 5.0
 ENSEMBLE_MIN_SOURCES = 5
 GAIA_G_MINUS_W1 = 1.5
 CCF_MATCH_ARCSEC = 3.0
+TRACK_EXCLUDE_ARCSEC = 20.0  # catalogue entries on the moving sequence target's own 1997-2027 track
+TRACK_EXCLUDE_BRIGHT_ARCSEC = 60.0  # ... when the target saturates (W1 < 8): its halo moves with it
+BLEND_MAG = 0.5  # measured NEOWISE W1 off the catalogue by more: the aperture measures a neighbour too
+
+
+def track_flags(sources: list[dict], target) -> dict[str, str]:
+    """'track' for sources on the 1997-2027 track of a moving target (CatWISE splits fast movers into several
+    entries, and a bright mover's wings sweep over fixed sources; AllWISE flags only its 2010 position)."""
+    years = np.linspace(1997.5, 2027.0, 120)
+    track = [tuple(float(v) for v in target.position_at(year_to_mjd(y))) for y in years]
+    if calibrate._sep_arcsec(*track[0], *track[-1]) < 2.0:
+        return {}
+    bright = any(s.get("w1") is not None and s["w1"] < 8.0 and calibrate._sep_arcsec(
+        s["ra"], s["dec"], *(float(v) for v in target.position_at(year_to_mjd(s.get("epoch") or 2015.4)))) < 5.0
+        for s in sources)
+    r = TRACK_EXCLUDE_BRIGHT_ARCSEC if bright else TRACK_EXCLUDE_ARCSEC
+    return {s["id"]: "track" for s in sources
+            if min(calibrate._sep_arcsec(s["ra"], s["dec"], a, b) for a, b in track) < r}
+
+
+def blend_flag(points: list[dict], w1_catalogue: float | None) -> str | None:
+    """'blend' when the median NEOWISE W1 aperture magnitude is more than BLEND_MAG off the catalogue W1."""
+    m = [p["mag"] for p in points if p["survey_id"] == "neowise" and p["band"] == "W1"
+         and p.get("method") == "aperture" and p.get("mag") is not None and not p.get("flagged")]
+    if w1_catalogue is None or len(m) < 5:
+        return None
+    return "blend" if abs(float(np.median(m)) - w1_catalogue) > BLEND_MAG else None
 
 
 def contamination_flags(sources: list[dict], label: str, ra: float, dec: float, radius_deg: float,
@@ -208,6 +235,7 @@ def search_field(ctx, opts: SearchOptions, progress, check) -> dict:
     targets = [calibrate.star_target(s) for s in src]
     keys = [s["id"] for s in src]
     ccf = contamination_flags(src, label, grid.ra, grid.dec, radius / 3600.0, notes)
+    ccf.update(track_flags(src, _sequence_target(ctx.meta)))
     check()
 
     def frames_progress(done, total):
@@ -220,6 +248,11 @@ def search_field(ctx, opts: SearchOptions, progress, check) -> dict:
     per_frame = measure_all(windows, [Position(k, t) for k, t in zip(keys, targets)], check=check)
     pts = {k: lightcurves(per_frame.get(k, []), INSTRUMENTS)[0] for k in keys}
     ens = ensemble_normalise(pts)
+    for s_ in src:
+        if s_["id"] not in ccf and label != "Gaia DR3":
+            f = blend_flag(pts[s_["id"]], s_.get("w1"))
+            if f:
+                ccf[s_["id"]] = f
     sx = coadd_points(ctx, targets, keys)
     t_phot = time.perf_counter() - t0 - t_frames
 
@@ -282,10 +315,11 @@ def search_field(ctx, opts: SearchOptions, progress, check) -> dict:
         "stats": {"images": len(images), "frames": frame_stats, "seconds": {"frames": t_frames, "photometry": t_phot,
                                                                             "total": time.perf_counter() - t0}},
         "notes": [f"Sources are {label} within the window radius; SPHEREx points are relative epoch co-add fluxes "
-                  "with fitted zero points. Sources with AllWISE W1/W2 contamination flags (halo, spike, ghost, "
-                  "latent) are measured but left out of the summary and listed last.", *notes],
+                  "with fitted zero points. Contaminated sources (AllWISE W1/W2 halo, spike, ghost or latent flags; "
+                  "on the moving target's track; measured W1 > 0.5 mag off the catalogue) are measured but left "
+                  "out of the summary and listed last.", *notes],
     }
 
 
-__all__ = ["SEARCH_VERSION", "SearchOptions", "coadd_points", "contamination_flags", "ensemble_normalise",
-           "search_field"]
+__all__ = ["SEARCH_VERSION", "SearchOptions", "blend_flag", "coadd_points", "contamination_flags",
+           "ensemble_normalise", "search_field", "track_flags"]

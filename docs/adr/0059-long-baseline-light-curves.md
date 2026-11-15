@@ -90,10 +90,12 @@ ADR-0023 resamples those frames onto the sequence grid for display. For photomet
      confirmed within 5 d by an independent measurement. SPHEREx bands never confirm each other.
 
    A rule-based classification follows: constant, variable (aperiodic), periodic or long-period variable.
-   Variable means χ²/dof ≥ 5 and a 5–95% range ≥ max(0.1 mag, 5 median errors) in the same band of W1/W2.
+   Variable means χ²/dof ≥ 5 and a 5–95% range ≥ max(0.1 mag, 5 median errors) in one band of W1/W2, the
+   other band not flat, and not the scan pattern (a cadence alias as best period at power ≥ 0.5).
 8. **Field-wide search.** Up to 150 CatWISE2020 sources (W1 ≤ 15) within `radius_arcsec` (150–360″) are
-   measured on the same frames. NEOWISE points are normalised by each visit's ensemble zero point. Sources with
-   AllWISE W1/W2 contamination flags (halo, spike, ghost, latent) are measured but kept out of the summary. SPHEREx adds relative
+   measured on the same frames. NEOWISE points are normalised by each visit's ensemble zero point. Contaminated
+   sources are measured but kept out of the summary: AllWISE W1/W2 flags (halo, spike, ghost, latent), entries
+   on a moving target's track, and apertures whose median W1 is > 0.5 mag off the catalogue (blends). SPHEREx adds relative
    aperture points on the epoch co-adds. Every source runs through the same model, and the field is ranked by a
    score (log χ²/dof + 2 × range + periodic bonus).
 9. **Jobs and interfaces.** Both run as field jobs (`spherex_core.field.jobs`, kinds `l` and `w`, deduplicated
@@ -108,14 +110,16 @@ ADR-0023 resamples those frames onto the sequence grid for display. For photomet
 
 ## Consequences
 
-- Any position inside a built sequence gets a 1997–2026 light curve in about a minute. The first run reads about
-  0.5 GB of WISE frames by S3 range reads; later runs reuse the cached windows and take seconds.
+- Any position inside a built sequence gets a 1997–2026 light curve in one to three minutes. The first run reads
+  0.5–0.8 GB of WISE frames by S3 range reads. Later runs reuse the cached windows and take 10–70 s.
+  Validation figures are in docs/methods.md, "Validation".
 - Saturated stars get light curves at all: rings in every archival survey and relative SPHEREx points. Their
-  absolute scale is only as good as the enclosed-energy curve. The analysis fits their zero points, so periods
+  absolute scale is only as good as the enclosed-energy curve. Rings holding under 0.5% of the PSF are marked
+  `scale_uncertain`; they can be off by a magnitude or more. The analysis fits their zero points, so periods
   and amplitudes do not depend on it.
 - How well SPHEREx sits on the WISE scale depends on the field's calibration stars. Fields with fewer than three
   usable constant stars (bright-star haloes, high latitude within 150″) fall back to the default offsets, and the
-  result says so.
+  result says so. The defaults are the medians over five validation fields, which scatter by 0.01–0.02 mag.
 - Each archival survey is in a different era, so a constant offset between surveys and a real change in
   brightness cannot be separated within one band unless the zero points are calibrated. Era means are reported
   with that caveat.

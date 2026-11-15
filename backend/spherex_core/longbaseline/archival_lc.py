@@ -28,6 +28,9 @@ from .instruments import WISE_BAD_BITS, WISE_SAT_BITS, Instrument
 
 FLOOR = {"aperture": 0.015, "ring": 0.03}  # fractional systematic floor per combined point
 RING_SATURATED_SHARE = 0.5
+# rings holding less of the PSF than this sit where the enclosed-energy curve is least certain (PSF wings,
+# neighbour light): their absolute scale can be off by a magnitude or more (V1968 Cyg W2 in the validation)
+RING_MIN_FRACTION = 0.005
 TWOMASS_GROUP_DAYS = 3.0
 CLIP = 3.0
 
@@ -145,6 +148,8 @@ def calibrate_frames(recs: list[dict], inst: Instrument, core_arcsec: float | No
         frac = inst.ring_fraction(r_in, r_out)
         info.update(r_in_px=r_in, r_out_px=r_out, ring_fraction=frac,
                     r_in_arcsec=r_in * inst.pixscale, r_out_arcsec=r_out * inst.pixscale)
+        if frac < RING_MIN_FRACTION:
+            info["scale_uncertain"] = True
         for r in recs:
             m = ring_dn(r["profile"], r_in, r_out)
             if m is None:

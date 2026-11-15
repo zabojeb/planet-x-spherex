@@ -673,8 +673,9 @@ Light-curve result:
             mag_anchored, flux_anchored_mjy, anchored,   # on the band's reference group (see analysis.anchoring)
             n, n_rejected, saturated, flagged, calibrated, coverage, extrapolated, wl_um}],
   methods: {"NEOWISE W1": {method: aperture|ring, saturated_share, frames, apcorr | r_in_px, r_out_px,
-                           ring_fraction, r_in_arcsec, r_out_arcsec, core_from}, ...},  # core_from: "NEOWISE"
-                           # when an AllWISE ring starts at the NEOWISE ring's radius
+                           ring_fraction, r_in_arcsec, r_out_arcsec, core_from, scale_uncertain}, ...},
+                           # core_from: "NEOWISE" when an AllWISE ring starts at the NEOWISE ring's radius;
+                           # scale_uncertain: the ring holds < 0.5% of the PSF (absolute scale off by up to ~2 mag)
   calibration: {references: {wise: CatWISE2020|AllWISE|Gaia DR3|"", 2mass},
                 stars: [{id, ra, dec, w1, mag, g}],
                 frames: {"neowise:W1": {offset_mag, scatter_mag, err_mag, n, applied, reference, stars}, ...},
@@ -709,11 +710,12 @@ Light-curve result:
 Long-period search result:
 
 ```text
-{ version: 2, kind: "long-period search", sequence, created, options, field: {ra, dec, radius_arcsec},
+{ version: 3, kind: "long-period search", sequence, created, options, field: {ra, dec, radius_arcsec},
   summary: {sources, measured, contaminated, labels: {label: n}, variable_fraction,    # over clean sources
             long_period_candidates: [id]},
   candidates: [{id, ra, dec, w1, w2, n_points, saturated,
-                contamination,            # AllWISE W1/W2 ccf ("hh", "d0", ...) or null; listed after clean ones
+                contamination,            # AllWISE W1/W2 ccf ("hh", "d0", ...), "track" (on the moving target's
+                                          # track), "blend" (W1 > 0.5 mag off the catalogue) or null
                 score, label, variable, periodic, reasons, chi2_red: {W1, W2}, range_mag: {W1, W2},
                 period_days, period_power, period_fap, cadence_alias, amplitudes_mag, trends, events,
                 baseline_years, points: [{band, survey, mjd, mag, mag_err, group}]}],   # ranked, best first

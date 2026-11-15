@@ -329,3 +329,36 @@ def test_allwise_ring_follows_neowise_core():
     _, info = calibrate_frames([dict(r) for r in recs], inst, core_arcsec=35.75)
     assert own["method"] == info["method"] == "ring" and own["r_in_px"] == 4
     assert info["r_in_px"] == 26 and info["r_out_px"] == 34 and info["core_from"] == "NEOWISE"
+    assert not own.get("scale_uncertain") and not info.get("scale_uncertain")
+    # a ring far out in the wings (V1968 Cyg W2: 49.5-60.5", 0.27 % of the PSF) has an unreliable scale
+    _, far = calibrate_frames([dict(r) for r in recs], INSTRUMENTS[("neowise", "W2")], core_arcsec=49.5)
+    assert far["r_in_px"] == 18 and far["ring_fraction"] < 0.005 and far["scale_uncertain"]
+
+
+def test_search_track_and_blend_flags():
+    """Catalogue entries on a fast mover's track and apertures that measure a neighbour are contaminated."""
+    from spherex_core.longbaseline import search
+    from spherex_core.targets import Target
+
+    mover = Target(ra=331.0435, dec=-56.7827, pmra=3982.0, pmdec=-2470.0, ref_epoch=2000.0)
+    on = mover.position_at(56000.0)
+    src = [{"id": "on", "ra": float(on[0]), "dec": float(on[1]), "w1": 10.6, "epoch": 2015.4},
+           {"id": "off", "ra": 331.0435, "dec": -56.75, "w1": 12.0, "epoch": 2015.4}]
+    assert search.track_flags(src, mover) == {"on": "track"}
+    assert search.track_flags(src, Target(ra=331.0435, dec=-56.7827)) == {}  # a fixed target: ccf handles it
+    pts = [{"survey_id": "neowise", "band": "W1", "method": "aperture", "mag": 9.4 + 0.01 * i, "flagged": False}
+           for i in range(8)]
+    assert search.blend_flag(pts, 13.7) == "blend" and search.blend_flag(pts, 9.5) is None
+    assert search.blend_flag(pts[:3], 13.7) is None  # too few points to judge
+
+
+def test_cadence_pattern_is_not_variability():
+    """Scatter that alternates with the scan direction (best period 365.25/k d at high power) is not counted."""
+    t = 56700.0 + 182.6 * np.arange(22) + np.random.default_rng(3).normal(0, 2, 22)
+    y = 12.0 + 0.15 * (-1) ** np.arange(22)
+    pts = [{"mjd": float(tt), "band": b, "group": b, "mag": float(yy + (0.02 if b == "W2" else 0.0)), "mag_err": 0.02,
+            "survey": "NEOWISE"} for tt, yy in zip(t, y) for b in ("W1", "W2")]
+    a = model.analyze(pts, period_bands=("W1", "W2"))
+    assert a["period"]["cadence_alias"] is not None and not a["period"]["significant"]
+    assert not a["classification"]["variable"]
+    assert any("scan-direction" in r for r in a["classification"]["reasons"])

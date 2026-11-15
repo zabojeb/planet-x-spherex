@@ -355,31 +355,118 @@ frames themselves. SPHEREx is then put on the same band scales, and the 1997–2
      365.25/k d. A best period within half the NEOWISE frequency resolution of 365.25/k d (k = 1–7) is reported
      with `cadence_alias: k` and is not significant.
    - **Verdict.** "Variable" needs, in one band of W1/W2, a constant-model χ²/dof ≥ 5 and a 5–95% range
-     ≥ max(0.1 mag, 5 median errors); pure noise gives a range of about 3.3 errors. "Periodic" also needs a
-     significant period, and a period ≥ 100 d makes it a long-period variable.
+     ≥ max(0.1 mag, 5 median errors); pure noise gives a range of about 3.3 errors. The other band, when it has
+     ≥ 8 points, must not be flat (χ²/dof ≥ 2), and the variability must not be the scan pattern (a cadence
+     alias as best period at power ≥ 0.5). "Periodic" also needs a significant period, and a period ≥ 100 d
+     makes it a long-period variable.
 7. **Field search** (`/long-period-search`). Up to 150 CatWISE sources with W1 ≤ 15 within `radius_arcsec`
    − 10″ (140″ by default) of the field centre are measured on the same NEOWISE/AllWISE frames, normalised per
    NEOWISE visit by the ensemble of unsaturated sources with S/N > 20. SPHEREx adds relative aperture points on
    the epoch co-adds. Each source goes through the same model, and sources are ranked by log χ²/dof + 2 × range
-   (+ 1 + power when periodic). Sources whose AllWISE W1/W2 contamination flag (`ccf`: halo, diffraction
-   spike, ghost, latent) is set are measured but listed after the clean ones and left out of the summary: in the
-   validation they carry almost all spurious variability.
+   (+ 1 + power when periodic). Contaminated sources are measured but listed after the clean ones and left out
+   of the summary: an AllWISE W1/W2 contamination flag (`ccf`: halo, diffraction spike, ghost, latent); within
+   20″ (60″ for a saturated target) of a moving sequence target's 1997–2027 track, since CatWISE splits fast
+   movers into several entries; or a median NEOWISE W1 more than 0.5 mag off the catalogue (the aperture also
+   measures a neighbour). In the validation they carry almost all spurious variability.
 
 ### Validation (2026-11-15)
 
-VALIDATION_PLACEHOLDER
+`analysis/validation/long_baseline_validation.py`, run on the dev server with 16 CPU workers and
+`field_radius` 360″. Six targets have light curves; five fields were searched.
+
+**Periods and classifications**
+
+| Target | Expected | Result |
+|---|---|---|
+| R Dra (Mira) | VSX P = 246.1 d | P = 247.0 ± 0.5 d, power 0.76, FAP 2·10⁻³¹; W1/W2 peak-to-peak 0.58/0.54 mag; long-period variable |
+| V1968 Cyg (carbon Mira) | VSX 395.5 d (ZTF r); Gaia DR3 long-period 645 ± 66 d | P = 670.5 ± 2.5 d, power 0.92, FAP 5·10⁻²⁹ (669.4 d from WISE alone); W1/W2 1.47/1.34 mag; W1 trend −0.049 mag/yr (6σ) |
+| RW Aur (CTTS, optical dimmings 2014–2018) | infrared brightening during the dimmings | variable, aperiodic (best 3300 d, FAP 0.12); W2 4.75 → 3.55 and W1 6.06 → 5.23 between 2014.2 and 2017.7, back by 2019–2021 |
+| Barnard's Star (10.4″/yr) | constant | constant; W1/W2 robust σ 0.036/0.021 mag, χ²/dof 0.4/0.2 |
+| eps Indi B (4.7″/yr) | constant | constant; W1/W2 robust σ 0.011/0.021 mag |
+| WISE 0855−0714 (8.1″/yr) | constant | constant; best period 73.1 d flagged as cadence alias k = 5; W2 trend +0.024 mag/yr (5.4σ), not checked against the literature |
+
+The V1968 Cyg infrared period disagrees with VSX but agrees with Gaia DR3. No event is flagged for RW Aur:
+its change is a broad brightening, not a run of faint points.
+
+**Zero points.** Each entry below is the median over the field's calibration stars, with the robust scatter
+between stars. The fields are RW Aur, V1968 Cyg, Barnard's Star, eps Indi B and WISE 0855 (10–16 stars each).
+R Dra has no calibration stars even at 360″: CatWISE lists 24 sources there, nearly all with W1 > 15.
+
+Frames → catalogue (applied in each field):
+
+| Survey and band | Offsets over fields | Scatter between stars |
+|---|---|---|
+| NEOWISE W1 / W2 | +0.002 … +0.013 / +0.004 … +0.016 mag | 0.011–0.022 / 0.006–0.017 mag |
+| AllWISE W1 / W2 | −0.021 … +0.011 / −0.007 … +0.010 mag | 0.014–0.033 / 0.009–0.042 mag |
+| 2MASS J / H / Ks (3 fields) | −0.001 … +0.034 mag | 0.007–0.073 mag |
+
+SPHEREx synthetic → archive:
+
+| Band | RW Aur | V1968 Cyg | Barnard's Star | eps Indi B | WISE 0855 | Median |
+|---|---|---|---|---|---|---|
+| W1 | −0.026 (0.012) | −0.033 (0.016) | −0.018 (0.008) | −0.003 (0.023) | −0.018 (0.011) | −0.018 |
+| W2 | +0.013 (0.019) | +0.008 (0.041) | −0.002 (0.021) | +0.013 (0.015) | +0.010 (0.028) | +0.010 |
+| J | −0.030 (0.060) | −0.029 (0.020) | — | +0.002 (0.045) | +0.001 (0.013) | −0.014 |
+| H | −0.003 (0.024) | +0.002 (0.030) | — | +0.013 (0.033) | +0.031 (0.032) | +0.008 |
+| Ks | −0.028 (0.014) | −0.011 (0.015) | — | +0.003 (0.051) | +0.009 (0.031) | −0.004 |
+
+Each SPHEREx offset is measured with 5–15 constant stars. The medians are the defaults
+(`calibrate.DEFAULT_SPHEREX_OFFSETS`) for fields with fewer than 3 stars. The offsets scatter by 0.01–0.02 mag
+between fields, so a field on the defaults is on the archival scale to about that.
+
+**Error calibration.** The median NEOWISE χ²/dof of clean field sources is about 1.0–1.1 at W1 13–15 and 1.3
+for faint W2. For bright stars it is about 0.15: the 1.5% floor dominates, and the true visit-to-visit
+repeatability is about 0.007 mag.
+
+**Ring scale.** R Dra's NEOWISE ring mean is W1 2.40, against Ks 2.44 from 2MASS, which is plausible for a Mira.
+Its single AllWISE point (3.03) lies within the 0.58 mag pulsation. For V1968 Cyg, the NEOWISE W2 ring lies at
+49.5–60.5″ and holds 0.27% of the PSF. It gives W2 = −0.71, against 1.48 from AllWISE and W1 2.73: the scale is
+off by about 2 mag. Such rings (< 0.5% of the PSF) are now marked `scale_uncertain`. The period is unaffected,
+since ring groups have free zero points.
+
+**False positives.** Five fields were searched at 360″: R Dra, RW Aur, eps Indi B, Barnard's Star and WISE 0855.
+- **Contamination.** 182 of 421 measured sources carry a contamination flag. That is 93 of 150 around Barnard's
+  Star, which saturates the field, and the one source in the R Dra field.
+- **False positives.** A clean source flagged variable or periodic that VSX does not list counts as a false
+  positive. There is 1 among 227 clean non-VSX sources: 0.44%, with a 95% upper bound of 1.3%. It is CatWISE
+  J175745.63+044653.9 (W1 13.8, Gaia G 17.6, BP−RP 2.5, an M dwarf at about 700 pc). We found P = 174 d and
+  W1/W2 amplitudes of 0.41/0.69 mag, which is implausible for such a star. It lies 70–110″ from Barnard's Star
+  (W1 ≈ 4) during the NEOWISE years.
+- **Recall.** Only one of the 12 VSX entries in the searched fields was flagged: RW Aur itself. The other
+  entries were not checked one by one; many are optical variables, faint in W1, or contaminated.
+- **Earlier version.** A version that still applied AllWISE motions and had neither these flags nor the
+  cadence-alias rule flagged 15 of 270 sources falsely (5.6%).
+
+**Runtimes** on the dev server, which was shared with other jobs (load 30):
+
+| Target | Frames already cached | First run |
+|---|---|---|
+| R Dra | 11 s | 55 s and 494 MB of windows at 150″ |
+| eps Indi B | 36 s | — |
+| WISE 0855−0714 | 38 s | — |
+| RW Aur | 49 s | — |
+| Barnard's Star | 50 s | — |
+| V1968 Cyg | 68 s | 149 s and 777 MB at 360″ |
+
+The field searches at 360″ took 124–367 s for 56–150 sources: eps Indi B 124 s, WISE 0855 216 s, RW Aur 328 s
+and Barnard's Star 367 s.
+
+IRSA's image search was down (502) during the validation, so the V1968 Cyg frame list was built by hand: NEOWISE
+frames from the single-exposure source table on S3, and the AllWISE tile from the S3 listing. The pixels were
+read as usual.
 
 ### Limitations
 
 - **Ring scale.** The absolute scale of ring points (heavily saturated stars) rests on the enclosed-energy curve
   at 5–20 px, which is uncertain at the 0.1–0.5 mag level. The analysis fits ring groups' zero points, so periods,
   amplitudes and shapes do not depend on it. Era-to-era comparisons of an all-ring star do: one ring per survey
-  means a different radius in each survey.
+  means a different radius in each survey. Rings far out in the wings (< 0.5% of the PSF, `scale_uncertain`)
+  can be off by a magnitude or more (V1968 Cyg W2).
 - **Blends.** WISE's 6″ PSF blends close pairs (RW Aur A+B at 1.4″). The aperture photometry is not deblended,
   and neighbours within the 8.25″ aperture add their flux.
 - **Calibration stars.** Fields at high latitude or around very bright stars have few isolated catalogue stars
-  within 140″. R Dra has none, so its SPHEREx points use the default offsets and its NEOWISE points the
-  enclosed-energy correction.
+  within `field_radius` − 10″. R Dra has none even at 360″ (CatWISE is nearly empty around it). Its SPHEREx
+  points then use the default offsets (±0.02 mag) and its frames the enclosed-energy correction.
 - **Sampling.** NEOWISE visits every ~6 months alias periods near 1 yr and 6 months. SPHEREx bins and AllWISE /
   2MASS points break the aliases only when the period is significant on its own. A real period within the
   resolution of 365.25/k d is reported as a cadence alias, not as significant. Periods < 50 d are not searched.

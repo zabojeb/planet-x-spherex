@@ -34,6 +34,7 @@ VARIABLE_AMPLITUDE = 0.1  # mag, robust 5-95 % range
 VARIABLE_RANGE_NOISE = 5.0  # the range must also exceed this many median errors (pure noise gives ~3.3)
 CONFIRM_CHI2 = 2.0  # a variable in one of W1/W2 needs at least this chi2/dof in the other (when it has the points)
 CONFIRM_MIN_POINTS = 8
+CADENCE_POWER = 0.5  # variability whose best period is a cadence alias at this power follows the scan pattern
 WISE_CADENCE_DAYS = 365.25  # WISE sees a field every ~6 months with the scan direction alternating, so a
 CADENCE_HARMONICS = 7  # systematic of the visit geometry looks periodic at 365.25/k d (k = 1..7 for P >= 50 d)
 EVENT_SIGMA = 3.0
@@ -395,8 +396,9 @@ def classify(res: dict) -> dict:
 
     Variable: in one of W1/W2 (all bands when neither is present), chi2/dof of the constant model >= 5 and a
     5-95 % range >= max(0.1 mag, 5 median errors), and the other of W1/W2, when it has >= 8 points, not flat
-    (chi2/dof >= 2): stellar variability shows in both bands, single-band excursions are mostly artefacts.
-    Periodic: a significant period on top (FAP < 1e-3, power >= 0.3, not a NEOWISE cadence alias)."""
+    (chi2/dof >= 2): stellar variability shows in both bands, single-band excursions are mostly artefacts; and
+    not explained by a NEOWISE cadence alias (best period 365.25/k d at power >= 0.5). Periodic: a significant
+    period on top (FAP < 1e-3, power >= 0.3, not a NEOWISE cadence alias)."""
     reasons = []
     per = res.get("band_stats", {})
     main = [b for b in ("W1", "W2") if b in per] or list(per)
@@ -416,8 +418,12 @@ def classify(res: dict) -> dict:
             reasons.append(f"{var_bands[0]} alone: {other} is flat (chi2/dof {per[other]['chi2_red_constant']:.1f} "
                            f"< {CONFIRM_CHI2} over {per[other]['n']} points), not counted")
             var_bands = []
-    variable = bool(var_bands)
     p = res.get("period") or {}
+    if var_bands and p.get("cadence_alias") and p.get("power", 0.0) >= CADENCE_POWER:
+        reasons.append(f"the variability follows the NEOWISE scan-direction pattern (best period 365.25/"
+                       f"{p['cadence_alias']} d, power {p['power']:.2f}), not counted")
+        var_bands = []
+    variable = bool(var_bands)
     periodic = bool(p.get("significant")) and variable
     label = "constant"
     if variable:

@@ -36,8 +36,10 @@ CONSTANT_SCATTER = 0.05  # mag
 G_RANGE = (10.5, 15.5)  # Gaia-only fallback: roughly W1 8-15 for FGKM stars
 CATWISE_MJD = 57170.0
 # SPHEREx synthetic -> NEOWISE / 2MASS PSC (mag, added to synthetic magnitudes) when a field has too few
-# calibration stars: medians over the validation fields (analysis/validation/long_baseline_calibration.py).
-DEFAULT_SPHEREX_OFFSETS = {"J": 0.0, "H": 0.0, "Ks": 0.0, "W1": 0.0, "W2": 0.0}
+# calibration stars: medians of the per-field offsets over the validation fields with calibration stars (RW Aur,
+# V1968 Cyg, Barnard's Star, eps Indi B, WISE 0855-0714; 4 of them for J / H / Ks), field-to-field scatter
+# 0.01-0.02 mag (analysis/validation/long_baseline_validation.py, docs/methods.md "Validation").
+DEFAULT_SPHEREX_OFFSETS = {"J": -0.014, "H": 0.008, "Ks": -0.004, "W1": -0.018, "W2": 0.010}
 
 
 def _sep_arcsec(ra1, dec1, ra2, dec2) -> float:
