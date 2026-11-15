@@ -1,4 +1,4 @@
-# ADR-0057: Subtract the static sky from co-moving sequences with SPHEREx's own other visits, and analyse comets, asteroids and unknown movers as jobs
+# ADR-0060: Subtract the static sky from co-moving sequences with SPHEREx's own other visits, and analyse comets, asteroids and unknown movers as jobs
 
 - Status: Accepted (extends 0045, 0048, 0049, 0052)
 - Date: 2026-11-15

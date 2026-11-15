@@ -81,4 +81,7 @@ def test_bucket_store_roundtrip(tmp_path, monkeypatch):
         assert s.ensure_local("seq1")  # downloaded
         assert results.read_meta(cache.layout().sequence("seq1"))["id"] == meta["id"]
         assert not s.ensure_local("missing")
+        s.remove("seq1")  # e.g. a preview once the full result is out
+        cache.set_root(tmp_path / "other")
+        assert not s.ensure_local("seq1", fresh=True)
         cache.set_root(None)

@@ -1,4 +1,4 @@
-"""Unidentified movers: tracklets from the field analysis that no known object explains (ADR-0057).
+"""Unidentified movers: tracklets from the field analysis that no known object explains (ADR-0060).
 
 The Moving Object Detection of the field analysis (field.transients: difference images, real/bogus, simultaneous
 detector-pair check, linking) and the identification against JPL (field.known, SPHEREx-centric positions) are run,

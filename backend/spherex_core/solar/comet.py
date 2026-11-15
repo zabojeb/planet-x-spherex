@@ -1,4 +1,4 @@
-"""Comet analysis of a co-moving sequence (ADR-0057).
+"""Comet analysis of a co-moving sequence (ADR-0060).
 
 Works on the static-sky subtracted exposures when the sequence has them (static_sky build), otherwise on the plain
 aligned exposures with a local background (stars then bias the apertures; the result says which was used).

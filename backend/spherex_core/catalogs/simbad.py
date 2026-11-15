@@ -7,11 +7,12 @@ overlay keeps working when one of them is down (CDS itself was unreachable on 20
 
 from __future__ import annotations
 
+from .. import endpoints, upstreams
 from ..archive.tap import tap_csv
 from ..config import settings
 from .common import MAX_ROWS, num
 
-LABEL = "SIMBAD (CDS)"
+LABEL = "SIMBAD"
 
 
 def _mag(x: dict) -> tuple[float | None, str]:
@@ -29,15 +30,8 @@ def query(ra: float, dec: float, r: float) -> list[dict]:
         FROM basic AS b LEFT JOIN allfluxes AS f ON f.oidref = b.oid LEFT JOIN otypedef AS d ON d.otype = b.otype
         WHERE 1 = CONTAINS(POINT('ICRS', b.ra, b.dec), CIRCLE('ICRS', {ra:.7f}, {dec:.7f}, {r:.6f}))
         ORDER BY refs DESC"""
-    errors = []
-    for url in settings.simbad_tap_urls:
-        try:
-            rows = tap_csv(adql, url=url, timeout=60, retries=1)
-            break
-        except RuntimeError as e:
-            errors.append(str(e).splitlines()[0][:120])
-    else:
-        raise RuntimeError("; ".join(errors) or "no SIMBAD service configured")
+    by_host = {endpoints.host(u): u for u in settings.simbad_tap_urls}
+    rows, _ = upstreams.call("simbad", lambda ep: tap_csv(adql, url=by_host[ep.service], timeout=60, retries=1))
     out = []
     for x in rows:
         if num(x["ra"]) is None or num(x["dec"]) is None:

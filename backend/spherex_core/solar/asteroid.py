@@ -1,4 +1,4 @@
-"""Asteroid analysis of a co-moving sequence (ADR-0057): rotational light curve, period, colours and a rough
+"""Asteroid analysis of a co-moving sequence (ADR-0060): rotational light curve, period, colours and a rough
 taxonomy.
 
 Fluxes: the ePSF photometry of the build (flagged, saturated and ring/relative measurements dropped). When the

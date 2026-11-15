@@ -1,4 +1,4 @@
-"""Solar-system science (ADR-0057), offline: static sky, comet, asteroid and unknown-mover helpers, a synthetic
+"""Solar-system science (ADR-0060), offline: static sky, comet, asteroid and unknown-mover helpers, a synthetic
 co-moving sequence through the comet analysis and the HTTP routes."""
 
 import math

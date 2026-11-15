@@ -1,4 +1,4 @@
-"""Solar-system science on co-moving sequences (ADR-0057): "different background, same comet".
+"""Solar-system science on co-moving sequences (ADR-0060): "different background, same comet".
 
     static_sky   template of the static sky behind the object, clean exposures and stacks (a build step)
     skyframes    images that cover a fixed sky point (TAP, or the MOST fixed-point search)

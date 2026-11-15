@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import cache
-from ..analysis.common import load_context
+from ..analysis.common import full_context, load_context
 from ..pipeline.results import clean_json
 from .analyze import FIELD_VERSION, FieldOptions, analyze_field
 from .common import FieldCancelled
@@ -34,7 +34,8 @@ MAX_POINT_CONCURRENT = 6
 
 
 KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis",
-         "c": "comet analysis", "a": "asteroid analysis", "u": "unknown movers"}  # c/a/u: spherex_core.solar
+         "c": "comet analysis", "a": "asteroid analysis", "u": "unknown movers",  # c/a/u: spherex_core.solar
+         "l": "long-baseline light curve", "w": "long-period search"}
 
 
 def options_key(opts: FieldOptions) -> str:
@@ -113,7 +114,7 @@ class FieldJobs:
 
     async def submit_work(self, seq_id: str, jid: str, work, client: str | None = None, force: bool = False) -> dict:
         """Start (or join) `work(ctx, progress, check) -> dict` for a finished sequence under job id `jid`."""
-        load_context(seq_id)  # NotFound for unknown or unfinished sequences
+        full_context(seq_id)  # NotFound for unknown or unfinished sequences, and for previews
         if not force and result_path(jid).exists():
             return {"id": jid, "status": "done", "stage": "done", "done": 0, "total": 0, "error": None,
                     "elapsed": 0.0}

@@ -1,4 +1,4 @@
-"""Solar-system science on co-moving sequences (ADR-0057): "different background, same comet".
+"""Solar-system science on co-moving sequences (ADR-0060): "different background, same comet".
 
     POST /api/sequences/{id}/static-sky              build the static-sky subtracted version (build queue);
                                                      answers {sequence: <clean id>, status, job}

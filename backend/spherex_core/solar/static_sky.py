@@ -1,4 +1,4 @@
-"""Static-sky subtraction for co-moving sequences: "different background, same comet" (ADR-0057).
+"""Static-sky subtraction for co-moving sequences: "different background, same comet" (ADR-0060).
 
 In a co-moving sequence every exposure i sits on its own grid G_i centred on the object at time t_i, so the stars
 trail and the object stays put. For each exposure this module builds a template of the same sky without the

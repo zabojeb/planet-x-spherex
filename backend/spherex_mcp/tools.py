@@ -472,6 +472,8 @@ async def job_result(job_id: str, limit: int = LIST_LIMIT) -> dict:
         raise ToolError(f"Not an analysis job id: {e}") from e
     if st == "done":
         res = json.loads(services.field_result_path(job_id).read_text())
+        if res.get("kind") in _LB_SUMMARIES:
+            return {"job_id": job_id, "status": "done", **_LB_SUMMARIES[res["kind"]](res, int(limit), job_id)}
         summarise = _SUMMARISERS.get(res.get("kind"), _summarise_field)
         return {"job_id": job_id, "status": "done", **summarise(res, int(limit))}
     if st == "unknown":
@@ -514,6 +516,74 @@ async def archival_epochs(sequence_id: str) -> dict:
                    max_list=60)
 
 
+# ---------------------------------------------------------------- long-baseline light curves (ADR-0059)
+def _lb_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
+    """A long-baseline light curve without its point list: coverage, calibration, period, trends, events."""
+    a = res.get("analysis") or {}
+    per = a.get("period") or {}
+    cal = res.get("calibration") or {}
+    bands = (res.get("coverage") or {}).get("bands") or {}
+    return compact({
+        "target": {k: (res.get("target") or {}).get(k) for k in ("name", "ra", "dec", "pmra", "pmdec")},
+        "verdict": a.get("classification"),
+        "coverage": {"first_year": (res.get("coverage") or {}).get("first_year"),
+                     "last_year": (res.get("coverage") or {}).get("last_year"),
+                     "bands": {b: {"n": v.get("n"), "surveys": v.get("surveys")} for b, v in bands.items()}},
+        "period": {k: per.get(k) for k in ("period_days", "period_err_days", "power", "false_alarm_probability",
+                                           "significant", "amplitudes_mag", "bands", "baseline_days")} if per else None,
+        "other_peaks_days": [p_.get("period_days") for p_ in (per.get("peaks") or [])[1:4]],
+        "trends": a.get("trends"), "events": (a.get("events") or [])[:limit],
+        "era_means": {b: [{k: e.get(k) for k in ("survey", "mean_mag", "err_mag", "n")} for e in v]
+                      for b, v in (a.get("era_means") or {}).items() if b in ("W1", "W2", "J", "H", "Ks")},
+        "methods": {k: v.get("method") for k, v in (res.get("methods") or {}).items()},
+        "calibration": {
+            "frames_vs_catalogue": {k: {kk: v.get(kk) for kk in ("offset_mag", "scatter_mag", "n", "applied")}
+                                    for k, v in (cal.get("frames") or {}).items()},
+            "spherex_vs_archive": {k: {kk: v.get(kk) for kk in ("used_offset_mag", "scatter_mag", "n", "source")}
+                                   for k, v in (cal.get("spherex") or {}).items()}},
+        "csv": f"/api/long-baseline/{job_id}/lightcurve.csv", "notes": res.get("notes", [])[:4]},
+        max_list=max(limit, 8))
+
+
+def _lp_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
+    keep = ("id", "ra", "dec", "w1", "w2", "label", "score", "contamination", "period_days", "period_fap",
+            "cadence_alias", "range_mag", "chi2_red", "trends", "events", "baseline_years")
+    return compact({"summary": res.get("summary"),
+                    "candidates": [{k: c.get(k) for k in keep} for c in (res.get("candidates") or [])[:limit]],
+                    "ensemble": res.get("ensemble"), "notes": res.get("notes")}, max_list=max(limit, 6))
+
+
+_LB_SUMMARIES = {"long-baseline light curve": _lb_summary, "long-period search": _lp_summary}
+
+
+async def _lb_job(job: dict, limit: int, hint: str) -> dict:
+    if job.get("status") == "done":
+        res = json.loads(services.field_result_path(job["id"]).read_text())
+        return {"job_id": job["id"], "status": "done", **_LB_SUMMARIES[res["kind"]](res, limit, job["id"])}
+    if job.get("status") in ("queued", "running"):
+        _keepalive("field", job["id"])
+    return {"job_id": job["id"], **{k: job.get(k) for k in ("status", "stage", "done", "total", "error")}, "hint": hint}
+
+
+async def long_baseline_lightcurve(sequence_id: str, ra: float | None = None, dec: float | None = None,
+                                   pmra: float | None = None, pmdec: float | None = None,
+                                   ref_epoch: float = 2000.0) -> dict:
+    """1999-2026 light curve of the target (or a position): 2MASS, AllWISE, NEOWISE frames + SPHEREx synthetic bands."""
+    _meta(sequence_id)
+    if (ra is None) != (dec is None):
+        raise ToolError("Give both ra and dec, or neither for the sequence target.")
+    job = await services.long_baseline_submit(sequence_id, ra, dec, pmra, pmdec, ref_epoch, client=CLIENT)
+    return await _lb_job(job, LIST_LIMIT, "Call again with the same arguments (or job_result) every 15-30 s; "
+                                          "a first run reads ~0.5 GB of WISE frames and takes 1-3 minutes.")
+
+
+async def long_period_search(sequence_id: str, limit: int = LIST_LIMIT) -> dict:
+    """Rank the field's sources by long-baseline (NEOWISE + SPHEREx) variability."""
+    _meta(sequence_id)
+    job = await services.long_period_search_submit(sequence_id, client=CLIENT)
+    return await _lb_job(job, int(limit), "Call again (or job_result) every 30 s; a field takes 1-5 minutes.")
+
+
 # ---------------------------------------------------------------- catalogs and exports
 def catalog_cone(catalog: str, ra: float, dec: float, radius_arcmin: float = 2.0, limit: int = 25) -> dict:
     try:
@@ -543,7 +613,7 @@ def export_report(sequence_id: str, fmt: str, job_id: str | None = None) -> dict
     raise ToolError("fmt must be ades, csv, votable or fits")
 
 
-# ---------------------------------------------------------------- solar-system objects (ADR-0057)
+# ---------------------------------------------------------------- solar-system objects (ADR-0060)
 async def build_object_sequence(name: str, fov_arcmin: float = 8.0, static_sky: bool = True,
                                 date_min: str | None = None, date_max: str | None = None) -> dict:
     """A co-moving sequence of a known asteroid or comet (each exposure centred on the object), optionally with

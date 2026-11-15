@@ -35,6 +35,8 @@ src/
   display.ts        what the viewer shows for a mode (pure): limits over all epochs, reference epoch,
                     playable epochs (partial visits skipped unless asked)
   astro.ts          TAN projection onto the grid, proper-motion propagation, coordinate/date formatting
+  skymap.ts         the sky map around the field: Aladin Lite (lazy chunk) on the SPHEREx all-sky HiPS; camera,
+                    zoom around a point, great-circle fly-to; the only module that touches aladin-lite
   search.ts         search without React: name normalisation (same rules as the backend), ranking with
                     typo tolerance, object-type facets, coordinate parsing, nearby objects, Random draws,
                     recent picks in localStorage
@@ -46,7 +48,8 @@ src/
   components/
     SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click to select a source
                        or drop a pin, fly-to, hairline overlays, RA/Dec grid with captions, SIMBAD name labels, hover
-                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader
+                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader;
+                       the dimmed sky map around the field, zooming out onto it and flying to the whole sky and back
     PickCard.tsx       card for the selection (target, catalogue source or pin): ICRS/degrees/Galactic/ecliptic with
                        copy buttons, motion, distance, offset from the target, counterparts in the other catalogues,
                        measure / centre / follow, links to SIMBAD, Aladin Lite and WiseView
@@ -98,6 +101,10 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   browser is idle or when the search box gets focus. Suggestions are ranked locally on every keystroke
   (1–3 ms); nothing is requested until a suggestion is chosen. `GET /api/resolve` is asked only after a
   350 ms pause, when local suggestions are weak or the query has digits, and answers are memoised per tab.
+- The sky map ([ADR-0057](../docs/adr/0057-sky-map-aladin-lite.md)): Aladin Lite (~840 kB gzipped, its WASM inlined)
+  is its own chunk, fetched once the viewer has mounted. Its tiles come straight from IRSA's SPHEREx all-sky HiPS and
+  stay in the browser's HTTP cache and Aladin's tile cache. Zooming out onto the map and back in downloads nothing for
+  the field: its planes stay in the LRU above.
 - Catalogs (Gaia, CatWISE, 2MASS, SIMBAD) load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
   the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
 - Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
@@ -125,11 +132,12 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
 
 ## Point analysis and field tools
 
-- **Analyze** (pick card of any pinned point, catalogue source or the target) opens the analysis window over the
-  sky. The source under the click and its centre are found in the browser's images first (`locate.ts`); then
+- **Analyze** (pick card of any pinned point, catalogue source or the target) opens the analysis card at the right
+  edge of the sky (460 px wide, at most 720 px tall, a sheet from the bottom on phones), so the field stays in
+  view. The source under the click and its centre are found in the browser's images first (`locate.ts`); then
   `POST /api/sequences/{id}/analyze`, polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with
   DELETE), ticks off each step from the job's `steps` map while they run side by side. The window leads with what
-  the source is (class, type, SIMBAD name, a stamp with the located centre), then tabs: Checks (SPHEREx against
+  the source is (class, type, SIMBAD name, a stamp with the located centre), then tabs pinned under the header as the card scrolls: Checks (SPHEREx against
   Gaia, CatWISE, 2MASS and SIMBAD, findings), Spectrum, Variability, Motion, Catalogues. Steps cut off at the 60 s
   deadline and unreachable services (`timings`) are listed with **Run again** (`force: true`; its polls bypass
   the browser's immutable copy of the old result). Catalogues that timed out are asked again from the browser.
@@ -142,6 +150,26 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   and 1-hour motion arrows; Track & Stack (`trackstack.bin`, rate/PA sliders, `trackstack/search` results); ADES
   (`/api/field/{id}/ades.psv`) and CSV exports.
 - **Display → Tools**: invert (`inv=1`), magnifier (11×11 px), ruler (two clicks: distance and PA).
+
+## Instant probe and Explore / Research
+
+- **Instant probe** (`probe.ts`, framework-free; `chart/ProbeCharts.tsx`): clicking any position, catalogue
+  source or the target puts a quick estimate in the pick card at once, with no server round-trip. It sums a
+  3 px aperture on the background-subtracted co-add minus an 5–8 px annulus median, times the pixel solid
+  angle (MJy/sr → mJy), with the annulus scatter plus a 3 % floor as the error; no PSF correction, so it is
+  labelled "quick estimate" (Analyze does PSF photometry on the native exposures). It shows the shown
+  epoch/detector, a coarse spectrum over D1–D6 of that epoch and a light curve over the epochs of that
+  detector (the best-S/N one when All is shown); the target and moving sources are followed epoch by epoch.
+  Only the planes it needs are fetched, lazily, through the same plane cache (`probeNeeds`).
+- **Explore / Research** (rail button, `ui=` in the URL, remembered in localStorage):
+  - Explore (default for first visits): magnitudes instead of mJy, plain-language hints from the numbers
+    (motion since 2000 from the catalogue proper motion; a 4 µm peak with methane/CO troughs → cold brown dwarf;
+    rising to 5 µm → warm dust; brightness change between visits; saturation with a pointer to Analyze), a
+    compact coordinate line, a guided tour of the five targets (rail → Tour) with a "find it yourself" game
+    (target, track and catalogue markers hidden; any click is the guess; Reveal says how far off it was), and
+    fewer controls (no field analysis, measuring tools, playback options, flags layer or downloads).
+  - Research: mJy ± error, S/N, AB magnitude, wavelengths, pixel position, exposures at the pixel, flags,
+    a per-visit table, full coordinates, Measure / Verify / Follow, field analysis, every control and the exports.
 
 ## Design
 
@@ -212,6 +240,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ylog=0` | linear flux axis in the spectrum |
 | `v3d` | `off` for the flat sky (the default), or the 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
 | `h3d` | vertical exaggeration of the 3D view (default 1) |
+| `ui` | `explore` (default for first visits) or `research`; without it the browser's last choice is used |
 | `embed=1` | viewer and its controls only, for iframes |
 
 Example: `/?target=barnard&mode=diff&band=D2&epoch=4` shows Barnard's Star in D2 minus the first visit:
@@ -249,6 +278,12 @@ cannot lock.
   `c`), type or paste a new position (sexagesimal, degrees, a J-name or Galactic `gal l b`) and press Enter; the field of
   view is kept. Go to (rail, top button) adds optional proper motion, an all-sky map to click on and recent places. The pad above the
   compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
+- **Zoom out to the sky.** Around the field lies the SPHEREx all-sky map, dimmed. Zoom out (wheel or pinch) and the
+  dimming fades. Once the field is about a fifth of its fitted size, the map takes over. Drag and pinch then move
+  the whole sky, and the field rides on it with an amber outline and its name, or a ring once it is a few pixels
+  wide. The globe button next to the centre button flies out to the whole sky. The centre button flies back, and so
+  does clicking the field; zooming in on it also hands the view back. A field in the target's co-moving frame has no
+  map.
 - **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
   motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,
   build a field centred on it, or one that follows its proper motion. SIMBAD, Aladin Lite and WiseView open at the

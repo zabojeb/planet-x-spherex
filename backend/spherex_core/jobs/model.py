@@ -68,6 +68,10 @@ class TooManyJobs(QueueFull):
         super().__init__(message, retry_after)
 
 
+# progress(PREVIEW_STAGE + id, done, total) tells the job that a preview result with that id is ready.
+PREVIEW_STAGE = "preview:"
+
+
 class JobCancelled(Exception):
     """Raised inside a build when nobody needs its result any more."""
 
@@ -91,8 +95,12 @@ class Job:
     clients: set[str] = field(default_factory=set)
     last_seen: float = field(default_factory=time.monotonic)
     cancel_reason: str | None = None
+    preview: str | None = None  # id of the latest preview result while the build runs (pipeline.sequence)
 
     def update(self, stage: str, done: int, total: int) -> None:
+        if stage.startswith(PREVIEW_STAGE):  # announces a preview; the stage itself does not change
+            self.preview = stage[len(PREVIEW_STAGE):]
+            return
         self.stage, self.done, self.total = stage, done, total
 
     def touch(self, client: str | None) -> None:
@@ -102,5 +110,5 @@ class Job:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "status": self.status, "stage": self.stage, "done": self.done, "total": self.total,
-                "error": self.error, "position": None,
+                "error": self.error, "position": None, "preview": self.preview,
                 "elapsed": (self.finished or time.time()) - self.started}

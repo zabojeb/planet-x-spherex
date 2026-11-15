@@ -103,3 +103,45 @@ def test_masked_weight_flags_the_fit():
     flags[15, 13:16] = TRANSIENT  # cosmic-ray hit across the core: > 20 % of the PSF weight
     r = psf_photometry(img, var, flags, 15.0, 15.0, psf, OVS, OMEGA, MASK_DEFAULT, SATURATION, ARTIFACTS)
     assert r is not None and r["masked_frac"] > 0.2 and r["flagged"]
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (tuple, list)):
+        return len(a) == len(b) and all(_same(u, v) for u, v in zip(a, b))
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return np.array_equal(np.asarray(a), np.asarray(b), equal_nan=True)
+    if isinstance(a, float) and isinstance(b, float):
+        return a == b or (np.isnan(a) and np.isnan(b))
+    return a == b
+
+
+def test_variance_is_read_only_within_variance_radius():
+    """The reader fetches VARIANCE only within VARIANCE_RADIUS rows of the target (ADR-0037): every measurement
+    must come out the same as with the full variance, for a faint and for a saturated star."""
+    from spherex_core.flags import RING_BAD, RING_CORE
+    from spherex_core.photometry import VARIANCE_RADIUS, radial_profile
+
+    psf = gaussian_epsf()
+    rng = np.random.default_rng(7)
+    for flux, saturate in [(80.0, False), (4000.0, True)]:
+        x, y = 44.3, 47.6
+        img, _, flags = star_image(psf, x, y, flux_native=flux, shape=(91, 91), noise=0.01, seed=5)
+        var = rng.uniform(5e-5, 2e-4, img.shape).astype(np.float32)
+        flags[rng.random(img.shape) < 0.03] = OVERFLOW
+        if saturate:
+            flags[45:51, 42:47] = OVERFLOW | TRANSIENT
+        k = int(np.floor(y))
+
+        def windowed(radius):
+            v = np.full_like(var, np.nan)
+            v[k - radius:k + radius + 1] = var[k - radius:k + radius + 1]
+            return v
+
+        def run(v):
+            return (measure(img, v, flags, x, y, 7.5, OMEGA, psf, OVS, MASK_DEFAULT, SATURATION, ARTIFACTS, PHOT_BAD),
+                    radial_profile(img, v, flags, x, y, RING_BAD, RING_CORE, frame_bkg=0.3))
+
+        assert _same(run(var), run(windowed(VARIANCE_RADIUS)))
+        assert not _same(run(var)[1], run(windowed(VARIANCE_RADIUS - 3))[1])  # the test can see a short window

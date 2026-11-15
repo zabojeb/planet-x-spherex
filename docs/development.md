@@ -53,10 +53,27 @@ All settings are environment variables:
 | `SPHEREX_IRSA_BASE` | `https://irsa.ipac.caltech.edu/` | IRSA download base |
 | `SPHEREX_GAIA_TAP_URL` | `https://gea.esac.esa.int/tap-server/tap/sync` | Gaia DR3 |
 | `SPHEREX_SESAME_URL` | `https://cds.unistra.fr/cgi-bin/nph-sesame/-oxp/~SNV` | name resolver |
-| `SPHEREX_MAX_CONNECTIONS` | 96 | HTTP connections to S3 |
-| `SPHEREX_MAX_FRAMES_IN_FLIGHT` | 64 | exposures read concurrently |
-| `SPHEREX_CPU_WORKERS` | 24 | processes for per-exposure work |
+| `SPHEREX_MAX_CONNECTIONS` | 96 | HTTP connections to S3 for remeasuring and archival epochs (a sequence build opens 3 per exposure in flight) |
+| `SPHEREX_MAX_FRAMES_IN_FLIGHT` | 64 | exposures a build reads at once, shared out over the pool workers (at least 2 per batch) |
+| `SPHEREX_CPU_WORKERS` | CPU quota − 1 | processes for reading and per-exposure work (ADR-0036) |
+| `SPHEREX_FETCH_WORKERS` | 1 | read and process exposures in batches on the pool (ADR-0039); `0` reads them in the calling process, on one core |
+| `SPHEREX_CUTOUT_SOURCE` | `irsa` | `irsa`: ask IRSA's cutout service first and read from S3 when it is busy or fails; `s3`: S3 range reads only (ADR-0038) |
+| `SPHEREX_IRSA_IN_FLIGHT` | 8 | IRSA cutout requests open at once for a whole build; above ~8 the service answers 503 to most |
+| `SPHEREX_IRSA_TIMEOUT` | 15 | seconds before an IRSA cutout request is given up and the exposure read from S3 |
+| `SPHEREX_CUTOUT_CACHE_FOV` | 30 | field of view (arcmin) whose columns the per-file cache keeps, so widening the field reads only new rows (ADR-0037) |
 | `SPHEREX_TAP_CACHE_HOURS` | 12 | lifetime of cached archive queries |
+| `SPHEREX_MIRROR` | 1 | answer image searches from the local file-catalogue mirror when it is complete and fresh (ADR-0057) |
+| `SPHEREX_MIRROR_DB` | `<cache>/mirror/spherex.sqlite` | mirror file |
+| `SPHEREX_MIRROR_AUTOSYNC` / `SPHEREX_MIRROR_SYNC_INTERVAL` | 1 / 3600 | refresh the mirror from the bucket in a background thread (one process per machine), every N seconds |
+| `SPHEREX_MIRROR_BOOTSTRAP` | 0 | let that thread build a missing mirror (~13 min, ~53 GB of header reads); otherwise run `scripts/sync_mirror.py` |
+| `SPHEREX_MIRROR_MAX_AGE_HOURS` | 26 | older than this, TAP is asked first and the mirror is the fallback |
+| `SPHEREX_FILE_MIRROR_BASE` | — | optional S3-compatible copy of the Level 2 files, asked before AWS S3 (404 there falls through) |
+| `SPHEREX_IRSA_FILE_BASE` | `https://irsa.ipac.caltech.edu/ibe/data/spherex/` | IRSA ibe, the fallback for S3 range reads |
+| `SPHEREX_HEDGE_READS` | 1 | in interactive builds, start a second source for a range read that runs past ~p90 |
+| `SPHEREX_MAST_GAIA_TAP_URL`, `SPHEREX_VIZIER_TAP_URL`, `SPHEREX_VIZIER_ASU_URL`, `SPHEREX_DATALAB_TAP_URL`, `SPHEREX_IRSA_SIA_URL` | see `config.py` | fallback catalogue and search services |
+| `SPHEREX_SKYBOT_FALLBACK` | 1 | known objects from SkyBoT (geocentric, flagged) when JPL fails |
+| `SPHEREX_POPULAR_PROMOTE_AFTER` | 5 | requests after which a field is prewarmed by `scripts/prewarm_popular.py` |
+| `REDIS_URL` (or `SPHEREX_REDIS_URL`) | — | also publish source statistics and request counts to Redis |
 | `SPHEREX_JOBS_PER_WORKER` (alias `SPHEREX_MAX_JOBS`) | 2 | builds running at once per worker; the rest queue |
 | `SPHEREX_MAX_RUNTIME` (alias `SPHEREX_JOB_TIMEOUT`) | 900 | seconds before a build is stopped with an error |
 | `SPHEREX_INTEREST_TIMEOUT` (alias `SPHEREX_JOB_IDLE`) | 30 | seconds without a poll before an unpinned build is cancelled |

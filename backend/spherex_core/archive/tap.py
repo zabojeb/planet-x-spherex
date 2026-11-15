@@ -23,7 +23,14 @@ def tap_csv(adql: str, url: str | None = None, timeout: float = 300, retries: in
     last: Exception | None = None
     service = urllib.parse.urlsplit(full).netloc
     netpolicy.check(service)  # interactive callers skip a service that failed minutes ago
+    requested = timeout
     timeout, retries = netpolicy.timeouts(timeout, retries)
+    from .. import upstreams
+
+    if upstreams.has_fallback():  # another source can answer: one quick attempt, then let it
+        timeout, retries = min(timeout, upstreams.FALLBACK_TIMEOUT_S), 1
+    elif upstreams.last_resort() and netpolicy.is_fast():  # the faster sources failed: one longer attempt
+        timeout, retries = max(timeout, min(requested, upstreams.LAST_RESORT_TIMEOUT_S)), 1
     for attempt in range(retries):
         t0 = time.perf_counter()
         try:

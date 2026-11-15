@@ -201,7 +201,7 @@ def build_server() -> _Server:
         slow movers. Starts the build on first call (1-2 min); call again until status is "done"."""
         return await t.archival_epochs(sequence_id)
 
-    # ------------------------------------------------------------ comets and asteroids (ADR-0057)
+    # ------------------------------------------------------------ comets and asteroids (ADR-0060)
     @mcp.tool()
     @_err
     async def build_object_sequence(name: str, fov_arcmin: float = 8.0, static_sky: bool = True,
@@ -247,6 +247,25 @@ def build_server() -> _Server:
         rate, PA, motion vs the ecliptic, detector-pair confirmation, real/bogus score and a population hint.
         field_job reuses a finished analyze_field job. Export with export_report(fmt="ades", job_id=...)."""
         return await t.unknown_movers(sequence_id, vmag_lim, field_job)
+
+    @mcp.tool()
+    @_err
+    async def long_baseline_lightcurve(sequence_id: str, ra: float | None = None, dec: float | None = None,
+                                       pmra: float | None = None, pmdec: float | None = None,
+                                       ref_epoch: float = 2000.0) -> dict:
+        """Homogeneous 1999-2026 light curve of the sequence target (or of any ra/dec inside the sequence's field):
+        2MASS, AllWISE and NEOWISE (2014-2024, ~6-month visits) measured on their frames (rings for saturated
+        stars), SPHEREx synthetic W1/W2/J/H/Ks cross-calibrated with field stars, plus SPHEREx narrow bands. Returns
+        the long-baseline period (Miras, other LPVs), amplitudes, trends, dimming events and a verdict. Start/poll:
+        call again with the same arguments until status is "done" (1-3 min the first time)."""
+        return await t.long_baseline_lightcurve(sequence_id, ra, dec, pmra, pmdec, ref_epoch)
+
+    @mcp.tool()
+    @_err
+    async def long_period_search(sequence_id: str, limit: int = 12) -> dict:
+        """Rank every CatWISE source in the field by long-baseline variability (NEOWISE visits 2014-2024 + SPHEREx
+        epochs): chi2, amplitude, period, trend, events. Start/poll like long_baseline_lightcurve (1-5 min)."""
+        return await t.long_period_search(sequence_id, limit)
 
     @mcp.tool()
     @_err

@@ -1,6 +1,6 @@
 # ADR-0012: Caching layers and cache keys
 
-- **Status:** Accepted
+- **Status:** Accepted; the native-cutout layer is superseded by [ADR-0037](0037-per-file-chunk-cache.md) (one chunk per file, not per request)
 - **Date:** 2026-11-14
 
 ## Context
