@@ -281,3 +281,108 @@ motion starts at the measured target's position at the sequence's mean epoch, wi
    SIMBAD (−0.3), Gaia (−0.15) or a known asteroid (−0.1) lower it.
 
 Each step is independent: a failing upstream service leaves `{"error"}` in its slot and the rest still runs.
+
+## Long-baseline light curves (ADR-0059)
+
+`POST /api/sequences/{id}/long-baseline` measures the target, or any position in the field, on the archival
+frames themselves. SPHEREx is then put on the same band scales, and the 1997–2026 light curve is analysed
+(`spherex_core.longbaseline`).
+
+1. **Frames.** Native-pixel windows are read around the target's 2018 position, with a 150″ radius (the
+   request's `field_radius`, 60–360″; wider for fast movers), from every 2MASS Atlas image, the AllWISE Atlas tile and up to 12 NEOWISE L1b frames per visit
+   and band. NEOWISE windows carry the msk-1b mask: saturation bits 10–18 and the bad-pixel bits. Windows are
+   cached, so a repeat reads nothing.
+2. **Photometry per frame**, at the position moved to the frame's MJD:
+   - **Aperture.** The survey's standard aperture (WISE 8.25″, 2MASS 4″) with a 3σ-clipped annulus (WISE
+     50–70″, 2MASS 14–20″), corrected to the catalogue scale with the measured enclosed energy. Bad pixels in
+     the aperture take the mean of the good pixels at the same radius; frames with more than 10% of the PSF
+     weight masked are flagged.
+   - **Saturated cores.** When at least half of a band's frames saturate at the source, every frame is measured
+     in one ring outside the core and scaled by the ring's enclosed-energy fraction. The ring starts 1 px outside
+     the 95th percentile of the core radii and is 4 px wide in NEOWISE and 2MASS, 8 px in AllWISE. A NEOWISE
+     core is a pixel with saturation bits 10–18, or a NaN that no bad-pixel bit explains (L1b sets dead and
+     noisy pixels to NaN too). AllWISE Atlas tiles have no mask and their co-added cores are only partly NaN, so
+     an AllWISE ring starts no closer than the NEOWISE ring of the same band.
+   - **Combining.** Frames are combined per NEOWISE visit (a new visit after a 20 d gap), per 2MASS night and
+     once for AllWISE: a 3σ-clipped weighted mean whose error is at least the scatter error, plus a floor of 1.5%
+     (aperture) or 3% (ring).
+   - **2MASS saturation.** Bands saturated in 2MASS use the PSC magnitude (read-1 photometry) when the PSC has one.
+3. **Enclosed energy.** Measured with `analysis/validation/long_baseline_calibration.py` on the five validation
+   fields (61 2MASS, 31 W1 and 22 W2 stars). Each frame's growth curve of an isolated, unsaturated star is divided
+   by the star's catalogue flux in that frame's DN, minus the expected flux of faint field sources (far-annulus
+   mean − median per pixel). The aperture corrections are:
+
+   | Survey and band | EE at the standard aperture | Correction | Star-to-star scatter |
+   |---|---|---|---|
+   | NEOWISE W1 / W2 | 0.858 / 0.827 | 0.167 / 0.207 mag | 0.005 / 0.008 mag |
+   | AllWISE W1 / W2 | 0.780 / 0.743 | 0.270 / 0.323 mag | 0.008 / 0.009 mag |
+   | 2MASS J / H / Ks | 0.955 | 0.050 mag | 0.012 / 0.026 / 0.015 mag |
+
+   Beyond about 10 px (NEOWISE) or 30 px (AllWISE) the curves exceed 1 by up to 10%: PSF wings beyond the
+   catalogue's profile-fit normalisation, plus residual neighbour light. The ring scale is therefore approximate.
+   Two isolated saturated AllWISE stars (W1 5.8 and 6.3, rings at 6–10 px) give ring − catalogue offsets of
+   −0.13 mag in W1 and +0.47 mag in W2, consistent between the two stars to 0.02 mag.
+4. **Cross-calibration.** Up to 16 field stars within `field_radius` − 10″ (140″ by default) are measured
+   exactly like the target, on the frames
+   and in every SPHEREx exposure. They are CatWISE2020 stars (AllWISE from a VizieR mirror when IRSA fails),
+   isolated (no neighbour within 16″ brighter than W1 + 2.5), with W1 9–14 and W2 7.5–13.5.
+   - **Frames → catalogue** (median and robust scatter per survey and band): applied to aperture points with
+     ≥ 4 stars.
+   - **SPHEREx synthetic → NEOWISE mean (W1/W2) or PSC (J/H/Ks):** uses stars constant in both, applied with
+     ≥ 3 stars, else the default.
+5. **Synthetic bands.** Each SPHEREx time bin (epochs cut into ≤ 15-day chunks) is a binned spectrum,
+   integrated as
+
+       ⟨Fν⟩ = ∫Fν R/λ / ∫R/λ
+
+   with SVO responses, log-linear interpolation and power-law extrapolation, and ≥ 75% of the photon weight
+   covered. The error comes from the band's Jacobian with respect to each spectral bin, plus a 2% floor. Ring
+   targets give relative synthetic points. D1–D6 per-bin fluxes are the bin over the all-epoch spectrum, times
+   the detector's mean flux.
+6. **Analysis.**
+   - **Period search.** Multiband generalised Lomb–Scargle over W1, W2 and D1–D6, with a free zero point per
+     offset group and per-band sinusoids. The grid runs from 50 d to baseline/1.5 at 10 samples per peak.
+   - **Significance.** FAP from an F-test times the number of independent frequencies; σ_P from the χ² curvature
+     with χ²/dof rescaled to 1. Significant when FAP < 10⁻³ and the power is ≥ 0.3.
+   - **Final model** with 2 harmonics, giving peak-to-peak amplitudes per band and phase-folded points.
+   - **From the residuals:**
+     - trends over ≥ 3 yr;
+     - era means per survey;
+     - events: runs of ≥ 2 archival visits or ≥ 3 SPHEREx bins beyond max(3σ, 0.1 mag), or one point
+       confirmed within 5 d by an independent survey or archival band (SPHEREx bands never confirm each other).
+   - **Cadence aliases.** NEOWISE alternates its scan direction every visit, so a neighbour's diffraction
+     spikes, ghosts and latents come and go with a 1-yr pattern that the 6-monthly sampling aliases to
+     365.25/k d. A best period within half the NEOWISE frequency resolution of 365.25/k d (k = 1–7) is reported
+     with `cadence_alias: k` and is not significant.
+   - **Verdict.** "Variable" needs, in one band of W1/W2, a constant-model χ²/dof ≥ 5 and a 5–95% range
+     ≥ max(0.1 mag, 5 median errors); pure noise gives a range of about 3.3 errors. "Periodic" also needs a
+     significant period, and a period ≥ 100 d makes it a long-period variable.
+7. **Field search** (`/long-period-search`). Up to 150 CatWISE sources with W1 ≤ 15 within `radius_arcsec`
+   − 10″ (140″ by default) of the field centre are measured on the same NEOWISE/AllWISE frames, normalised per
+   NEOWISE visit by the ensemble of unsaturated sources with S/N > 20. SPHEREx adds relative aperture points on
+   the epoch co-adds. Each source goes through the same model, and sources are ranked by log χ²/dof + 2 × range
+   (+ 1 + power when periodic). Sources whose AllWISE W1/W2 contamination flag (`ccf`: halo, diffraction
+   spike, ghost, latent) is set are measured but listed after the clean ones and left out of the summary: in the
+   validation they carry almost all spurious variability.
+
+### Validation (2026-11-15)
+
+VALIDATION_PLACEHOLDER
+
+### Limitations
+
+- **Ring scale.** The absolute scale of ring points (heavily saturated stars) rests on the enclosed-energy curve
+  at 5–20 px, which is uncertain at the 0.1–0.5 mag level. The analysis fits ring groups' zero points, so periods,
+  amplitudes and shapes do not depend on it. Era-to-era comparisons of an all-ring star do: one ring per survey
+  means a different radius in each survey.
+- **Blends.** WISE's 6″ PSF blends close pairs (RW Aur A+B at 1.4″). The aperture photometry is not deblended,
+  and neighbours within the 8.25″ aperture add their flux.
+- **Calibration stars.** Fields at high latitude or around very bright stars have few isolated catalogue stars
+  within 140″. R Dra has none, so its SPHEREx points use the default offsets and its NEOWISE points the
+  enclosed-energy correction.
+- **Sampling.** NEOWISE visits every ~6 months alias periods near 1 yr and 6 months. SPHEREx bins and AllWISE /
+  2MASS points break the aliases only when the period is significant on its own. A real period within the
+  resolution of 365.25/k d is reported as a cadence alias, not as significant. Periods < 50 d are not searched.
+- **Image lists need IRSA.** Finding new archival frames uses IRSA's CAOM search (cached per field for a week).
+  The catalogues fall back to VizieR mirrors and Gaia DR3, but with IRSA down a field without cached image lists
+  cannot get a long-baseline light curve.
