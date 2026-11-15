@@ -6,7 +6,8 @@ or read from a finished field analysis of the same sequence. A tracklet whose id
 object within the position and motion tolerances becomes an "unidentified mover" candidate, with the evidence a
 follow-up observer needs: rate and position angle, motion relative to the ecliptic, number of detections and
 time span, detector-pair confirmation (D1/D4, D2/D5, D3/D6 image the same sky simultaneously), real/bogus score,
-S/N and fit residual. Tracklets whose identification failed (JPL unreachable) are listed as "unverified", never
+S/N, fit residual, and whether a tracklet of another visit sits at the same position (a static residual; the tier
+drops one step). Tracklets whose identification failed (JPL unreachable) are listed as "unverified", never
 as unidentified.
 
 Rates give a rough population hint (near-Earth > 60"/h, main belt 15-60"/h, outer < 5"/h near opposition), which
@@ -26,14 +27,18 @@ from ..errors import NotFound
 MOVERS_VERSION = 1
 OBLIQUITY = math.radians(23.4392911)
 TIERS = ("strong", "candidate", "weak")
+REPEAT_ARCSEC = 6.0  # a tracklet this close to one of another visit is probably a static residual (about 1 px)
 CAVEATS = [
     "Unidentified means no object in JPL's small-body database (sb_ident, V <= vmag_lim) moved along this track "
     "as seen from SPHEREx; faint known objects, comets without current elements and artefacts remain possible.",
     "Tracklets are straight lines inside one visit; below ~1.5 au SPHEREx's orbital parallax bends real tracks by "
     ">= 1 px, which can split or drop near-Earth objects.",
     "Rates are converted to a population hint without an orbit; one tracklet does not constrain the distance.",
-    "Positions come from the resampled grid (peak pixel), so ADES uncertainties are generous; check MPChecker and "
-    "the NEOCP before reporting anything (docs/research/astrometrica.md).",
+    "Positions are the field analysis' detections on the resampled grid (6.2\" pixels); the ADES uncertainties are "
+    "its per-detection estimates. Check MPChecker and the NEOCP before reporting anything "
+    "(docs/research/astrometrica.md).",
+    "A tracklet that sits where a tracklet of another visit was (repeats_in_other_visits) is more likely a static "
+    "residual than a mover; its tier is lowered one step.",
 ]
 
 
@@ -104,6 +109,19 @@ def describe(t: dict, ident_error: str | None) -> dict:
     }
 
 
+def mark_repeats(rows: list[dict], radius_arcsec: float = REPEAT_ARCSEC) -> None:
+    """A real mover is somewhere else six months later; a tracklet at the position of a tracklet from another
+    visit is more likely a static residual (bright-star wings, a variable). Adds repeats_in_other_visits and lowers
+    the tier one step when it is not zero."""
+    for r in rows:
+        cosd = math.cos(math.radians(r["dec"]))
+        r["repeats_in_other_visits"] = sum(
+            1 for o in rows if o["epoch"] != r["epoch"]
+            and 3600.0 * math.hypot((o["ra"] - r["ra"]) * cosd, o["dec"] - r["dec"]) < radius_arcsec)
+        if r["repeats_in_other_visits"]:
+            r["tier"] = TIERS[min(len(TIERS) - 1, TIERS.index(r["tier"]) + 1)]
+
+
 def unknown_movers(ctx: SequenceContext, vmag_lim: float = 21.0, field_result: dict | None = None,
                    progress=None, check=None) -> dict:
     """Run (or reuse) the moving-object detection and identification and keep what is left unexplained."""
@@ -133,6 +151,7 @@ def unknown_movers(ctx: SequenceContext, vmag_lim: float = 21.0, field_result: d
     check()
     err = (ident or {}).get("error")
     rows = [describe(t, err) for t in tracklets]
+    mark_repeats(rows)
     by_id = {t["id"]: t for t in tracklets}
     unknown = [r for r in rows if r["status"] == "unidentified"]
     unknown.sort(key=lambda r: (TIERS.index(r["tier"]), -r["mean_snr"]))

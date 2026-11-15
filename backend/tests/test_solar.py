@@ -518,6 +518,20 @@ def test_unknown_movers_from_a_field_result():
     assert res["counts"]["unidentified"] == 0 and res["counts"]["unverified"] == 3
 
 
+def test_repeats_in_other_visits_lower_the_tier():
+    rows = [{"id": "a", "epoch": 0, "ra": 10.0, "dec": 0.0, "tier": "strong"},
+            {"id": "b", "epoch": 1, "ra": 10.0 + 3 / 3600, "dec": 0.0, "tier": "candidate"},
+            {"id": "c", "epoch": 1, "ra": 10.1, "dec": 0.0, "tier": "strong"},
+            {"id": "d", "epoch": 0, "ra": 10.1 + 1 / 3600, "dec": 0.0, "tier": "weak"}]
+    movers.mark_repeats(rows)
+    assert [r["repeats_in_other_visits"] for r in rows] == [1, 1, 1, 1]
+    assert [r["tier"] for r in rows] == ["candidate", "weak", "candidate", "weak"]
+    lone = [{"id": "a", "epoch": 0, "ra": 10.0, "dec": 0.0, "tier": "strong"},
+            {"id": "b", "epoch": 0, "ra": 10.0 + 1 / 3600, "dec": 0.0, "tier": "strong"}]  # same visit: no repeat
+    movers.mark_repeats(lone)
+    assert [r["tier"] for r in lone] == ["strong", "strong"]
+
+
 def test_unknown_movers_refuse_comoving():
     class C(_Ctx):
         meta = {"grid": {"frame": "comoving"}}

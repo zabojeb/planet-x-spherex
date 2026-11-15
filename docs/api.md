@@ -411,7 +411,8 @@ its stars move). `field_job` reuses a finished `f` job of the same sequence (422
 job, 404 if not finished). Result: `{kind: "unknown_movers", source, identification, counts: {tracklets, known,
 unidentified, unverified, strong}, unidentified: [{id, trk_sub, status, tier, epoch, n, mjd_first, mjd_last,
 span_hours, ra, dec, ecliptic_latitude_deg, rate_arcsec_per_hr, pa_deg, angle_from_ecliptic_deg, retrograde,
-rms_arcsec, mean_snr, mean_rb, partner_fraction, bands, population_hint, nearest_known}], others: [...],
+rms_arcsec, mean_snr, mean_rb, partner_fraction, bands, population_hint, repeats_in_other_visits,
+nearest_known}], others: [...],
 candidates: {tracklets}, ades, caveats}`. `GET /api/field/{id}/ades.psv` exports the strong ones
 (`?all=true`: all), station 288, "follow-up data, not a submission".
 

@@ -231,7 +231,8 @@ spectrum class either (no unsaturated 1 µm channels).
 
 **Unknown movers.** Fixed-position sequences only: the field analysis' moving-object detection and JPL
 identification (or a finished field job), then every tracklet without a JPL match listed with its evidence and a
-tier (strong: high quality, ≥ 4 detections, detector pair confirmed ≥ 50 %, real/bogus ≥ 0.6). Identification
+tier (strong: high quality, ≥ 4 detections, detector pair confirmed ≥ 50 %, real/bogus ≥ 0.6), one step lower
+when a tracklet of another visit lies within 6″ (a real mover is elsewhere months later). Identification
 failures make tracklets "unverified". The ADES export (station 288) writes the strong ones; it is follow-up data
 for MPChecker / NEOCP checks, not a discovery claim.
 
