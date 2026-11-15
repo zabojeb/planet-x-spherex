@@ -19,6 +19,7 @@ import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
 import { paintDisplay, paintFlags } from "../render";
 import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type SkyMap } from "../skymap";
+import { LoadChip } from "./Progress";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
 
@@ -56,8 +57,13 @@ interface Props {
   year: number;
   span: [number, number] | null;
   targetPx: [number, number] | null;
-  /** What is being loaded, shown with the progress (a search pick or a Random draw tells you what you got). */
+  /** What is being loaded, shown in the middle while there is nothing of it on screen yet (a search pick or a
+   *  Random draw tells you what you got). */
   loading?: { name: string; note?: string | null } | null;
+  /** The image on screen is of another place than the one loading: shown faded until the new one arrives. */
+  dim?: boolean;
+  /** What the image on screen is while the build goes on (e.g. a preview), shown in the loading chip. */
+  chipNote?: string | null;
   targetWorld: [number, number] | null;
   track: [number, number][];
   trackIndex: number;
@@ -158,27 +164,6 @@ export function catalogMarkers(grid: Grid, catalogs: Record<string, CatalogSourc
 export function markerTip(cat: string, src: CatalogSource): { name: string; sub: string } {
   const kind = cat === "simbad" ? (src.type as string | null) ?? "SIMBAD" : CATALOG_STYLE[cat].label;
   return { name: String(src.id), sub: `${kind}${src.mag != null ? ` · ${src.mag_band} ${src.mag.toFixed(1)}` : ""}` };
-}
-
-export function loaderText(p: Progress): { text: string; pct: number | null } {
-  const pct = p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
-  switch (p.stage) {
-    case "busy":
-      return { text: `Many users right now · retrying in ${p.retryIn ?? 1}s`, pct: null };
-    case "search":
-      return { text: "Querying the IRSA archive", pct: null };
-    case "fetch":
-      return { text: `Fetching ${p.total || ""} exposures from S3`, pct };
-    case "stack":
-      return { text: "Aligning and co-adding epochs", pct: null };
-    case "publish":
-      return { text: "Publishing results", pct: null };
-    case "download":
-    case "done":
-      return { text: "Downloading results", pct };
-    default:
-      return { text: p.ahead ? `Waiting for a free worker · ${p.ahead} ahead` : "Waiting for a free worker", pct: null };
-  }
 }
 
 function hexRgb(hex: string): [number, number, number] {
@@ -843,7 +828,6 @@ export function SkyView(p: Props) {
   // ---------------------------------------------------------------- render
   const d = p.display;
   const hasImage = n > 0 && d && d.kind !== "empty";
-  const loader = p.progress ? loaderText(p.progress) : null;
   // on a wide map the compass and the scale bar would hold only near the centre: dropped past 30°
   const bar = !p.grid ? null : isMap ? (mapFov && mapFov <= 30 ? scaleBar(W / mapFov) : null) : scaleBar((s * 3600) / p.grid.pixscale_arcsec);
   const cw = !isMap && cursor && p.grid && cursor.x >= -0.5 && cursor.y >= -0.5 && cursor.x < n - 0.5 && cursor.y < n - 0.5 ? cursor : null;
@@ -886,7 +870,7 @@ export function SkyView(p: Props) {
       {n > 0 && (
         <div
           ref={layerRef}
-          className={`sky-layer${p.progress ? " dim" : ""}${isMap ? " on-map" : ""}`}
+          className={`sky-layer${p.dim ? " dim" : ""}${isMap ? " on-map" : ""}`}
           // on the map the frame loop moves the layer; React only restates where it last put it
           style={{ width: n, height: n, transform: isMap ? layerMatrix.current : `translate(${tx}px, ${ty}px) scale(${s})` }}
         >
@@ -903,7 +887,7 @@ export function SkyView(p: Props) {
       )}
       {n > 0 && W > 0 && !isMap && (
         // Overlays live in screen space with an SVG transform so strokes stay hairline at any zoom.
-        <svg className={`overlay${p.progress ? " dim" : ""}`} width={W} height={H}>
+        <svg className={`overlay${p.dim ? " dim" : ""}`} width={W} height={H}>
           <defs>
             <clipPath id="sky-clip">
               <rect x={0} y={0} width={n} height={n} />
@@ -1120,23 +1104,15 @@ export function SkyView(p: Props) {
         </div>
       )}
 
-      {loader && (
-        <div className="hud-loader" role="status" aria-live="polite">
-          {p.loading && (
-            <div className="hud-loader-target">
-              <div className="hud-loader-name">{p.loading.name}</div>
-              {p.loading.note && <div className="hud-loader-note">{p.loading.note}</div>}
-            </div>
-          )}
-          <div className="hud-loader-text">
-            {loader.text}
-            {loader.pct != null && <span> — {loader.pct}%</span>}
-          </div>
-          <div className={`hud-loader-bar${loader.pct == null ? " indeterminate" : ""}`}>
-            <span style={loader.pct == null ? undefined : { width: `${Math.max(2, loader.pct)}%` }} />
+      {p.progress && p.loading && (
+        <div className="hud-loader" aria-hidden>
+          <div className="hud-loader-target">
+            <div className="hud-loader-name">{p.loading.name}</div>
+            {p.loading.note && <div className="hud-loader-note">{p.loading.note}</div>}
           </div>
         </div>
       )}
+      {p.progress && <LoadChip progress={p.progress} note={p.chipNote} />}
       {d?.kind === "empty" && !p.progress && n > 0 && <div className="sky-note glass">{d.message}</div>}
       {p.error && !p.progress && (
         <div className="sky-note glass error" role="alert" onPointerDown={stop} onPointerUp={stop}>

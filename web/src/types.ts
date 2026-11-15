@@ -166,6 +166,8 @@ export interface Meta {
     seconds?: Record<string, number | null>;
   };
   sources: { archive: string; collections: string[]; data: string };
+  /** Set on a preview: an early, complete result of part of the exposures (the build `of` is still running). */
+  preview?: { of: string; n: number; frames: number; total: number };
 }
 
 export interface Job {
@@ -178,6 +180,8 @@ export interface Job {
   elapsed: number;
   /** Builds that start before this one while it is queued (null otherwise). */
   position?: number | null;
+  /** Id of the latest preview of a running build (a finished result of the exposures read so far). */
+  preview?: string | null;
 }
 
 export interface CatalogSource {

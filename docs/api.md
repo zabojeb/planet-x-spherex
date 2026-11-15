@@ -76,10 +76,12 @@ Rows are sorted by `refs` (SIMBAD bibliography count). `ra`/`dec` are degrees IC
 The response is the job:
 
 ```json
-{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "elapsed": 9.4}
+{"id": "48006f61db3e73e6ae51", "status": "running", "stage": "fetch", "done": 120, "total": 358, "error": null, "position": null, "preview": "48006f61db3e73e6ae51p1", "elapsed": 9.4}
 ```
 
 `status` is `queued`, `running`, `done`, `error` or `cancelled`; `stage` is `queued`, `search`, `fetch` (with `done`/`total` exposures), `stack` or `done`. While queued, `position` is the number of builds ahead of this one. The `id` is a hash of the normalised parameters, so identical requests share one job and one result.
+
+`preview` is the id of the latest preview while the build runs, else `null` (ADR-0039). A preview is a complete result of the epochs read so far: the epoch the viewer opens on first, then more at 1/3 and 2/3 of the exposures. Builds of fewer than 40 exposures, or with one epoch, have none. Read it like any finished result (`GET /api/sequences/{preview}` or `/lite`, its planes and tables). Its `meta.json` has `preview: {"of": <build id>, "n": <1, 2, …>, "frames": <exposures in it>, "total": <exposures in the build>}`. Previews are deleted once the full result is written, so a client should drop a preview's data when the build finishes. Work that is stored with a sequence or handed out answers `404` with a message for a preview: field and point analyses, known objects, Track & Stack, verification, position photometry, archival epochs and exports. Quick reads (planes, tables, motion, periodogram, spectra) work on it.
 
 Builds go through the job queue (ADR-0033): `SPHEREX_JOBS_PER_WORKER` builds run at once per worker (default 2; `SPHEREX_MAX_JOBS` is accepted as an alias), the rest wait by priority and submission order, and a queued job reports `position` (builds that start before it). Each POST and each poll is a heartbeat keyed by `X-Client-Id`; `DELETE` withdraws the caller. A build is cancelled when every client has withdrawn, or when nobody polled it for `SPHEREX_INTEREST_TIMEOUT` seconds (default 30; alias `SPHEREX_JOB_IDLE`); a cancelled job answers 410. A build that runs longer than `SPHEREX_MAX_RUNTIME` seconds (default 900; alias `SPHEREX_JOB_TIMEOUT`) fails with an error. Limits answer 429 with `Retry-After`.
 
@@ -578,3 +580,33 @@ Result (every step slot is either its object or `{"error": "<Type>: <message>"}`
 curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' \
   -d '{"ra": 269.4462, "dec": 4.7688}' https://<host>/api/sequences/<id>/analyze
 ```
+
+## Data sources and the file-catalogue mirror (ADR-0057)
+
+### `GET /api/status/upstreams`
+
+Every remote source per kind of data, in the order it is asked now, plus the local mirror:
+
+```json
+{"kinds": {"gaia": [{"rank": 0, "name": "mast-gaia", "label": "MAST (STScI)", "service": "mast.stsci.edu", "note": "",
+                     "samples": 12, "success_rate": 1.0, "p50_s": 0.31, "p90_s": 0.6, "last_ok_s_ago": 4,
+                     "last_fail_s_ago": null, "last_error": null, "breaker": null, "state": "ok"},
+                    {"rank": 1, "name": "esa-gaia", "...": "...", "state": "down"}],
+           "spherex-files": ["..."], "spherex-cutouts": ["..."], "spherex-meta": ["..."], "catwise": ["..."],
+           "2mass": ["..."], "simbad": ["..."], "solar-system": ["..."]},
+ "breakers": {"gea.esac.esa.int": {"retry_in_s": 211, "error": "timed out"}},
+ "mirror": {"path": "...", "bytes": 312000000, "files": 1628230, "releases": {"dr1": {"files": 1179406, "complete": true}},
+            "synced_at": "1794739000.1", "age_hours": 0.4, "last_sync": {"...": "..."}},
+ "cluster": {"host:pid": {"aws-s3": {"samples": 50, "success_rate": 1.0, "p50_s": 0.08}}}}
+```
+
+`state` is `ok` (last call succeeded), `degraded` (last call failed), `down` (circuit breaker open, skipped by
+interactive calls) or `unknown` (not used since the process started). `cluster` appears only with Redis: what every
+API/worker process reported in its last 15-s summary. Kinds: `spherex-files` (range reads: AWS S3, IRSA ibe,
+optional `SPHEREX_FILE_MIRROR_BASE`), `spherex-cutouts` (IRSA cutout service vs range reads), `spherex-meta`
+(local mirror, IRSA TAP, IRSA SIA), `gaia` (ESA, MAST, IRSA, VizieR), `catwise`/`2mass` (IRSA, VizieR), `simbad`
+(CDS, Harvard), `solar-system` (JPL, IRSA MOST, SkyBoT — geocentric).
+
+`GET /api/releases` answers from the mirror when it is complete (with `"source": "local mirror (synced … h ago)"`)
+and falls back to it when IRSA TAP fails; `GET /api/catalogs` labels no longer name one archive, since the answer
+may come from any source of that catalogue.

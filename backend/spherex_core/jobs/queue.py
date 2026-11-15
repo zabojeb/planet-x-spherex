@@ -216,7 +216,7 @@ def job_from_hash(job_id: str, h: dict) -> dict:
     finished = float(h["finished"]) if h.get("finished") else None
     return {"id": job_id, "status": h.get("status", "queued"), "stage": h.get("stage", "queued"),
             "done": int(h.get("done") or 0), "total": int(h.get("total") or 0), "error": h.get("error") or None,
-            "position": None, "elapsed": (finished or _now()) - started}
+            "position": None, "preview": h.get("preview") or None, "elapsed": (finished or _now()) - started}
 
 
 class RedisQueue:

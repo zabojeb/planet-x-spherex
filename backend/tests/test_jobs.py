@@ -192,3 +192,53 @@ def test_redis_limits():
 
 def test_job_cancelled_is_exception():
     assert issubclass(JobCancelled, Exception)
+
+
+# ------------------------------------------------------------------ previews (ADR-0039)
+class PreviewBuild(FakeBuild):
+    """Announces a preview half way, the way build_sequence does."""
+
+    async def __call__(self, params, out_dir, progress):
+        progress("fetch", 5, 10)
+        progress(f"preview:{out_dir.name}p1", 5, 10)
+        await asyncio.sleep(self.seconds)
+        progress("fetch", 10, 10)
+        meta, arrays = make_result()
+        results.write_result(out_dir, meta, arrays)
+
+
+def test_inprocess_status_carries_the_preview():
+    async def go():
+        q = InProcessQueue(build=PreviewBuild(seconds=0.6))
+        job = await q.submit(P(), client="tab1")
+        st = await wait_status(q, job["id"], {"running"})
+        for _ in range(30):
+            st = await q.status(job["id"], client="tab1")
+            if st.get("preview"):
+                break
+            await asyncio.sleep(0.05)
+        assert st["preview"] == job["id"] + "p1" and st["stage"] == "fetch"  # the stage is not replaced
+        await wait_status(q, job["id"], {"done"})
+    asyncio.run(go())
+
+
+def test_redis_status_carries_the_preview():
+    async def go():
+        r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        q = RedisQueue(redis=r)
+        w = Worker(redis=r, loops=1, build=PreviewBuild(seconds=0.6))
+        task = asyncio.create_task(w.run())
+        try:
+            job = await q.submit(P(), client="tab1")
+            st = None
+            for _ in range(60):
+                st = await q.status(job["id"], client="tab1")
+                if st and st.get("preview"):
+                    break
+                await asyncio.sleep(0.05)
+            assert st["preview"] == job["id"] + "p1"
+        finally:
+            w.stop()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(go())

@@ -150,6 +150,26 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   (`/api/field/{id}/ades.psv`) and CSV exports.
 - **Display → Tools**: invert (`inv=1`), magnifier (11×11 px), ruler (two clicks: distance and PA).
 
+## Instant probe and Explore / Research
+
+- **Instant probe** (`probe.ts`, framework-free; `chart/ProbeCharts.tsx`): clicking any position, catalogue
+  source or the target puts a quick estimate in the pick card at once, with no server round-trip. It sums a
+  3 px aperture on the background-subtracted co-add minus an 5–8 px annulus median, times the pixel solid
+  angle (MJy/sr → mJy), with the annulus scatter plus a 3 % floor as the error; no PSF correction, so it is
+  labelled "quick estimate" (Analyze does PSF photometry on the native exposures). It shows the shown
+  epoch/detector, a coarse spectrum over D1–D6 of that epoch and a light curve over the epochs of that
+  detector (the best-S/N one when All is shown); the target and moving sources are followed epoch by epoch.
+  Only the planes it needs are fetched, lazily, through the same plane cache (`probeNeeds`).
+- **Explore / Research** (rail button, `ui=` in the URL, remembered in localStorage):
+  - Explore (default for first visits): magnitudes instead of mJy, plain-language hints from the numbers
+    (motion since 2000 from the catalogue proper motion; a 4 µm peak with methane/CO troughs → cold brown dwarf;
+    rising to 5 µm → warm dust; brightness change between visits; saturation with a pointer to Analyze), a
+    compact coordinate line, a guided tour of the five targets (rail → Tour) with a "find it yourself" game
+    (target, track and catalogue markers hidden; any click is the guess; Reveal says how far off it was), and
+    fewer controls (no field analysis, measuring tools, playback options, flags layer or downloads).
+  - Research: mJy ± error, S/N, AB magnitude, wavelengths, pixel position, exposures at the pixel, flags,
+    a per-visit table, full coordinates, Measure / Verify / Follow, field analysis, every control and the exports.
+
 ## Design
 
 Google-Earth model on black: the sky fills the viewport and every control floats over it as small glass
@@ -219,6 +239,7 @@ Every view is reproducible from its URL; the app keeps the address bar in sync.
 | `ylog=0` | linear flux axis in the spectrum |
 | `v3d` | `off` for the flat sky (the default), or the 3D view: `relief`, `time` (epochs stacked by date) or `bands` (detectors stacked by wavelength) |
 | `h3d` | vertical exaggeration of the 3D view (default 1) |
+| `ui` | `explore` (default for first visits) or `research`; without it the browser's last choice is used |
 | `embed=1` | viewer and its controls only, for iframes |
 
 Example: `/?target=barnard&mode=diff&band=D2&epoch=4` shows Barnard's Star in D2 minus the first visit:

@@ -62,6 +62,20 @@ def flag_defs_to_text(defs: FlagDefs) -> str:
     return "\n".join(f"{b}\t{n}\t{d}" for b, (n, d) in sorted(defs.items()))
 
 
+def merge_flag_defs(texts) -> FlagDefs:
+    """The bits defined by any of the files (flag_defs_to_text of each, in frame order): files of different
+    pipeline versions define different bits, and the first definition of a bit is kept, so the result does not
+    depend on which file happened to be read first."""
+    defs: FlagDefs = {}
+    seen: set[str] = set()
+    for text in texts:
+        if text and text not in seen:
+            seen.add(text)
+            for bit, d in flag_defs_from_text(text).items():
+                defs.setdefault(bit, d)
+    return defs
+
+
 def flag_defs_from_text(text: str) -> FlagDefs:
     defs: FlagDefs = {}
     for line in text.splitlines():

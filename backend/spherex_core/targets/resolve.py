@@ -20,7 +20,7 @@ from dataclasses import asdict
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
-from .. import cache
+from .. import cache, upstreams
 from ..config import settings
 from .model import Target
 from .objects import compact, index
@@ -91,6 +91,14 @@ def _parse_sesame(xml: bytes, name: str) -> Target | None:
     return None
 
 
+def _endpoint(host: str) -> upstreams.Endpoint:
+    """The Sesame mirror at `host` as an upstreams endpoint (kind "names"; statistics only, they are raced)."""
+    label = "cds" if "unistra" in host else host.split(".")[-2] if host.count(".") >= 1 else host
+    ep = upstreams.Endpoint(f"sesame-{label}", "names", host, f"Sesame ({host})", note="all mirrors raced")
+    upstreams.register(ep)
+    return ep
+
+
 def _ask(base: str, name: str, timeout: float) -> Target | None:
     host = urllib.parse.urlsplit(base).netloc
     t0 = time.perf_counter()
@@ -99,8 +107,10 @@ def _ask(base: str, name: str, timeout: float) -> Target | None:
             t = _parse_sesame(r.read(), name)
     except Exception as e:
         log.warning("sesame failed s=%.2f host=%s name=%r error=%s", time.perf_counter() - t0, host, name, e)
+        upstreams.record(_endpoint(host), time.perf_counter() - t0, False, e, breaker=False)
         raise RuntimeError(f"{host}: {e}") from e
     log.info("sesame done s=%.2f host=%s name=%r found=%s", time.perf_counter() - t0, host, name, t is not None)
+    upstreams.record(_endpoint(host), time.perf_counter() - t0, True, breaker=False)
     return t
 
 

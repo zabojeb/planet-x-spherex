@@ -1,4 +1,4 @@
-# ADR-0057: Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both
+# ADR-0058: Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both
 
 - **Status:** Accepted
 - **Date:** 2026-11-15

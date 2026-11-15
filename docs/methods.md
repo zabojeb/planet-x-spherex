@@ -27,7 +27,12 @@ Centre the grid on the target's position at the median MJD of its images. TAN pr
 
 ### 3. Read cutouts
 
-For each image, read a square of 2h + 1 native pixels around the grid centre, with h = ceil(n / 2 × 1.42) + 3 (45 for a 6′ field), from S3 with HTTP range requests: `IMAGE`, `FLAGS` (RICE tiles decoded) and `VARIANCE`. Up to 64 images are in flight on up to 96 connections. The detector's wavelength table (`WCS-WAVE`) and effective-PSF table (`EPSF`, 441 zones) are read once per detector and cached ([ADR-0002](adr/0002-s3-range-reads.md), [ADR-0016](adr/0016-epsf-psf-photometry.md)).
+For each image, read a square of 2h + 1 native pixels around the grid centre, with h = ceil(n / 2 × 1.42) + 3 (45 for a 6′ field): `IMAGE`, `FLAGS` and `VARIANCE`.
+
+- **Where from.** First IRSA's cutout service, which cuts the window on its side: one request, ~160 KB at 6′, with at most 8 requests open per build. When no request slot is free, or the service is busy, slow or answers with something unusable, the image is read from S3 with HTTP range requests (`FLAGS` RICE tiles decoded on our side). Both give the same pixels ([ADR-0002](adr/0002-s3-range-reads.md), [ADR-0038](adr/0038-irsa-cutouts.md)).
+- **What is kept.** Each file's rows are cached in one chunk, with the columns of a 30′ field, so a wider or narrower field later reads only rows it does not hold yet. `VARIANCE` is read only within 22 px of the target, the farthest any measurement looks; elsewhere it is NaN ([ADR-0037](adr/0037-per-file-chunk-cache.md)).
+- **How.** The images are read in batches of 2–16 on the process pool, each worker reading and processing its own (step 4), with 64 images in flight over the whole build. The epoch the viewer opens on is read first, and a preview of the finished epochs is published while the rest is read ([ADR-0039](adr/0039-batched-fetch-and-previews.md)).
+- **Tables.** The detector's wavelength table (`WCS-WAVE`) and effective-PSF table (`EPSF`, 441 zones) are read once per detector from S3 and cached ([ADR-0016](adr/0016-epsf-psf-photometry.md)).
 
 ### 4. Per exposure (process pool)
 
@@ -76,6 +81,14 @@ ALGO_VERSION 2 rebuilds at each preset's field of view (cutouts cached except WI
 | WISE 0855−0714 (6′) | 258 | 3 | 24.7 s from S3 (555 MB, TAP 13.0 s) |
 | RW Aurigae (6′) | 335 | 3 | 2.7 s |
 | R Draconis (6′) | 2,493 | 10 | 16.4 s |
+
+With per-file chunks, batched reading on the pool and IRSA cutouts first (ADR-0037 to ADR-0039), Barnard's Star at 6′ (358 exposures, 583 MB, dev server, 29 workers, 128 exposures in flight, TAP query cached; the default of 64 is within the same spread, ADR-0039):
+
+| Build | Before (ADR-0037) | Now |
+|---|---|---|
+| Cold: first picture (opening epoch, 118 exposures) | only the full result | 3.0–3.5 s in about half the runs, up to 7 s when one of its reads is slow |
+| Cold: full result | 19.8–20.4 s | 6.6–10.4 s, median 7.9 s |
+| Every row already cached | 4.4 s | ~1.0 s |
 
 ## Validation so far
 

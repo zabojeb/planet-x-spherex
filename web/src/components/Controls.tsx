@@ -281,7 +281,7 @@ function LayerTip({ def, anchor, status }: { def: LayerDef; anchor: { top: numbe
   );
 }
 
-export function LayersPanel({ view, set, catalogStatus }: { view: ViewState; set: Set; catalogStatus: CatalogStatus }) {
+export function LayersPanel({ view, set, catalogStatus, simple }: { view: ViewState; set: Set; catalogStatus: CatalogStatus; simple?: boolean }) {
   const toggle = (o: Overlay) => set({ overlays: view.overlays.includes(o) ? view.overlays.filter((x) => x !== o) : [...view.overlays, o] });
   const [tip, setTip] = useState<{ id: Overlay; top: number; right: number } | null>(null);
   const show = (id: Overlay, el: HTMLElement) => {
@@ -297,7 +297,7 @@ export function LayersPanel({ view, set, catalogStatus }: { view: ViewState; set
   const tipDef = tip ? LAYERS.find((l) => l.id === tip.id) : null;
   return (
     <div className="layers" onPointerLeave={() => setTip(null)}>
-      {LAYERS.map((l) => {
+      {LAYERS.filter((l) => !simple || l.id !== "flags").map((l) => {
         const style = CATALOG_STYLE[l.id];
         const st = catalogStatus[l.id];
         const on = view.overlays.includes(l.id);
