@@ -6,7 +6,7 @@
 
 A public time machine for NASA's **SPHEREx** all-sky survey. Name a star or click anywhere on the sky, and watch that patch change across every SPHEREx visit, with spectra, light curves and motion measured for you.
 
-**[▶ Open seekin.space](https://seekin.space)** &nbsp;·&nbsp; [Presentation](docs/presentation.pdf) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [For AI agents](#for-ai-agents-mcp) &nbsp;·&nbsp; [Docs](#documentation)
+**[▶ Open seekin.space](https://seekin.space)** &nbsp;·&nbsp; [Presentation](docs/presentation.pdf) &nbsp;·&nbsp; [Public evidence](https://seekin.space/evidence/) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [For AI agents](#for-ai-agents-mcp) &nbsp;·&nbsp; [Docs](#documentation)
 
 NASA Space Apps Challenge 2026 &nbsp;·&nbsp; Challenge: [Planet X and SPHEREx](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/) &nbsp;·&nbsp; Team NUPASA
 
