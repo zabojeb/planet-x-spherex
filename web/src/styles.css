@@ -345,6 +345,22 @@ canvas.crisp { image-rendering: pixelated; image-rendering: crisp-edges; }
 canvas.smooth { image-rendering: auto; }
 .flags-layer { pointer-events: none; }
 .overlay { overflow: visible; pointer-events: none; }
+/* The sky map around the field (skymap.ts). It takes pointer events only in map mode ("live"); in field
+   mode the field handles them and the map follows. The dim layer darkens it around a field in view. */
+.sky-map { position: absolute; inset: 0; background: #000; }
+.sky-map.off { visibility: hidden; }
+.sky-map:not(.live), .sky-map:not(.live) * { pointer-events: none !important; }
+.sky-dim { position: absolute; inset: 0; background: #000; pointer-events: none; }
+.sky-layer.on-map { pointer-events: none; transition: none; }
+/* Aladin paints rgb(26, 26, 26) outside the globe and where no tile has loaded yet; the brightness/contrast
+   pair maps 26 → 0 and 255 → 255 (no clamping in between), which also drops the tiles' first noise level
+   above the empty-sky floor. The blur hides the HEALPix pixels once they are several screen pixels wide. */
+.sky-map canvas.aladin-imageCanvas { filter: brightness(0.907) contrast(1.228) blur(var(--map-blur, 0px)); }
+.sky-map .aladin-logo-container { opacity: 0.4; transform: scale(0.8); transform-origin: 100% 100%; }
+.map-overlay .field-outline { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.map-overlay .field-ring { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.map-overlay .field-name { fill: var(--text-1); font: 500 11px var(--mono); letter-spacing: 0.04em; paint-order: stroke; stroke: rgba(0, 0, 0, 0.85); stroke-width: 3px; }
+.nav-btn.on { color: var(--accent); border-color: var(--accent-ring); }
 .reticle path { fill: none; stroke: var(--hair-3); stroke-width: 1; animation: lockColor 1100ms ease-out both; }
 @keyframes lockColor { 0%, 50% { stroke: var(--accent); } 100% { stroke: var(--hair-3); } }
 .track polyline { fill: none; stroke: #d95926; stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.9; }

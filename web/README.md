@@ -35,6 +35,8 @@ src/
   display.ts        what the viewer shows for a mode (pure): limits over all epochs, reference epoch,
                     playable epochs (partial visits skipped unless asked)
   astro.ts          TAN projection onto the grid, proper-motion propagation, coordinate/date formatting
+  skymap.ts         the sky map around the field: Aladin Lite (lazy chunk) on the SPHEREx all-sky HiPS; camera,
+                    zoom around a point, great-circle fly-to; the only module that touches aladin-lite
   search.ts         search without React: name normalisation (same rules as the backend), ranking with
                     typo tolerance, object-type facets, coordinate parsing, nearby objects, Random draws,
                     recent picks in localStorage
@@ -46,7 +48,8 @@ src/
   components/
     SkyView.tsx        full-bleed sky: drag, wheel/pinch zoom around the cursor, double-click, click to select a source
                        or drop a pin, fly-to, hairline overlays, RA/Dec grid with captions, SIMBAD name labels, hover
-                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader
+                       tips; HUD with the field-stepping pad, compass, scale and the coordinate readout; HUD loader;
+                       the dimmed sky map around the field, zooming out onto it and flying to the whole sky and back
     PickCard.tsx       card for the selection (target, catalogue source or pin): ICRS/degrees/Galactic/ecliptic with
                        copy buttons, motion, distance, offset from the target, counterparts in the other catalogues,
                        measure / centre / follow, links to SIMBAD, Aladin Lite and WiseView
@@ -98,6 +101,10 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
   browser is idle or when the search box gets focus. Suggestions are ranked locally on every keystroke
   (1–3 ms); nothing is requested until a suggestion is chosen. `GET /api/resolve` is asked only after a
   350 ms pause, when local suggestions are weak or the query has digits, and answers are memoised per tab.
+- The sky map ([ADR-0057](../docs/adr/0057-sky-map-aladin-lite.md)): Aladin Lite (~840 kB gzipped, its WASM inlined)
+  is its own chunk, fetched once the viewer has mounted. Its tiles come straight from IRSA's SPHEREx all-sky HiPS and
+  stay in the browser's HTTP cache and Aladin's tile cache. Zooming out onto the map and back in downloads nothing for
+  the field: its planes stay in the LRU above.
 - Catalogs (Gaia, CatWISE, 2MASS, SIMBAD) load only when their layer is on (browser-cached via ETag/max-age); chart code loads only when
   the drawer opens. The only prefetch is a preset's lite metadata on hover in the landing index.
 - Analysis: the Period tab calls `GET .../periodogram` (or `POST /api/periodogram` for a measured source);
@@ -249,6 +256,12 @@ cannot lock.
   `c`), type or paste a new position (sexagesimal, degrees, a J-name or Galactic `gal l b`) and press Enter; the field of
   view is kept. Go to (rail, top button) adds optional proper motion, an all-sky map to click on and recent places. The pad above the
   compass (or Shift + arrows) moves the field half its width; the centre button fits the field back in view.
+- **Zoom out to the sky.** Around the field lies the SPHEREx all-sky map, dimmed. Zoom out (wheel or pinch) and the
+  dimming fades. Once the field is about a fifth of its fitted size, the map takes over. Drag and pinch then move
+  the whole sky, and the field rides on it with an amber outline and its name, or a ring once it is a few pixels
+  wide. The globe button next to the centre button flies out to the whole sky. The centre button flies back, and so
+  does clicking the field; zooming in on it also hands the view back. A field in the target's co-moving frame has no
+  map.
 - **What is this.** Click empty sky to drop a pin, or click a marker. The card gives the position in four frames,
   motion and distance, the same object in the other catalogues, and actions: measure its spectrum and light curve,
   build a field centred on it, or one that follows its proper motion. SIMBAD, Aladin Lite and WiseView open at the

@@ -68,3 +68,4 @@ Statuses: `Proposed` · `Accepted` · `Superseded by ADR-NNNN` · `Deprecated`.
 | [0054](0054-known-objects-bracketed-positions.md) | Identify tracklets against positions queried at their first and last detection, not instantaneous rates | Accepted (extends 0049) | 2026-11-14 |
 | [0055](0055-mcp-server-for-discovery-agents.md) | MCP server (stdio + streamable HTTP at /mcp) so an AI agent can run a discovery search over the services facade | Accepted | 2026-11-14 |
 | [0056](0056-interactive-analyses-fast-and-outage-proof.md) | Interactive analyses: no IRSA search for existing sequences, short timeouts + circuit breakers, concurrent steps with a 60 s deadline | Accepted (extends 0053) | 2026-11-15 |
+| [0057](0057-sky-map-aladin-lite.md) | Put the field on an Aladin Lite map of the SPHEREx all-sky HiPS, with one camera shared by both | Accepted | 2026-11-15 |
