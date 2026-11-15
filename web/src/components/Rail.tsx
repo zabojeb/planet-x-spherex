@@ -1,6 +1,6 @@
 /** Slim vertical tool rail on the right edge; each button opens a compact panel beside it. "Go to" is there
  *  even before a field has loaded; the rest need a sequence. */
-import { Box, Info, Layers, ListTree, Navigation, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
+import { Box, Info, Layers, ListTree, Maximize, Minimize, Navigation, ScanSearch, Share2, SlidersHorizontal, Telescope } from "lucide-react";
 import type { ReactNode } from "react";
 import { Popover } from "./ui/primitives";
 
@@ -20,6 +20,8 @@ export function Rail(p: {
   bandLabel: string;
   is3d?: boolean;
   on3d?: () => void;
+  /** Omitted where the browser can't go fullscreen (iPhone Safari). */
+  fullscreen?: { on: boolean; toggle: () => void };
 }) {
   return (
     <nav className="rail glass" aria-label="Tools">
@@ -66,6 +68,16 @@ export function Rail(p: {
         <Popover label={<Share2 size={16} />} title="Share" align="side" width={330}>
           {p.share}
         </Popover>
+      )}
+      {p.fullscreen && (
+        <button
+          className={`btn ghost icon rail-btn${p.fullscreen.on ? " active" : ""}`}
+          onClick={p.fullscreen.toggle}
+          title={p.fullscreen.on ? "Exit full screen (F, or hold Esc)" : "Full screen (F)"}
+          aria-pressed={p.fullscreen.on}
+        >
+          {p.fullscreen.on ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
       )}
     </nav>
   );
