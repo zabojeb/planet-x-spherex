@@ -161,3 +161,36 @@ async def unknown_movers_submit(seq_id: str, vmag_lim: float = 21.0, field_job: 
         return unknown_movers(ctx, vmag_lim, reuse, progress, check)
 
     return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)
+
+
+# ---------------------------------------------------------------- comet discovery (ADR-0063): spherex_core.comets
+async def comet_search_submit(seq_id: str, options: dict | None = None, client: str | None = None,
+                              force: bool = False) -> dict:
+    """Comet search over a sequence (a job, kind 'h'; poll GET /api/field/{id}): moving sources ranked by
+    comet-likeness on a fixed field, or the object check of a co-moving sequence. options: HuntOptions fields."""
+    from ..comets.hunt import HuntOptions, comet_search, load_field_result
+
+    opts = HuntOptions.from_dict(options)
+    reuse = load_field_result(seq_id, opts.field_job)
+    fj, jid = _field_job(seq_id, "h", opts.to_dict())
+
+    def work(ctx, progress, check):
+        return comet_search(ctx, opts, progress, check, reuse)
+
+    return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)
+
+
+async def comet_watch(now_limit: int = 30) -> dict:
+    """The known-comet watch: watched comets with their latest activity, the bright comets now, the refresh task."""
+    import asyncio
+
+    from ..comets import watch
+
+    return await asyncio.to_thread(watch.watch, now_limit)
+
+
+def comet_watch_refresh() -> dict:
+    """Start the watch refresh (MOST, prewarm co-moving builds, comet analyses) unless it runs. Event loop only."""
+    from ..comets import watch
+
+    return watch.start_refresh()

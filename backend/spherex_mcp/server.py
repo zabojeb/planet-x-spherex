@@ -30,6 +30,8 @@ build_sequence + poll sequence_status -> describe_sequence -> get_blink_strip / 
 known_objects -> report with evidence and a confidence level. Pixels are 6.2"; motions below ~1.2"/yr are not
 significant with 3-4 visits. Saturated bright stars only have relative photometry. Comets and asteroids:
 moving_object_search -> build_object_sequence (static_sky) -> clean_stack / comet_analysis / asteroid_lightcurve.
+New comets: comet_search on a field (or on a co-moving sequence to see how a known object scores) -> poll
+comet_candidates -> look at the best ones (get_image, analyze_point) -> comet_watch for the known comets now.
 Be economical: builds take 20-60 s and are capped per hour; reuse sequences you already built."""
 
 
@@ -247,6 +249,33 @@ def build_server() -> _Server:
         rate, PA, motion vs the ecliptic, detector-pair confirmation, real/bogus score and a population hint.
         field_job reuses a finished analyze_field job. Export with export_report(fmt="ades", job_id=...)."""
         return await t.unknown_movers(sequence_id, vmag_lim, field_job)
+
+    @mcp.tool()
+    @_err
+    async def comet_search(sequence_id: str | None = None, ra: float | None = None, dec: float | None = None,
+                           fov_arcmin: float = 10.0, slow: bool = True, stack: bool = True) -> dict:
+        """Start a comet search. On a fixed-position sequence: moving sources (fast tracklets inside one pass,
+        slow movers linked over days with SPHEREx's own parallax, faint ones by shift-and-stack) ranked by a
+        0-100 comet-likeness from coma extent and tail vs field stars, CO2 4.26 / CO 4.67 / H2O bands and a
+        digest2-style orbit-class score, identified against JPL's small bodies (comets included). On a co-moving
+        sequence (build_object_sequence): the same tests on its object per visit. Without sequence_id, ra/dec
+        build the field first. Returns job_id; poll comet_candidates."""
+        return await t.comet_search(sequence_id, ra, dec, fov_arcmin, slow, stack)
+
+    @mcp.tool()
+    @_err
+    async def comet_candidates(job_id: str, limit: int = 12) -> dict:
+        """Progress of a comet search, or its ranked candidates: id, motion, comet-likeness with the reasons,
+        coma verdict and significance, tail position angle (aligned with the anti-solar or trail direction?),
+        gas band S/N, likeliest orbit class, known/unidentified status. Export with export_report(fmt="ades")."""
+        return await t.comet_candidates(job_id, limit)
+
+    @mcp.tool()
+    @_err
+    async def comet_watch(limit: int = 15) -> dict:
+        """Known comets now (JPL SBDB, predicted magnitude, position) and the watched ones with their latest
+        SPHEREx visit: heliocentric distance, Afrho, CO2 band S/N, activity slope vs r_h and outburst flags."""
+        return await t.comet_watch(limit)
 
     @mcp.tool()
     @_err

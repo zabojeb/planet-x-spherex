@@ -249,6 +249,16 @@ when a tracklet of another visit lies within 6″ (a real mover is elsewhere mon
 failures make tracklets "unverified". The ADES export (station 288) writes the strong ones; it is follow-up data
 for MPChecker / NEOCP checks, not a discovery claim.
 
+### Comet discovery (ADR-0063)
+
+The comet search (`spherex_core.comets`) finds movers in a fixed field (field-analysis tracklets, single-pass
+tracklets, slow links over days with SPHEREx's parallax x(t) = x0 + v dt + B(t)/D, and a capped shift-and-stack),
+measures each along its track in exposures minus the other visits' static sky, and ranks them by a 0-100
+comet-likeness: coma extent and tail against field stars built the same way (bootstrap errors, interpolation and
+jitter corrected), CO2 / CO / H2O bands from the per-exposure spectrum, and a digest2-style orbit-class share
+(ranging with population densities). On a co-moving sequence it checks the object itself: 3I/ATLAS 99.9, C/2025 A6
+100, 433 Eros <= 1, 16 Psyche 0.1 (ADR-0063 has the table). Scores are hand-weighted rankings, not probabilities.
+
 ## Spectral analysis
 
 Code: `spherex_core/spectral/` (ADRs 0040–0044); endpoints in [api](api.md#spectral-analysis).

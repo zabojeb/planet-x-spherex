@@ -873,3 +873,51 @@ Outlines of SPHEREx exposures whose footprint lies within `radius` degrees (at m
 each dichroic pair (D1–D3; D4–D6 see the same sky): `{available, total, shown, radius_deg, footprints: [{obs_id, band,
 mjd, collection, corners: [ra1, dec1, … ra4, dec4]}]}`. Without a mirror: `{available: false, reason, footprints: []}`.
 Cached for 10 minutes.
+
+## Comet discovery (ADR-0063)
+
+### `POST /api/sequences/{id}/comet-search`
+
+A job (kind `h`, polled with `GET /api/field/{job}` like the field analysis). Body (all optional): `{field_job:
+null, slow: true, stack: true, vmag_lim: 21, window_days: 6, stack_rate_max: 2.0, identify: true, force: false}`.
+`field_job` reuses a finished field analysis of the same sequence for its tracklets. 404 unknown sequence, 422 bad
+options.
+
+On a fixed-position sequence (`mode: "field"`): `{kind: "comet_search", mode, version, sequence, options,
+observer: "SPHEREx" | "geocentre", counts{candidates, tracklet, slow, stack, unidentified, comet_like}, stats{fast,
+slow{links, stack_hits, unconfirmed, groups, stack[{epoch, windows, trials, coarsened, thresholds}]}, identification,
+psf, seconds}, candidates{comets[...], tracklets[...ADES layout...]}, caveats}`. Each `comets[]` row, best first:
+`{id: "H001", kind: tracklet | slow | stack, epoch, ra, dec, mjd, x, y, rate_arcsec_per_hr, pa_deg, span_hours,
+n_exposures, bands, model{x0, y0, vx, vy, w, t_ref, t_lo, t_hi}, ecliptic_latitude, elongation_deg,
+antisolar_pa_deg, status: known | unidentified | unverified, known, identification, distance_au (slow links with
+a significant parallax), comet_likeness{score 0-100, log_odds, terms{orbit, morphology, spectrum}, why[]},
+coma{verdict, coma_score, extent_sigma, snr, size{fwhm_arcsec, psf_fwhm_arcsec, intrinsic_fwhm_arcsec},
+concentration, tail{pa_deg, sigma, detected, aligned, antisolar_pa_deg, offset_from_antisolar_deg, trail_pa_deg,
+offset_from_trail_deg}, stamp, psf_stamp}, spectrum{verdict, gas_sigma, bands[{id, snr, detected, ...}],
+long_excess, per_detector[], points[[wl, flux_mjy, err_mjy]]}, orbit{most_likely, comet_like, probabilities,
+median_distance_au, constrained}, path[[x, y]], forced[], detections[], strip[{mjd, band, x, y, image 15x15}]}`
+(stamps north up in grid rows, null for no data; strips for the first 20 only).
+
+On a co-moving sequence (`mode: "object"`): the same measurements for the sequence's own object, one row per visit
+(`kind: "object"`, `id: "V1"`, plus `dates`, `r_au`, `delta_au`, `registration`), and `summary{visits, max_score,
+median_score, extended_visits, gas_visits}`.
+
+`GET /api/field/{job}/ades.psv` exports the measured candidates (tracklets and slow links scoring >= 30;
+`?all=true` adds the rest), station 288, follow-up data, not a submission.
+
+### `GET /api/comets/watch?limit=30`
+
+`{updated, watched[{designation, name, stage, sequence, now{ra, dec, r_au, delta_au, elongation_deg, mag},
+most{object, n_exposures, dates}, comet_job, search_job, activity{visits[{epoch, mjd, dates, r_au, delta_au,
+phase_deg, afrho_cm, afrho_err_cm, co2_snr, co2_w_m2, q_co2, q_co2_upper}], trend, outbursts[{epoch, ratio,
+delta_mag, sigma}]}, latest, comet_likeness, coma[], error, checked}], now[{name, designation, ra, dec, r_au,
+delta_au, elongation_deg, mag, days_from_perihelion, pinned}], refresh{status, stage, done, total, error}, pinned,
+max_watch, error, note}`. `now` lists JPL SBDB comets with perihelion within 2 years, positions from two-body
+propagation (about a degree), sorted pinned first, then by predicted magnitude (cached a day).
+
+### `POST /api/comets/watch/refresh`
+
+Starts the watch refresh in the background (idempotent while it runs, one at a time across workers): for each
+watched comet (`SPHEREX_COMET_WATCH`, default `3I,C/2025 A6,29P`, plus the brightest up to
+`SPHEREX_COMET_WATCH_MAX` = 8) an IRSA MOST search, a 6′ co-moving sequence at prewarm priority (pinned), the comet
+analysis and the comet-search object check. Returns the task status; poll `GET /api/comets/watch`.

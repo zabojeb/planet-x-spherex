@@ -9,6 +9,7 @@ import { archivalFov, embed as embedPlane, frameLabel, gridOffset, selectFrames,
 import { ArchivalStrip, LongBaselineControls } from "./components/LongBaseline";
 import { MovingCard, type MovingState } from "./components/Moving";
 import { FieldPanel, MeasureTools, useFieldTools, type Candidate } from "./components/FieldTools";
+import { CometPanel, useCometHunt } from "./components/CometHunt";
 import type { AnalysisSubject } from "./components/AnalysisModal";
 import type { VerifySubject } from "./components/chart/VerifyPanel";
 import { compassPoint, formatDate, formatDec, formatRA, formatRange, fromEcliptic, fromGalactic, mjdToYear, pixelToWorld, positionAngle, propagate, separation, tanToWorld, totalPm, worldToPixel } from "./astro";
@@ -566,6 +567,9 @@ export default function App() {
 
   // ---- field tools: candidates, known objects, Track & Stack (their marks and stacked image go on the sky)
   const ft = useFieldTools(building ? null : meta, view.epoch);
+  // ---- comet hunt (ADR-0063): ranked comet-like movers, their marks join the field tools' on the sky
+  const ch = useCometHunt(building ? null : meta);
+  const skyMarks = useMemo(() => (ch.marks.length ? [...ft.marks, ...ch.marks] : ft.marks), [ft.marks, ch.marks]);
 
   // ---- 3D cubes: one layer per epoch (time) or detector (λ), each computed like the flat frame
   const slices = useMemo(
@@ -992,6 +996,14 @@ export default function App() {
     setHero(false);
   };
   const onMark = (key: string) => {
+    if (key.startsWith("h:")) {
+      const hc = ch.cands.find((x) => `h:${x.id}` === key);
+      if (hc) {
+        ch.setActive(hc.id);
+        setSel({ kind: "point", ra: hc.ra, dec: hc.dec });
+      }
+      return;
+    }
     const c = ft.cands.find((x) => x.key === key);
     if (c) return pickCandidate(c);
     if (key.startsWith("s:") && ft.search.state === "done") {
@@ -1378,7 +1390,7 @@ export default function App() {
         if (s) setHero(false);
       }}
       card={hideMarks ? null : card}
-      marks={lbActive ? undefined : ft.marks}
+      marks={lbActive ? undefined : skyMarks}
       onMark={onMark}
       ruler={ruler}
       magnifier={magnifier}
@@ -1551,6 +1563,18 @@ export default function App() {
               <FieldPanel t={ft} onPick={pickCandidate} epochLabel={`visit ${view.epoch + 1}`} />
             )
           ) : undefined
+        }
+        comets={
+          embed ? undefined : (
+            <CometPanel
+              t={ch}
+              research={research}
+              comoving={comoving}
+              building={building}
+              onPick={(c) => setSel({ kind: "point", ra: c.ra, dec: c.dec })}
+              onComet={(designation, label) => findMoving({ name: designation }, label)}
+            />
+          )
         }
         share={meta ? <SharePanel link={() => viewLink(spec, fov, view, false)} embedLink={() => viewLink(spec, fov, view, true)} exportUrl={research && !building ? (k) => exportUrl(meta.id, k) : undefined} /> : undefined}
         detailsOpen={!!drawer}

@@ -775,4 +775,74 @@ def _summarise_movers(res: dict, limit: int) -> dict:
                     "caveats": res.get("caveats")}, max_list=limit)
 
 
-_SUMMARISERS = {"comet": _summarise_comet, "asteroid": _summarise_asteroid, "unknown_movers": _summarise_movers}
+def _summarise_comet_search(res: dict, limit: int) -> dict:
+    """Ranked comet candidates with their evidence, without the stamps and cutout strips."""
+    rows = []
+    for c in (res.get("candidates") or {}).get("comets", [])[:limit]:
+        cm, sp, orb = c.get("coma") or {}, c.get("spectrum") or {}, c.get("orbit") or {}
+        bands = {b["id"]: b.get("snr") for b in sp.get("bands", []) if b.get("snr") is not None}
+        rows.append({"id": c["id"], "kind": c["kind"], "epoch": c.get("epoch"), "ra": c.get("ra"), "dec": c.get("dec"),
+                     "mjd": c.get("mjd"), "rate_arcsec_per_hr": c.get("rate_arcsec_per_hr"), "pa_deg": c.get("pa_deg"),
+                     "status": c.get("status"), "known": (c.get("known") or {}).get("name"),
+                     "comet_likeness": c["comet_likeness"]["score"], "why": c["comet_likeness"].get("why"),
+                     "coma": {k: cm.get(k) for k in ("verdict", "extent_sigma", "snr")} |
+                             {"tail_pa": (cm.get("tail") or {}).get("pa_deg") if (cm.get("tail") or {}).get("detected") else None,
+                              "tail_aligned": (cm.get("tail") or {}).get("aligned")},
+                     "spectrum": {"verdict": sp.get("verdict"), "band_snr": bands},
+                     "orbit": {"most_likely": orb.get("most_likely"), "comet_like": orb.get("comet_like")},
+                     "distance_au": c.get("distance_au"), "r_au": c.get("r_au"), "delta_au": c.get("delta_au")})
+    out = {"mode": res.get("mode"), "sequence": res.get("sequence"), "object": res.get("object"),
+           "counts": res.get("counts") or res.get("summary"), "observer": res.get("observer"),
+           "seconds": (res.get("stats") or {}).get("seconds") or res.get("seconds"), "candidates": rows,
+           "ades": "export_report(fmt='ades', job_id=...) writes the measured candidates (station 288, follow-up "
+                   "data, not a submission)" if res.get("mode") == "field" else None,
+           "caveats": res.get("caveats")}
+    return compact(out, max_list=limit)
+
+
+_SUMMARISERS = {"comet": _summarise_comet, "asteroid": _summarise_asteroid, "unknown_movers": _summarise_movers,
+                "comet_search": _summarise_comet_search}
+
+
+# ---------------------------------------------------------------- comet discovery (ADR-0063)
+async def comet_search(sequence_id: str | None = None, ra: float | None = None, dec: float | None = None,
+                       fov_arcmin: float = 10.0, slow: bool = True, stack: bool = True) -> dict:
+    """A comet search over a built sequence, or (with ra/dec) the build of the field first."""
+    if not sequence_id:
+        if ra is None or dec is None:
+            raise ToolError("Give a sequence_id, or ra and dec of a field to build first.")
+        built = await build_sequence(ra, dec, fov_arcmin=fov_arcmin)
+        if built["status"] != "done":
+            return {**built, "hint": "Building the field; poll sequence_status, then call comet_search with this "
+                                     "sequence_id."}
+        sequence_id = built["sequence_id"]
+    return await _solar_job(services.comet_search_submit, sequence_id, {"slow": bool(slow), "stack": bool(stack)})
+
+
+async def comet_candidates(job_id: str, limit: int = LIST_LIMIT) -> dict:
+    """The ranked candidates of a comet search (or its progress)."""
+    out = await job_result(job_id, limit)
+    if out.get("status") == "done" and "candidates" not in out:
+        raise ToolError("Not a comet search job; use job_result.")
+    return out
+
+
+async def comet_watch(limit: int = 15) -> dict:
+    """Watched comets with their latest SPHEREx activity, and the brightest comets now."""
+    w = await services.comet_watch(int(limit))
+    watched = []
+    for c in w.get("watched", []):
+        latest = c.get("latest") or {}
+        watched.append({"designation": c.get("designation"), "name": c.get("name"), "stage": c.get("stage"),
+                        "sequence_id": c.get("sequence"), "now": {k: (c.get("now") or {}).get(k) for k in
+                                                                    ("ra", "dec", "r_au", "delta_au", "mag", "elongation_deg")},
+                        "latest_visit": {k: latest.get(k) for k in ("dates", "r_au", "afrho_cm", "co2_snr", "q_co2")},
+                        "outbursts": (c.get("activity") or {}).get("outbursts"),
+                        "activity_slope": ((c.get("activity") or {}).get("trend") or {}).get("k"),
+                        "comet_likeness": c.get("comet_likeness"), "error": c.get("error")})
+    return compact({"updated": w.get("updated"), "watched": watched,
+                    "now": [{k: x.get(k) for k in ("designation", "name", "ra", "dec", "mag", "r_au", "delta_au",
+                                                   "elongation_deg")} for x in w.get("now", [])[:limit]],
+                    "refresh": w.get("refresh"), "note": w.get("note"),
+                    "hint": "build_object_sequence(name) for any of them, then comet_search(sequence_id)."},
+                   max_list=limit)

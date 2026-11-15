@@ -35,7 +35,8 @@ MAX_POINT_CONCURRENT = 6
 
 KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis",
          "c": "comet analysis", "a": "asteroid analysis", "u": "unknown movers",  # c/a/u: spherex_core.solar
-         "l": "long-baseline light curve", "w": "long-period search"}
+         "l": "long-baseline light curve", "w": "long-period search",
+         "h": "comet search"}  # h: spherex_core.comets (ADR-0063)
 
 
 def options_key(opts: FieldOptions) -> str:
