@@ -23,7 +23,10 @@ from .routes import archival, moving
 from .routes import spectral
 from .routes import field
 from .routes import point
+from .routes import solar
 from .routes import status
+from .routes import longbaseline
+from .routes import sky
 
 log = logging.getLogger("spherex_api.http")
 _SEQ_PATH = re.compile(r"^/api/sequences/([A-Za-z0-9]+)")
@@ -93,6 +96,7 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(targets.router)
     app.include_router(archival.router)  # before sequences: its /{array}.bin catch-all would take archival.bin
     app.include_router(field.router)  # before sequences for the same reason (trackstack.bin)
+    app.include_router(solar.router)  # before sequences for the same reason (clean_exposures.bin)
     app.include_router(sequences.router)
     app.include_router(moving.router)
     app.include_router(catalogs.router)
@@ -102,6 +106,8 @@ def create_app(web_dist: Path | None = WEB_DIST) -> FastAPI:
     app.include_router(spectral.router)
     app.include_router(point.router)
     app.include_router(status.router)
+    app.include_router(longbaseline.router)
+    app.include_router(sky.router)
     if os.environ.get("SPHEREX_MCP", "1") != "0":  # MCP endpoint for AI agents at /mcp (docs/mcp.md)
         from spherex_mcp.http import attach
 

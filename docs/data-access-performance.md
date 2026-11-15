@@ -92,7 +92,10 @@ outage for the four non-preset prewarm fields (the presets were cached); that fa
   `wrangler`; the server holds no credentials. `fetch` + `pull` restore them on a new server (`pull` also reads a
   public bucket URL, if the bucket is given one).
 
-The nine `tier` fields (five presets, Proxima Centauri, Wolf 359, Luhman 16, Mira) make 1.80 GB in 12 parts (plus a manifest each).
+The nine `tier` fields (five presets, Proxima Centauri, Wolf 359, Luhman 16, Mira) make 1.80 GB in 12 parts plus
+a manifest each. The five presets (1.10 GB, 8 parts) are in the R2 bucket `planet-x-spherex-tier`; the other four
+(0.70 GB) are bundled on the dev server and go up with `cutout_tier.py push <ids>` (the upload streams through the
+logged-in machine, ~1 MB/s from a home connection; `push` retries a failed part and `--skip-parts` resumes).
 
 ## What to mirror, and what it costs
 
@@ -102,7 +105,7 @@ we search), growing ~1.4 TB per week (~6 TB per month). 1 TB holds ~15,300 files
 | Option | Size | Monthly cost | Notes |
 |---|---|---|---|
 | File-catalogue mirror (this PR) | 1.0 GB | ~$0.09 on vast.ai disk, ~$0.15 on a Railway volume | removes the dependency on IRSA TAP; refresh 13 s/hour |
-| Popular-field tier in R2 (this PR) | 1.8 GB | $0 (R2 free tier: 10 GB-month, 1 M writes, 10 M reads) | $0.015/GB-month beyond 10 GB |
+| Popular-field tier in R2 (this PR) | 1.1 GB (1.8 GB with all nine fields) | $0 (R2 free tier: 10 GB-month, 1 M writes, 10 M reads) | $0.015/GB-month beyond 10 GB |
 | 1 TB of pixels in R2 | 1 TB | ~$15 | writes $4.50/M (15,300 files: $0.07 once), reads $0.36/M, no egress fees |
 | 1 TB in a Railway Bucket | 1 TB | ~$15 | $0.015/GB-month, egress and operations free |
 | 1 TB on the vast.ai instance disk | 1 TB | ~$93 | $0.093/GB-month, fixed when the instance is created, lost with it |

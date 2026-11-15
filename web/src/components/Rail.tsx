@@ -28,10 +28,12 @@ export function Rail(p: {
   /** Guided tour of the five targets (Explore only). */
   onTour?: () => void;
   tourOn?: boolean;
+  /** Map mode (ADR-0061): the field's tools fade out while the map's own rail is shown. */
+  off?: boolean;
 }) {
   const research = p.audience === "research";
   return (
-    <nav className="rail glass" aria-label="Tools">
+    <nav className={`rail glass field-rail${p.off ? " rail-off" : ""}`} aria-label="Tools" aria-hidden={p.off || undefined} {...(p.off ? { inert: "" } : {})}>
       {/* scrolls on short phone screens; not positioned, so the side panels (placed against .rail) are not clipped */}
       <div className="rail-scroll">
       <Popover label={<Navigation size={16} />} title="Go to coordinates" align="side" width={330}>
@@ -97,7 +99,7 @@ export function Rail(p: {
       )}
       {p.fullscreen && (
         <button
-          className={`btn ghost icon rail-btn${p.fullscreen.on ? " active" : ""}`}
+          className={`btn ghost icon rail-btn rail-fs${p.fullscreen.on ? " active" : ""}`}
           onClick={p.fullscreen.toggle}
           title={p.fullscreen.on ? "Exit full screen (F, or hold Esc)" : "Full screen (F)"}
           aria-pressed={p.fullscreen.on}

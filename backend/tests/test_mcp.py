@@ -51,7 +51,8 @@ def test_server_lists_all_tools_resource_and_prompt():
     for n in ("resolve_target", "search_observations", "build_sequence", "sequence_status", "describe_sequence",
               "get_image", "get_blink_strip", "analyze_point", "analyze_field", "job_result", "known_objects",
               "track_and_stack_search", "track_and_stack_image", "catalog_cone", "spectrum_classify",
-              "archival_epochs", "moving_object_search", "export_report", "cancel_job", "list_presets"):
+              "archival_epochs", "moving_object_search", "export_report", "cancel_job", "list_presets",
+              "build_object_sequence", "clean_stack", "comet_analysis", "asteroid_lightcurve", "unknown_movers"):
         assert n in names
     assert any(p.name == "discovery_report" for p in run(s.list_prompts()))
     assert any(str(r.uri) == "spherex://overview" for r in run(s.list_resources()))

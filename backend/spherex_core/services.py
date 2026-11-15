@@ -10,6 +10,7 @@ resolve_target, UpstreamError (a RuntimeError, message safe for users) when a re
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -619,3 +620,77 @@ async def point_analysis_submit(seq_id: str, ra: float, dec: float, pmra: float 
         return analyze_point(ctx, req, progress, check)
 
     return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)
+
+
+# ---------------------------------------------------------------- long-baseline light curves (ADR-0059)
+async def long_baseline_submit(seq_id: str, ra: float | None = None, dec: float | None = None,
+                               pmra: float | None = None, pmdec: float | None = None, ref_epoch: float = 2000.0,
+                               name: str | None = None, calibrate: bool = True, min_period: float | None = None,
+                               max_period: float | None = None, client: str | None = None,
+                               force: bool = False, field_radius: float = 150.0) -> dict:
+    """Start or join the 1999-2026 light curve of the sequence target (or any position inside its field): 2MASS,
+    AllWISE and NEOWISE frames measured like the target, SPHEREx synthetic bands on the same scale, period / trend /
+    event analysis (ADR-0059). A job; poll with field_status."""
+    from .field import jobs as fj
+    from .longbaseline import LB_VERSION, LongBaselineRequest, run
+
+    req = LongBaselineRequest(ra=ra, dec=dec, pmra=pmra, pmdec=pmdec, ref_epoch=ref_epoch, name=name,
+                              calibrate=calibrate, min_period=min_period, max_period=max_period,
+                              field_radius=field_radius)
+    jid = fj.make_id(seq_id, "l", {"lb": req.key(), "v": LB_VERSION})  # a new version does not reuse old results
+    return await fj.field_jobs().submit_work(seq_id, jid, lambda ctx, progress, check: run(ctx, req, progress, check),
+                                             client, force)
+
+
+async def long_period_search_submit(seq_id: str, options: dict | None = None, client: str | None = None,
+                                    force: bool = False) -> dict:
+    """Start or join the field-wide ranking of sources by long-baseline variability (a job)."""
+    from .field import jobs as fj
+    from .longbaseline import SearchOptions, search_field
+    from .longbaseline.search import SEARCH_VERSION
+
+    opts = SearchOptions(**(options or {}))
+    jid = fj.make_id(seq_id, "w", {"lp": opts.to_dict(), "v": SEARCH_VERSION})
+    return await fj.field_jobs().submit_work(seq_id, jid,
+                                             lambda ctx, progress, check: search_field(ctx, opts, progress, check),
+                                             client, force)
+
+
+def long_baseline_csv(job_id: str) -> str:
+    """CSV of a finished long-baseline light curve job. Raises NotFound."""
+    import json
+
+    from .longbaseline.export import lightcurve_csv
+
+    if job_id.partition("-")[2][:1] != "l":
+        raise NotFound("not a long-baseline light-curve job")
+    return lightcurve_csv(json.loads(field_result_path(job_id).read_text()))
+
+
+# ---------------------------------------------------------------- solar system (ADR-0060): spherex_core.solar.service
+from .solar.service import (asteroid_submit, clean_exposures, clean_summary, comet_submit,  # noqa: E402, F401
+                            static_sky_submit, unknown_movers_submit)
+
+
+# ---------------------------------------------------------------- sky map (ADR-0061)
+
+
+async def hips_file(survey: str, path: str):
+    """Local copy of a HiPS file (tile, Allsky, properties, Moc), fetched from the source once."""
+    from . import hips
+
+    return await hips.get(survey, path)
+
+
+async def coverage_at(ra: float, dec: float) -> dict:
+    """SPHEREx exposures and visits covering a position (map pick card)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.at, ra, dec)
+
+
+async def footprints_near(ra: float, dec: float, radius_deg: float, limit: int = 600) -> dict:
+    """Outlines of SPHEREx exposures near a position (map coverage layer)."""
+    from . import coverage
+
+    return await asyncio.to_thread(coverage.footprints, ra, dec, radius_deg, limit)

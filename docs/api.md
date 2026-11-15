@@ -327,6 +327,97 @@ on a grid centred on the object at its own time (ADR-0024). Its `meta.json` adds
 `moving` block; `target_px` and the track sit on the central pixel. Stars trail; catalog overlays and archival
 epochs do not apply.
 
+## Comets, asteroids and unknown movers (ADR-0060)
+
+"Different background, same comet": a co-moving sequence built with `"static_sky": true` also subtracts the sky
+behind the object, using SPHEREx's own images of the same patch at the same detector and wavelength from times
+when the object was elsewhere. The analyses below are jobs with the field-analysis lifecycle (next section):
+kinds `c` (comet), `a` (asteroid), `u` (unknown movers), polled with `GET /api/field/{id}`.
+
+### Static sky: `POST /api/sequences` with `static_sky` · `POST /api/sequences/{id}/static-sky`
+
+`static_sky: true` in a sequence request (422 without `object_name` or `naif_id`) builds the clean version on the
+build queue (deduplicated, cancellable; a separate sequence id, because the key includes it).
+`POST /api/sequences/{id}/static-sky` with `{"force": false}` submits the clean twin of an existing co-moving
+sequence and answers `{"sequence": <clean id>, "source": <id>, "status", "job"}` (`status: "done"` and
+`sequence = id` when it already has clean arrays); poll `GET /api/sequences/{sequence}` as for any build. 404 for
+a fixed-position sequence; 429 when the queue is full.
+
+The clean sequence's `meta.json` adds:
+
+- `arrays.clean` (`clean.f32`, float32 `[epochs, 6, n, n]`, MJy/sr), `arrays.clean_coverage` (`clean_coverage.u16`)
+  and `arrays.clean_exposures` (`clean_exposures.f16`, `[frames, n, n]`, same order as `exposures`; `null` when
+  single exposures are not stored). NaN = masked star residual or no template.
+- per exposure: `ss_method` (`median | interp | single | nearest | none`), `ss_n` (templates combined),
+  `ss_candidates`, `ss_dl` (wavelength offsets used, in resolution elements), `ss_offset`, `ss_eps` (star
+  residual fraction), `ss_masked`, `ss_p99_before`, `ss_p99_after` (99th percentile of |pixel| / noise).
+- `static_sky`: version, method, object type, exclusion radius, tolerances, footprint clusters and search sources
+  (`tap`, `most`, `failed`), `failed_searches`, exposures with a template, counts per method, templates read,
+  medians of ε / masked fraction / p99 before and after, errors (first 20), network bytes and seconds per phase.
+
+### `GET /api/sequences/{id}/clean.bin` · `clean_coverage.bin` · `clean_exposures.bin?epoch=&band=`
+
+The clean co-adds through the generic array route (same headers and caching as `coadds.bin`), and the clean
+single exposures of one epoch and detector, float32 `[k, n, n]`, with `X-Exposure-Indices`. 404 (`this sequence
+has no static-sky subtraction`) on a sequence without them.
+
+### `GET /api/sequences/{id}/clean-summary?epoch=`
+
+What a client needs for a clean view: `{sequence, object, static_sky, arrays, epochs: [{epoch, band, noise_clean,
+noise_plain, noise_ratio, centre_clean, centre_snr}]}` (robust noise beyond 0.6 of the half-width, mean of the
+central 3 × 3 px). 404 without static sky.
+
+### `POST /api/sequences/{id}/comet`
+
+Body `{"rho_km": [1e4, 2e4, 5e4, 1e5], "use_clean": true, "force": false}` (1–8 radii, ≤ 5·10⁶ km; 422 otherwise).
+Needs a co-moving sequence with single exposures (the job fails with `NotFound` otherwise). Result:
+
+```json
+{"kind": "comet", "version": 1, "sequence": "...", "object": "ATLAS (C/2025 N1)", "options": {...},
+ "static_sky": true, "image_source": "clean_exposures (static sky subtracted)", "geometry_source": ["most"],
+ "solar_spectrum": "CALSPEC sun_mod_001", "km_per_arcsec_per_au": 725.27, "features": [...],
+ "spectrum": [{"index", "epoch", "band", "mjd", "wl", "dwl", "r_au", "delta_au", "phase_deg",
+               "ap": [{"rho_km", "theta_arcsec", "psf_limited", "flux_mjy", "err_mjy", "masked_frac"}]}],
+ "afrho_exposures": [{"index", "band", "wl", "rho_km", "afrho_cm", "err_cm", "a0frho_cm", "a0err_cm"}],
+ "afrho_summary": {"20000": {"afrho_cm": 204.0, "err_cm": 3.1, "n": 31}},
+ "epochs": [{"epoch": 0, "date_min", "date_max", "r_au": 3.22, "delta_au": 2.71, "phase_deg": 17.1,
+             "afrho": {"20000": {"D1": {"afrho_cm", "err_cm", "a0frho_cm", "a0err_cm", "n"}}},
+             "bands": {"20000": [{"id": "co2", "kind": "emission", "value": 1.1e14, "err": 2e12, "snr": 55,
+                                  "detected": true, "unit": "W m-2", "value_w_m2", "err_w_m2",
+                                  "q_proxy": 8.7e26, "q_err": 1.6e25, "q_upper_3sigma": null, "molecule": "CO2"},
+                                 {"id": "h2o_ice_3.0", "kind": "absorption", "value": 0.75, "err": 0.07, ...}]},
+             "dust_colour": {"slope_pct_per_100nm", "err", "rho_km", "n"},
+             "band_images": {"co2": {"n_window", "n_side", "profile": {"r_px", "sb", "err", "npix"}}}}],
+ "profiles": [{"epoch", "band", "source", "fwhm_px", "km_per_px", "profile", "slope": {"slope", "err"}}],
+ "activity_trend": {"rho_km", "k", "err", "points", "r_au", "a0frho_cm"}, "caveats": [...]}
+```
+
+`value` is the integrated band flux in mJy·Hz for emission bands (`value_w_m2` in W m⁻²) and the fractional
+depth for absorption bands; `q_proxy` / `q_upper_3sigma` are molecules s⁻¹. See docs/methods.md.
+
+### `POST /api/sequences/{id}/asteroid`
+
+Body `{"min_period_h": 1.5, "max_period_h": null, "use_clean": true, "force": false}`. Result: `{kind:
+"asteroid", flux_source, geometry_source, solar_spectrum, n_points, points: [{index, epoch, band, wl, t, mag, err,
+alpha}], period: {best_period_h, period_err_h, periodogram_peak_h, nterms, rotation: {rule, maxima_per_cycle,
+odd_harmonics_p, double_peak_confirmed}, aliases_h, peaks_h, epochs: [{epoch, n, used, span_days,
+best_period_h, period_err_h, amplitude_mag, chi2_red}], folded, periodogram, grid}, spectra: [{epoch, n,
+phase_deg, r_au, delta_au, wl, reflectance, err, binned, features: {thermal, slope, band_1um, band_2um,
+band_3um}, taxonomy}], taxonomy: {complex, rule, hydrated}, taxonomy_epoch, taxonomy_rules, caveats}`. `t` is the
+light-time corrected MJD and `mag` the reduced reflectance magnitude.
+
+### `POST /api/sequences/{id}/unknown-movers`
+
+Body `{"vmag_lim": 21.0, "field_job": null, "force": false}` on a fixed-position sequence (a co-moving one fails:
+its stars move). `field_job` reuses a finished `f` job of the same sequence (422 for another sequence's or kind's
+job, 404 if not finished). Result: `{kind: "unknown_movers", source, identification, counts: {tracklets, known,
+unidentified, unverified, strong}, unidentified: [{id, trk_sub, status, tier, epoch, n, mjd_first, mjd_last,
+span_hours, ra, dec, ecliptic_latitude_deg, rate_arcsec_per_hr, pa_deg, angle_from_ecliptic_deg, retrograde,
+rms_arcsec, mean_snr, mean_rb, partner_fraction, bands, population_hint, repeats_in_other_visits,
+nearest_known}], others: [...],
+candidates: {tracklets}, ades, caveats}`. `GET /api/field/{id}/ades.psv` exports the strong ones
+(`?all=true`: all), station 288, "follow-up data, not a submission".
+
 ## Spectral analysis
 
 All spectral endpoints work on photometry records shaped like `meta.photometry` (`wl`, `band`, `flux_mjy`,
@@ -441,7 +532,8 @@ Jobs below share one lifecycle. `POST` starts or joins the job and returns the j
 200 with the result (immutable, `ETag "<id>"`), 202 with the job while it runs (every poll is a heartbeat),
 500 if it failed, 410 if cancelled (POST again). `DELETE /api/field/{id}` withdraws this client (200 job / 204);
 a job nobody polls for 60 s is cancelled. Send `X-Client-Id`. Job ids are `<sequence>-<kind><hash>` with kind
-`f` (field analysis), `k` (known objects), `s` (stack search). 404 for an unknown or unfinished sequence.
+`f` (field analysis), `k` (known objects), `s` (stack search), and `c` / `a` / `u` (comet, asteroid, unknown
+movers; previous section). 404 for an unknown or unfinished sequence.
 
 ### `POST /api/sequences/{id}/field`
 
@@ -548,14 +640,19 @@ unavailable ...` instead of being waited for again. The result's `timings` block
 Result (every step slot is either its object or `{"error": "<Type>: <message>"}`):
 
 ```text
-{ id, sequence, version: 1,
+{ id, sequence, version: 2,
   request: {ra, dec, pmra, pmdec, ref_epoch, name},
-  point: {ra, dec, x, y, inside, motion_used: {pmra, pmdec, ref_epoch, source}},
+  point: {ra, dec, x, y, inside,                     # x, y, inside: at the mean epoch (moved with the request's motion)
+          epoch_position: {ra, dec, year},           # where a request with a motion is at the sequence's mean epoch
+          motion_used: {pmra, pmdec, ref_epoch, source}},
   identification: {radius_arcsec: 15, reference_year,
                    gaia|catwise|2mass|simbad: {matches: [{id, ra, dec, epoch, pmra, pmdec, mag, mag_band,
                                                            otype?, sptype?, parallax?, sep_arcsec, pm_total,
                                                            track: [{epoch, ra, dec, x, y}]}],   # ≤ 3, nearest first
-                                               n_in_radius, counterpart}            # counterpart: nearest ≤ 4″
+                                               n_in_radius, counterpart,            # counterpart: nearest ≤ 4″
+                                               truncated}   # cone hit the 3000-row limit: "no counterpart" not claimed
+                                    # sources with a motion are compared with the point at the mean epoch, sources
+                                    # without one (2MASS) at their own epoch (ADR-0062)
                                     | {error}},
   photometry: {sequence, target, photometry: [records as meta.photometry], rings, stats,
                summary: {n, n_flagged, n_saturated, n_relative, methods: {psf|aperture|ring: n},
@@ -610,3 +707,169 @@ optional `SPHEREX_FILE_MIRROR_BASE`), `spherex-cutouts` (IRSA cutout service vs 
 `GET /api/releases` answers from the mirror when it is complete (with `"source": "local mirror (synced … h ago)"`)
 and falls back to it when IRSA TAP fails; `GET /api/catalogs` labels no longer name one archive, since the answer
 may come from any source of that catalogue.
+
+## Long-baseline light curves (2MASS, AllWISE, NEOWISE + SPHEREx)
+
+A homogeneous 1997–2026 light curve of the sequence target, or of any position inside its field, and a field-wide
+long-period variability search (ADR-0059). Both are field jobs with the usual lifecycle: deduplicated per sequence
+and request, `force: true` re-runs, a job nobody polls for 60 s is cancelled. Send `X-Client-Id`.
+
+### `POST /api/sequences/{id}/long-baseline`
+
+Body (all optional):
+
+```text
+{ra, dec,              # deg ICRS at ref_epoch; omit both for the sequence target (one without the other: 422)
+ pmra, pmdec,          # mas/yr (pmra with cos dec); omitted: a Gaia DR3 counterpart's motion within 3", else 0
+ ref_epoch: 2000.0, name,
+ calibrate: true,      # cross-calibrate with field stars (CatWISE2020 / AllWISE / 2MASS PSC)
+ min_period: 50,       # days
+ max_period,           # days, default baseline / 1.5 (<= 6000)
+ field_radius: 150,    # arcsec (60-360): frame windows and calibration stars around the target; larger finds
+                       # more calibration stars near bright targets but reads more frame rows the first time
+ force: false}
+```
+
+Returns the job `{id, status, stage, done, total, error, elapsed}`, with `id` = `<sequence>-l<hash>`. 404: the
+sequence is unknown or unfinished. 422: a bad body, or a position outside the field or on a solar-system
+sequence (the job fails with the reason). Stages run in order: `archive search`, `catalogues`, `frames`
+(done/total = windows read), `photometry`, `calibrate`, `analysis`.
+
+### `POST /api/sequences/{id}/long-period-search`
+
+Body `{w1_max: 15, max_sources: 150 (1-400), min_points: 8, min_period: 50, max_period: null,
+radius_arcsec: 150 (30-360), force: false}`. Returns the job, with `id` = `<sequence>-w<hash>`. Job ids include
+the result version, so a new pipeline version does not serve old results.
+
+### `GET /api/long-baseline/{job_id}` · `DELETE /api/long-baseline/{job_id}`
+
+GET answers:
+
+| Status | Meaning |
+|---|---|
+| 200 | The result (immutable, `ETag: "<job_id>"`). |
+| 202 | The job, while it runs; every GET is a heartbeat. |
+| 500 | The job failed. |
+| 410 | The job was cancelled; POST again. |
+| 404 | Unknown job, or not an `l` / `w` job. |
+
+DELETE withdraws this client: 200 with the job, or 204 if the job is unknown.
+
+Light-curve result:
+
+```text
+{ version: 2, kind: "long-baseline light curve", sequence, created,
+  target: {ra, dec, name, pmra, pmdec, ref_epoch, source}, is_sequence_target, request,
+  coverage: {first_year, last_year, baseline_years, bands: {J|H|Ks|W1|W2|D1..D6: {n, surveys, first, last}}},
+  points: [{band, survey: 2MASS|AllWISE|NEOWISE|SPHEREx, survey_id, date, mjd, mjd_min, mjd_max, year,
+            flux_mjy, err_mjy,               # null for relative points
+            mag, mag_err, mag_system,        # Vega (J..W2), AB (D1..D6), "relative" (-2.5 log10 rel)
+            rel, rel_err, relative,          # relative points (ring photometry of saturated targets)
+            method,                          # aperture | ring | psc | synthetic | synthetic-relative | narrow | narrow-relative
+            group,                           # zero-point group: band, or "<band>:<survey>-ring|-relative"
+            mag_anchored, flux_anchored_mjy, anchored,   # on the band's reference group (see analysis.anchoring)
+            n, n_rejected, saturated, flagged, calibrated, coverage, extrapolated, wl_um}],
+  methods: {"NEOWISE W1": {method: aperture|ring, saturated_share, frames, apcorr | r_in_px, r_out_px,
+                           ring_fraction, r_in_arcsec, r_out_arcsec, core_from, scale_uncertain}, ...},
+                           # core_from: "NEOWISE" when an AllWISE ring starts at the NEOWISE ring's radius;
+                           # scale_uncertain: the ring holds < 0.5% of the PSF (absolute scale off by up to ~2 mag)
+  calibration: {references: {wise: CatWISE2020|AllWISE|Gaia DR3|"", 2mass},
+                stars: [{id, ra, dec, w1, mag, g}],
+                frames: {"neowise:W1": {offset_mag, scatter_mag, err_mag, n, applied, reference, stars}, ...},
+                spherex: {W1|W2|J|H|Ks: {offset_mag, scatter_mag, n, applied, used_offset_mag,
+                                         source: "field stars"|"default", rejected_variable, stars}},
+                star_photometry: {<star id>: {neowise: {W1, W2}, spherex_synthetic: {...}, catalogue: {...}}}},
+  analysis: {n_points, bands, groups, baseline_days, first_mjd, last_mjd,
+             constant_model: {chi2_red, offsets: {group: mag}},
+             period: {period_days, period_err_days, frequency_per_day, power, false_alarm_probability, significant,
+                      cadence_alias,                     # k when P = 365.25/k d (k <= 7): not significant
+                      n_points, bands, nterms, chi2_red, min_period_days, max_period_days, baseline_days,
+                      amplitudes_mag: {band: peak-to-peak}, offsets: {group: mag}, t0_mjd,
+                      peaks: [{period_days, power}],                    # up to 5, independent
+                      periodogram: {period_days: [...], power: [...]},  # <= 1500 samples
+                      model: {phase: [0..1], mag_by_band: {band: [...]}}} | null,
+             folded: [{band, survey, group, phase, mag, mag_err, mjd}],  # when the period is significant
+             trends: {band: {slope_mag_per_year, slope_err, significance, span_years, n}},   # spans >= 3 yr
+             era_means: {band: [{survey, group, mean_mag, err_mag, n, first_mjd, last_mjd}]},
+             events: [{kind: dimming|brightening, start_mjd, end_mjd, peak_mag, bands, surveys, n_points,
+                       significance}],
+             band_stats: {band: {n, chi2_red_constant, range_5_95_mag, robust_sigma_mag, median_err_mag}},
+             anchoring: {group: {band, reference, shift_mag, fitted, absolute_scale}},
+             classification: {label: constant|variable (aperiodic)|periodic variable|long-period variable,
+                              variable, periodic, trend_bands, dimming_events, reasons: [...]}} | {error},
+  processing: {window_centre: {ra, dec}, window_radius_arcsec, max_visit_frames, spherex_bin_days, period_bands,
+               mag_floor},
+  stats: {images, frames: {frames, cached, read, not_covered, requests, bytes, errors}, spherex, seconds: {stage: s},
+          total_seconds},
+  notes: [...] }
+```
+
+Long-period search result:
+
+```text
+{ version: 3, kind: "long-period search", sequence, created, options, field: {ra, dec, radius_arcsec},
+  summary: {sources, measured, contaminated, labels: {label: n}, variable_fraction,    # over clean sources
+            long_period_candidates: [id]},
+  candidates: [{id, ra, dec, w1, w2, n_points, saturated,
+                contamination,            # AllWISE W1/W2 ccf ("hh", "d0", ...), "track" (on the moving target's
+                                          # track), "blend" (W1 > 0.5 mag off the catalogue) or null
+                score, label, variable, periodic, reasons, chi2_red: {W1, W2}, range_mag: {W1, W2},
+                period_days, period_power, period_fap, cadence_alias, amplitudes_mag, trends, events,
+                baseline_years, points: [{band, survey, mjd, mag, mag_err, group}]}],   # ranked, best first
+  ensemble: {"neowise:W1": {applied, visits, zero_point_scatter_mag}, ...},
+  stats: {images, frames, seconds: {frames, photometry, total}}, notes }
+```
+
+### `GET /api/long-baseline/{job_id}/lightcurve.csv`
+
+The finished light curve, one row per point, with three `#` comment lines first. The columns are:
+
+```text
+band, survey, date, mjd, mjd_min, mjd_max, year, flux_mjy, err_mjy, mag, mag_err, mag_system, mag_anchored,
+flux_anchored_mjy, anchored, group, method, relative, rel, rel_err, saturated, flagged, calibrated, n, coverage
+```
+
+404 for an unknown or unfinished job.
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' -d '{}' \
+  https://<host>/api/sequences/<id>/long-baseline
+```
+
+```bash
+curl -s -H 'X-Client-Id: tab1' https://<host>/api/long-baseline/<job_id>
+```
+
+MCP: `long_baseline_lightcurve(sequence_id, ra?, dec?, pmra?, pmdec?, ref_epoch?)` and
+`long_period_search(sequence_id, limit?)` submit or join the same jobs. They return a compact summary once
+done, the job status while running, and `job_result(job_id)` works too. From the command line:
+`python scripts/long_baseline.py <sequence> [--ra --dec] [--png curve.png] [--out result.json] [--search]`.
+
+## Sky map: HiPS cache, coverage and footprints (ADR-0061)
+
+### `GET /hips/{survey}/{path}`
+
+The SPHEREx DR1 all-sky HiPS cube (`survey` = `spherex-dr1`), served from the server's disk and fetched from IRSA
+the first time a file is asked for. `path` is a HiPS file name: `properties`, `Moc.fits`, `Norder3/Allsky_{frame}.png`
+or `Norder{k}/Dir{d}/Npix{n}_{frame}.png`; anything else is 404.
+
+| Response | When | `Cache-Control` |
+|---|---|---|
+| 200 tile / `Allsky` (PNG) | on disk, or fetched now | `public, max-age=31536000, immutable`, with `ETag` |
+| 200 `properties` / `Moc.fits` | refreshed after an hour; the stale copy when IRSA is down | `public, max-age=3600` |
+| 304 | `If-None-Match` matches | as above |
+| 404 | unknown survey or path, or IRSA has no such file (remembered for a day) | `public, max-age=86400` |
+| 502 | not on disk and every source failed | — |
+
+### `GET /api/coverage?ra=&dec=`
+
+What SPHEREx has at a position, from the local file-catalogue mirror (milliseconds; an IRSA image search when the
+mirror is not built). `{ra, dec, n_exposures, n_visits, per_detector: {D1: n, …}, per_collection, date_min, date_max,
+visits: [{from, to, n, mjd_min, mjd_max}], deep, source, seconds}`; `n_exposures: 0` where there is nothing yet.
+
+### `GET /api/footprints?ra=&dec=&radius=3&limit=600`
+
+Outlines of SPHEREx exposures whose footprint lies within `radius` degrees (at most 12), newest first, one detector of
+each dichroic pair (D1–D3; D4–D6 see the same sky): `{available, total, shown, radius_deg, footprints: [{obs_id, band,
+mjd, collection, corners: [ra1, dec1, … ra4, dec4]}]}`. Without a mirror: `{available: false, reason, footprints: []}`.
+Cached for 10 minutes.

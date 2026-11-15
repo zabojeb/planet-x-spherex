@@ -472,7 +472,10 @@ async def job_result(job_id: str, limit: int = LIST_LIMIT) -> dict:
         raise ToolError(f"Not an analysis job id: {e}") from e
     if st == "done":
         res = json.loads(services.field_result_path(job_id).read_text())
-        return {"job_id": job_id, "status": "done", **_summarise_field(res, int(limit))}
+        if res.get("kind") in _LB_SUMMARIES:
+            return {"job_id": job_id, "status": "done", **_LB_SUMMARIES[res["kind"]](res, int(limit), job_id)}
+        summarise = _SUMMARISERS.get(res.get("kind"), _summarise_field)
+        return {"job_id": job_id, "status": "done", **summarise(res, int(limit))}
     if st == "unknown":
         raise ToolError("Unknown or expired job id.")
     if st in ("queued", "running"):
@@ -513,6 +516,74 @@ async def archival_epochs(sequence_id: str) -> dict:
                    max_list=60)
 
 
+# ---------------------------------------------------------------- long-baseline light curves (ADR-0059)
+def _lb_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
+    """A long-baseline light curve without its point list: coverage, calibration, period, trends, events."""
+    a = res.get("analysis") or {}
+    per = a.get("period") or {}
+    cal = res.get("calibration") or {}
+    bands = (res.get("coverage") or {}).get("bands") or {}
+    return compact({
+        "target": {k: (res.get("target") or {}).get(k) for k in ("name", "ra", "dec", "pmra", "pmdec")},
+        "verdict": a.get("classification"),
+        "coverage": {"first_year": (res.get("coverage") or {}).get("first_year"),
+                     "last_year": (res.get("coverage") or {}).get("last_year"),
+                     "bands": {b: {"n": v.get("n"), "surveys": v.get("surveys")} for b, v in bands.items()}},
+        "period": {k: per.get(k) for k in ("period_days", "period_err_days", "power", "false_alarm_probability",
+                                           "significant", "amplitudes_mag", "bands", "baseline_days")} if per else None,
+        "other_peaks_days": [p_.get("period_days") for p_ in (per.get("peaks") or [])[1:4]],
+        "trends": a.get("trends"), "events": (a.get("events") or [])[:limit],
+        "era_means": {b: [{k: e.get(k) for k in ("survey", "mean_mag", "err_mag", "n")} for e in v]
+                      for b, v in (a.get("era_means") or {}).items() if b in ("W1", "W2", "J", "H", "Ks")},
+        "methods": {k: v.get("method") for k, v in (res.get("methods") or {}).items()},
+        "calibration": {
+            "frames_vs_catalogue": {k: {kk: v.get(kk) for kk in ("offset_mag", "scatter_mag", "n", "applied")}
+                                    for k, v in (cal.get("frames") or {}).items()},
+            "spherex_vs_archive": {k: {kk: v.get(kk) for kk in ("used_offset_mag", "scatter_mag", "n", "source")}
+                                   for k, v in (cal.get("spherex") or {}).items()}},
+        "csv": f"/api/long-baseline/{job_id}/lightcurve.csv", "notes": res.get("notes", [])[:4]},
+        max_list=max(limit, 8))
+
+
+def _lp_summary(res: dict, limit: int = LIST_LIMIT, job_id: str = "") -> dict:
+    keep = ("id", "ra", "dec", "w1", "w2", "label", "score", "contamination", "period_days", "period_fap",
+            "cadence_alias", "range_mag", "chi2_red", "trends", "events", "baseline_years")
+    return compact({"summary": res.get("summary"),
+                    "candidates": [{k: c.get(k) for k in keep} for c in (res.get("candidates") or [])[:limit]],
+                    "ensemble": res.get("ensemble"), "notes": res.get("notes")}, max_list=max(limit, 6))
+
+
+_LB_SUMMARIES = {"long-baseline light curve": _lb_summary, "long-period search": _lp_summary}
+
+
+async def _lb_job(job: dict, limit: int, hint: str) -> dict:
+    if job.get("status") == "done":
+        res = json.loads(services.field_result_path(job["id"]).read_text())
+        return {"job_id": job["id"], "status": "done", **_LB_SUMMARIES[res["kind"]](res, limit, job["id"])}
+    if job.get("status") in ("queued", "running"):
+        _keepalive("field", job["id"])
+    return {"job_id": job["id"], **{k: job.get(k) for k in ("status", "stage", "done", "total", "error")}, "hint": hint}
+
+
+async def long_baseline_lightcurve(sequence_id: str, ra: float | None = None, dec: float | None = None,
+                                   pmra: float | None = None, pmdec: float | None = None,
+                                   ref_epoch: float = 2000.0) -> dict:
+    """1999-2026 light curve of the target (or a position): 2MASS, AllWISE, NEOWISE frames + SPHEREx synthetic bands."""
+    _meta(sequence_id)
+    if (ra is None) != (dec is None):
+        raise ToolError("Give both ra and dec, or neither for the sequence target.")
+    job = await services.long_baseline_submit(sequence_id, ra, dec, pmra, pmdec, ref_epoch, client=CLIENT)
+    return await _lb_job(job, LIST_LIMIT, "Call again with the same arguments (or job_result) every 15-30 s; "
+                                          "a first run reads ~0.5 GB of WISE frames and takes 1-3 minutes.")
+
+
+async def long_period_search(sequence_id: str, limit: int = LIST_LIMIT) -> dict:
+    """Rank the field's sources by long-baseline (NEOWISE + SPHEREx) variability."""
+    _meta(sequence_id)
+    job = await services.long_period_search_submit(sequence_id, client=CLIENT)
+    return await _lb_job(job, int(limit), "Call again (or job_result) every 30 s; a field takes 1-5 minutes.")
+
+
 # ---------------------------------------------------------------- catalogs and exports
 def catalog_cone(catalog: str, ra: float, dec: float, radius_arcmin: float = 2.0, limit: int = 25) -> dict:
     try:
@@ -540,3 +611,168 @@ def export_report(sequence_id: str, fmt: str, job_id: str | None = None) -> dict
         return {"format": "fits", "url": f"/api/sequences/{sequence_id}/export/coadds.fits",
                 "note": "Binary; download it from the site (prefix with the server URL)."}
     raise ToolError("fmt must be ades, csv, votable or fits")
+
+
+# ---------------------------------------------------------------- solar-system objects (ADR-0060)
+async def build_object_sequence(name: str, fov_arcmin: float = 8.0, static_sky: bool = True,
+                                date_min: str | None = None, date_max: str | None = None) -> dict:
+    """A co-moving sequence of a known asteroid or comet (each exposure centred on the object), optionally with
+    the static sky subtracted. Runs the IRSA MOST search first; call again while it reports "searching"."""
+    st, res = await services.moving_search(name)
+    if st != "done":
+        return compact({"status": "searching" if st == "running" else st,
+                        **{k: res.get(k) for k in ("kind", "error", "choices")},
+                        "hint": "MOST is still searching (minutes for long windows); call again in 30 s."})
+    req = res.get("suggested_request")
+    if not req:
+        raise ToolError(f"SPHEREx never observed {name!r} according to MOST.")
+    fov = float(fov_arcmin)
+    if not (1.0 <= fov <= LIMITS.max_fov_arcmin):
+        raise ToolError(f"fov_arcmin must be between 1 and {LIMITS.max_fov_arcmin:g}")
+    from spherex_api.schemas import _mjd
+
+    params = SequenceParams(ra=req["ra"], dec=req["dec"], name=req.get("name"), fov_arcmin=fov,
+                            object_name=req.get("object_name"), object_type=req.get("object_type"),
+                            naif_id=req.get("naif_id"), obs_begin=req["obs_begin"], obs_end=req["obs_end"],
+                            date_min=_mjd(date_min), date_max=_mjd(date_max, end_of_day=True),
+                            static_sky=bool(static_sky))
+    st, _ = await services.poll_sequence(params.key(), client=CLIENT)
+    if st == "done":
+        return {"sequence_id": params.key(), "status": "done", "object": res.get("object"),
+                "note": "Already built; call comet_analysis or asteroid_lightcurve."}
+    LIMITS.check_build(_active("sequence"))
+    try:
+        job = await services.submit_sequence(params, ip="mcp", client=CLIENT)
+    except Exception as e:  # TooManyJobs / QueueFull
+        raise ToolError(f"The server is busy: {e}. Try again in a minute.") from e
+    if job.get("status") not in ("done", "error", "cancelled"):
+        _keepalive("sequence", job["id"])
+    return {"sequence_id": job["id"], "status": job.get("status"), "object": res.get("object"),
+            "exposures": res.get("n_exposures"), "dates": [res.get("date_min"), res.get("date_max")],
+            "hint": "Poll sequence_status; a static-sky build searches the sky behind the track (1-5 min)."}
+
+
+def _clean_png(m: dict, clean: np.ndarray, e: int, band: str, stretch: str) -> bytes:
+    if band.upper() == "ALL":
+        img = _all_bands(clean, e)
+    else:
+        img = clean[e, _band_index(band)]
+    lo, hi = images.limits(img, 1, 99.7)
+    return images.encode_png(images.upscale(images.to_grey(images.stretch(img, lo, hi, stretch))))
+
+
+async def clean_stack(sequence_id: str, epoch: int = -1, band: str = "ALL", stretch: str = "asinh") -> tuple:
+    """The static-sky subtracted co-add of one epoch of a co-moving sequence ("different background, same
+    comet"), with the noise and object S/N clean vs plain. Starts the static-sky build when the sequence has
+    none (returns its id; poll sequence_status, then call again with that id)."""
+    m = _meta(sequence_id)
+    if not (m.get("arrays") or {}).get("clean"):
+        try:
+            res = await services.static_sky_submit(sequence_id, ip="mcp", client=CLIENT)
+        except NotFound as e:
+            raise ToolError(str(e)) from e
+        if res["status"] == "done":
+            sequence_id = res["sequence"]
+            m = _meta(sequence_id)
+        else:
+            if res["status"] not in ("error", "cancelled"):
+                _keepalive("sequence", res["sequence"])
+            return {"sequence_id": res["sequence"], "source_sequence": sequence_id, "status": res["status"],
+                    "hint": "Static-sky build started; poll sequence_status, then call clean_stack with this id."}, None
+    clean = services.read_array(sequence_id, "clean")
+    e = epoch % clean.shape[0]
+    summ = services.clean_summary(sequence_id, e)
+    info = m["static_sky"]
+    ep = m["epochs"][e]
+    out = {"sequence_id": sequence_id, "epoch": e, "dates": f"{ep['date_min'][:10]}..{ep['date_max'][:10]}",
+           "band": band.upper(), "object": (m.get("moving") or {}).get("object"),
+           "static_sky": compact({k: info.get(k) for k in ("method", "exposures", "with_template", "median_eps",
+                                                         "median_masked_frac", "median_p99_before",
+                                                         "median_p99_after", "seconds", "errors")}),
+           "per_detector": compact([{k: r.get(k) for k in ("band", "noise_ratio", "centre_snr")}
+                                    for r in summ["epochs"]]),
+           "caption": "Static-sky subtracted co-add (object at the centre, north up, east left): stars behind the "
+                      "track are removed with templates from other SPHEREx visits; masked residuals are NaN. "
+                      "noise_ratio < 1 means the clean co-add is quieter than the plain one."}
+    return out, _clean_png(m, clean, e, band, stretch)
+
+
+async def _solar_job(submit, sequence_id: str, *args) -> dict:
+    _meta(sequence_id)
+    if _active("field") >= LIMITS.max_active_analyses:
+        raise ToolError("Two analyses are already running; poll job_result first.")
+    try:
+        job = await submit(sequence_id, *args, client=CLIENT)
+    except NotFound as e:
+        raise ToolError(str(e)) from e
+    if job.get("status") not in ("done", "error", "cancelled"):
+        _keepalive("field", job["id"])
+    return {"job_id": job["id"], "status": job.get("status"), "hint": "Poll job_result (usually under a minute)."}
+
+
+async def comet_analysis(sequence_id: str, rho_km: list[float] | None = None) -> dict:
+    return await _solar_job(services.comet_submit, sequence_id, {"rho_km": rho_km})
+
+
+async def asteroid_lightcurve(sequence_id: str, min_period_h: float = 1.5, max_period_h: float | None = None) -> dict:
+    return await _solar_job(services.asteroid_submit, sequence_id,
+                            {"min_period_h": float(min_period_h), "max_period_h": max_period_h})
+
+
+async def unknown_movers(sequence_id: str, vmag_lim: float = 21.0, field_job: str | None = None) -> dict:
+    return await _solar_job(services.unknown_movers_submit, sequence_id, float(vmag_lim), field_job)
+
+
+def _summarise_comet(res: dict, limit: int) -> dict:
+    rhos = [str(int(r)) for r in res["options"]["rho_km"]]
+    ref = rhos[min(1, len(rhos) - 1)]
+    epochs = []
+    for ep in res.get("epochs", [])[:limit]:
+        bands = []
+        for b in ep.get("bands", {}).get(ref, []):
+            row = {k: b.get(k) for k in ("id", "kind", "value", "err", "snr", "detected", "q_proxy", "q_err",
+                                         "q_upper_3sigma")}
+            bands.append(row)
+        epochs.append({"epoch": ep["epoch"], "dates": f"{ep['date_min'][:10]}..{ep['date_max'][:10]}",
+                       "r_au": ep.get("r_au"), "delta_au": ep.get("delta_au"), "phase_deg": ep.get("phase_deg"),
+                       "afrho_D1_cm": {r: (ep["afrho"].get(r) or {}).get("D1") for r in rhos},
+                       f"bands_at_{ref}_km": bands, "dust_colour": ep.get("dust_colour")})
+    return compact({"object": res.get("object"), "image_source": res.get("image_source"),
+                    "geometry_source": res.get("geometry_source"), "afrho_summary": res.get("afrho_summary"),
+                    "epochs": epochs, "activity_trend": res.get("activity_trend"),
+                    "profile_slopes": [{"epoch": p["epoch"], "band": p["band"], "source": p.get("source"),
+                                        "slope": (p.get("slope") or {}).get("slope"),
+                                        "err": (p.get("slope") or {}).get("err")}
+                                       for p in (res.get("profiles") or [])][:12],
+                    "caveats": res.get("caveats")}, max_list=12)
+
+
+def _summarise_asteroid(res: dict, limit: int) -> dict:
+    per = res.get("period") or {}
+    rot = per.get("rotation") or {}
+    return compact({"object": res.get("object"), "flux_source": res.get("flux_source"), "n_points": res.get("n_points"),
+                    "n_relative": res.get("n_relative"),
+                    "period": {k: per.get(k) for k in ("best_period_h", "period_err_h", "confidence", "warnings",
+                                                       "periodogram_peak_h", "aliases_h", "peaks_h")}
+                    if per.get("best_period_h") else
+                    "not enough points for a period",
+                    "rotation_rule": rot.get("rule"), "double_peak_confirmed": rot.get("double_peak_confirmed"),
+                    "epochs": [{k: e.get(k) for k in ("epoch", "n", "best_period_h", "amplitude_mag", "chi2_red")}
+                               for e in per.get("epochs", [])][:limit],
+                    "taxonomy": res.get("taxonomy"), "taxonomy_epoch": res.get("taxonomy_epoch"),
+                    "features": [{"epoch": s["epoch"], "phase_deg": s["phase_deg"], **(s.get("features") or {})}
+                                 for s in res.get("spectra", [])][:limit],
+                    "caveats": res.get("caveats")}, max_list=12)
+
+
+def _summarise_movers(res: dict, limit: int) -> dict:
+    return compact({"source": res.get("source"), "counts": res.get("counts"),
+                    "identification": {k: (res.get("identification") or {}).get(k) for k in ("objects_in_field", "matched",
+                                                                                              "error")},
+                    "unidentified": res.get("unidentified", [])[:limit],
+                    "ades": "export_report(fmt='ades', job_id=...) writes the strong ones (station 288, follow-up "
+                            "data, not a submission)",
+                    "caveats": res.get("caveats")}, max_list=limit)
+
+
+_SUMMARISERS = {"comet": _summarise_comet, "asteroid": _summarise_asteroid, "unknown_movers": _summarise_movers}

@@ -7,8 +7,9 @@
  *
  * Around the field lies the sky map (skymap.ts, Aladin Lite), dimmed while the field fills the view. Two
  * modes share one camera: in "field" mode this component pans and zooms and the map follows; zoomed out
- * past FIELD_OUT the map takes over ("map" mode: the whole sky, drag and pinch by Aladin) and the field
- * rides on it as a small image; zoomed back in on the field, or clicked, the field takes the view back.
+ * past FIELD_OUT the map takes over ("map" mode: the whole sky, north-up drag and pinch in skymap.ts) and the
+ * field rides on it as a small image; zoomed back in on the field, or clicked, the field takes the view back.
+ * The view maths (every gesture keeps the grabbed point under the pointer) is in viewport.ts, with tests.
  */
 import { Globe, LocateFixed, RotateCcw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -18,10 +19,12 @@ import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
 import { paintDisplay, paintFlags } from "../render";
-import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type SkyMap } from "../skymap";
+import { mapGrid } from "../mapgrid";
+import { createSkyMap, MAP_PIXEL_ARCSEC, preloadSkyMap, type MapCamera, type MapCatalog, type MapLine, type MapPlace, type SkyMap } from "../skymap";
 import { LoadChip } from "./Progress";
 import type { Overlay, ViewState } from "../state";
 import type { CatalogSource, Grid } from "../types";
+import { dragged, layerOrigin, pinched, spread, wheelFactor, zoomAround, type Anchor, type PinchStart, type Pt, type View } from "../viewport";
 
 export type Selection = { kind: "target" } | { kind: "source"; cat: string; src: CatalogSource } | { kind: "point"; ra: number; dec: number };
 export type StepDir = "N" | "S" | "E" | "W";
@@ -100,6 +103,25 @@ interface Props {
   label?: string | null;
   /** Draw the sky map around the field (default on). Never for co-moving grids, which follow an object. */
   map?: boolean;
+  /** Called when the view hands over between the field and the zoomed-out map (ADR-0058/0061). */
+  onMapMode?: (on: boolean) => void;
+  /** Map mode: a picked sky position; its card (mapCard) follows it on the map. */
+  mapPick?: { ra: number; dec: number } | null;
+  onMapPick?: (pos: { ra: number; dec: number } | null) => void;
+  mapCard?: ReactNode;
+  /** Map mode, throttled: the map camera, for layers that depend on the view (footprints). */
+  onMapView?: (cam: MapCamera) => void;
+  /** Overlays drawn on the map. */
+  mapLayers?: { grid: boolean; lines: MapLine[]; polygons: [number, number][][]; places: MapPlace[]; catalogs: MapCatalog[] };
+  onPlace?: (key: string) => void;
+  /** Map actions for the map's own tool rail. */
+  controller?: { current: SkyController | null };
+}
+
+export interface SkyController {
+  backToField: () => void;
+  wholeSky: () => void;
+  flyTo: (ra: number, dec: number, fovDeg: number) => void;
 }
 
 /** A mark drawn over the sky: grid pixel position, a shape per kind, optional label and motion arrow. */
@@ -125,8 +147,9 @@ const MAX_LABELS = 28;
  *  FIELD_IN × (a gap, so the hand-over does not flicker), the field takes it back. */
 const FIELD_OUT = 0.22;
 const FIELD_IN = 0.3;
-/** How dark the map stays around a field that fills the view (0 = not dimmed); it brightens on zooming out. */
-const MAP_DIM = 0.62;
+/** How dark the map stays around a field that fills the view (0 = not dimmed); it brightens on zooming out. Light
+ *  enough that the neighbouring sky reads as real sky, dark enough that the field's edge stays clear. */
+const MAP_DIM = 0.3;
 /** Width of the view, in degrees, for "zoom out to the whole sky": nearly a hemisphere. */
 const SKY_FOV = 150;
 const MAX_SCALE = 48; // screen pixels per image pixel
@@ -204,14 +227,34 @@ export function SkyView(p: Props) {
   const s = scale || (p.view.zoom ? p.view.zoom : fit);
   const c = center ?? [n / 2, n / 2];
   const shiftX = p.shiftX ?? 0;
-  const tx = W / 2 + shiftX - c[0] * s;
-  const ty = cy - c[1] * s;
+  const anchor: Anchor = { ox: W / 2 + shiftX, oy: cy };
+  const [tx, ty] = layerOrigin({ s, c }, anchor);
   const u = 1 / s;
+  // The view as last set. Handlers build on it rather than on this render's s and c: two fingers or a trackpad
+  // send several events before React renders again, and each must start where the previous one left the view.
+  // A render that shows a different view than the last one seen (a new zoom from the URL, a resize) resets it.
+  const viewNow = useRef<View>({ s, c });
+  const viewSeen = useRef<View>({ s, c });
+  if (s !== viewSeen.current.s || c[0] !== viewSeen.current.c[0] || c[1] !== viewSeen.current.c[1]) viewNow.current = viewSeen.current = { s, c };
+  const setView = (v: View) => {
+    viewNow.current = v;
+    setScale(v.s);
+    setCenter(v.c);
+  };
+  // The URL's zoom (rounded to 0.1) echoes this view's own zoom back; that echo must not snap the scale to the
+  // rounded value (a visible jump at low zoom). Only a zoom set elsewhere (Display panel, URL) refits.
+  const zoomSent = useRef<number | null>(null);
+  const sendZoom = (z: number) => {
+    zoomSent.current = z;
+    p.onZoom(z);
+  };
 
   // ---------------------------------------------------------------- sky map (see the header comment)
   const mapHost = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const outlineRef = useRef<SVGPolygonElement>(null);
+  const mapGridRef = useRef<SVGGElement>(null);
+  const hudRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<SVGCircleElement>(null);
   const nameRef = useRef<SVGTextElement>(null);
   const [skyMap, setSkyMap] = useState<SkyMap | null>(null);
@@ -264,6 +307,26 @@ export function SkyView(p: Props) {
     };
   }, [wantMap, armed]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => skyMap?.setBand(p.view.band), [skyMap, p.view.band]);
+  const onMapMode = p.onMapMode;
+  useEffect(() => onMapMode?.(isMap), [isMap, onMapMode]);
+  // map overlays
+  const layers = p.mapLayers;
+  useEffect(() => skyMap?.setLines(layers?.lines ?? []), [skyMap, layers?.lines]);
+  useEffect(() => skyMap?.setPolygons(layers?.polygons ?? [], "rgba(255, 200, 69, 0.3)"), [skyMap, layers?.polygons]);
+  useEffect(() => skyMap?.setPlaces(layers?.places ?? []), [skyMap, layers?.places]);
+  const catKey = (layers?.catalogs ?? []).join(",");
+  useEffect(() => skyMap?.setCatalogs(catKey ? (catKey.split(",") as MapCatalog[]) : []), [skyMap, catKey]);
+  if (p.controller)
+    p.controller.current = {
+      backToField: () => (modeRef.current === "map" ? flyToField() : undefined),
+      wholeSky: () => zoomToSky(),
+      flyTo: (ra, dec, fov) => {
+        if (!skyMap || !p.grid) return;
+        if (modeRef.current === "field") enterMap(s, tx, ty);
+        cancelFlight();
+        flight.current = skyMap.flyTo({ ra, dec, fov }, undefined, () => (flight.current = null));
+      },
+    };
 
   // Field mode: the map follows the field's camera (here, before paint, and again every frame below so
   // nothing Aladin animates on its own can drift).
@@ -312,7 +375,7 @@ export function SkyView(p: Props) {
     setMode("field");
     setMapCursor(null);
     window.clearTimeout(zoomTimer.current);
-    zoomTimer.current = window.setTimeout(() => p.onZoom(Math.round(sc * 10) / 10), 300);
+    zoomTimer.current = window.setTimeout(() => sendZoom(Math.round(sc * 10) / 10), 300);
   }
 
   /** Fly from the map back into the field, ending with the field fitted in view. */
@@ -329,7 +392,7 @@ export function SkyView(p: Props) {
       setScale(0);
       setMode("field");
       setMapCursor(null);
-      p.onZoom(0);
+      sendZoom(0);
     });
     p.onInteract();
   }
@@ -381,43 +444,108 @@ export function SkyView(p: Props) {
     if (!flight.current && mapPointers.current.size === 0 && sm >= fit * FIELD_IN && mx > 0 && mx < W && my > 0 && my < H) enterField(sm, a[0], a[1]);
   }
 
-  /** One wheel step at (mx, my), whichever element it reached: the field zooms, or the map does. */
-  function wheelAt(dy: number, mx: number, my: number) {
+  /** Map mode: the RA/Dec grid (mapgrid.ts), redrawn when the camera moves. Captions keep to the free part of
+   *  the screen: below the top bar, left of the rail, above the HUD. */
+  function drawMapGrid() {
+    const el = mapGridRef.current;
+    if (!el || !skyMap) return;
+    const on = !!layers?.grid;
+    const cam = skyMap.camera();
+    const hudTop = hudRef.current?.offsetTop ?? H;
+    const key = on ? `${cam.ra.toFixed(7)}|${cam.dec.toFixed(7)}|${cam.fov.toPrecision(7)}|${W}|${H}|${hudTop}|${frameTop}` : "";
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    if (!on) {
+      el.innerHTML = "";
+      return;
+    }
+    const box = { left: 14, top: Math.max(150, frameTop + 12), right: W - 90, bottom: Math.min(H - 16, hudTop - 10) };
+    const g = mapGrid(cam, W, H, skyMap.world2pix, skyMap.pix2world, box);
+    el.innerHTML =
+      `<path d="${g.path}"/>` +
+      g.captions.map((c) => `<text class="grid-label" x="${c.x.toFixed(1)}" y="${c.y.toFixed(1)}" text-anchor="${c.anchor}">${c.text}</text>`).join("");
+  }
+
+  /** One wheel event at (mx, my), whichever element it reached: the field zooms, or the map does. */
+  function wheelAt(e: WheelEvent, mx: number, my: number) {
     if (!n || modeRef.current !== mode) return; // a hand-over is still being rendered
-    const f = Math.exp(-dy * 0.0016);
+    const f = wheelFactor(e, H);
     if (isMap && skyMap) {
       cancelFlight();
       skyMap.zoomAt(1 / f, mx, my);
       p.onInteract();
       return;
     }
-    zoomAt(s * f, mx, my);
+    zoomAt(viewNow.current.s * f, mx, my);
   }
 
   // The frame loop and the map's callbacks run with the latest render's closures.
-  const live = useRef({ frame: () => {}, wheel: (_e: WheelEvent) => {}, click: (_ra: number, _dec: number, _drag: boolean) => {}, move: (_pos: [number, number] | null) => {} });
+  const live = useRef({ frame: () => {}, wheel: (_e: WheelEvent) => {}, fieldWheel: (_e: WheelEvent) => {}, click: (_ra: number, _dec: number, _drag: boolean) => {}, move: (_pos: [number, number] | null) => {}, place: (_key: string) => {} });
+  const pickRef = useRef<HTMLDivElement>(null);
+  const pinRef = useRef<HTMLDivElement>(null);
+  const viewSent = useRef({ t: 0, key: "" });
   live.current.frame = () => {
     if (!skyMap || !mapOn) return;
-    if (modeRef.current === "map") placeOnMap();
-    else if (wantCam.current) skyMap.setCamera(wantCam.current);
+    if (modeRef.current === "map") {
+      placeOnMap();
+      drawMapGrid();
+      const el = pickRef.current;
+      const pin = pinRef.current;
+      if (el && pin && p.mapPick) {
+        const at = skyMap.world2pix(p.mapPick.ra, p.mapPick.dec);
+        el.style.visibility = pin.style.visibility = at ? "" : "hidden";
+        if (at) {
+          el.style.left = `${Math.max(12, Math.min(at[0] + 18, W - 312)).toFixed(0)}px`;
+          el.style.top = `${Math.max(70, Math.min(at[1] - 24, H - 340)).toFixed(0)}px`;
+          pin.style.transform = `translate(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px)`;
+        }
+      }
+      if (p.onMapView) {
+        const cam = skyMap.camera();
+        const key = `${cam.ra.toFixed(2)}|${cam.dec.toFixed(2)}|${Math.log(cam.fov).toFixed(1)}`;
+        const now = performance.now();
+        if (key !== viewSent.current.key && now - viewSent.current.t > 400) {
+          viewSent.current = { t: now, key };
+          p.onMapView(cam);
+        }
+      }
+    } else if (wantCam.current) skyMap.setCamera(wantCam.current);
   };
   live.current.wheel = (e) => {
     const [mx, my] = local(e);
-    wheelAt(e.deltaY, mx, my);
+    wheelAt(e, mx, my);
+  };
+  live.current.fieldWheel = (e) => {
+    // cards and panels over the sky keep their own scrolling
+    if ((e.target as Element | null)?.closest?.(".pick, .glass")) return;
+    e.preventDefault(); // a trackpad pinch (ctrl + wheel) would zoom the whole page
+    const [mx, my] = local(e);
+    wheelAt(e, mx, my);
   };
   live.current.click = (ra, dec, dragging) => {
     if (dragging || modeRef.current !== "map" || !p.grid || !skyMap) return;
     const half = (n * p.grid.pixscale_arcsec) / 3600 / Math.SQRT2; // half the field's diagonal
     const px = skyMap.size()[0] / skyMap.camera().fov; // screen pixels per degree
-    if (separation(p.grid.ra, p.grid.dec, ra, dec) <= Math.max(half, 16 / px)) flyToField();
+    const sep = separation(p.grid.ra, p.grid.dec, ra, dec);
+    if (sep <= Math.max(half, 16 / px)) {
+      p.onMapPick?.(null);
+      flyToField();
+      // inside the image: pin the point there too, so its instant probe and Analyze are one click away
+      const [x, y] = worldToPixel(p.grid, ra, dec);
+      if (x >= -0.5 && y >= -0.5 && x < n - 0.5 && y < n - 0.5) p.onSelect({ kind: "point", ra, dec });
+      return;
+    }
+    p.onMapPick?.({ ra, dec });
   };
   live.current.move = (pos) => setMapCursor(modeRef.current === "map" ? pos : null);
+  live.current.place = (key) => p.onPlace?.(key);
   useEffect(() => {
     if (!skyMap) return;
     skyMap.on({
       wheel: (e) => live.current.wheel(e),
       click: (ra, dec, drag) => live.current.click(ra, dec, drag),
       move: (pos) => live.current.move(pos),
+      place: (key) => live.current.place(key),
     });
     let raf = 0;
     const tick = () => {
@@ -446,8 +574,20 @@ export function SkyView(p: Props) {
     setMode("field");
     if (layerRef.current) layerRef.current.style.visibility = "";
   }, [p.lockKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // external zoom changes (Display panel, URL)
-  useEffect(() => setScale(0), [p.view.zoom]);
+  // external zoom changes (Display panel, URL), not the echo of this view's own zoom
+  useEffect(() => {
+    if (p.view.zoom !== zoomSent.current) setScale(0);
+    zoomSent.current = null;
+  }, [p.view.zoom]);
+  // Wheel events on the sky (those on the map go through its own handler). Not React's onWheel: that one is
+  // passive, and only a listener that may cancel the event keeps a trackpad pinch from zooming the page.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const on = (e: WheelEvent) => live.current.fieldWheel(e);
+    el.addEventListener("wheel", on, { passive: false });
+    return () => el.removeEventListener("wheel", on);
+  }, [boxRef]);
 
   useEffect(() => {
     const cv = imgRef.current;
@@ -528,35 +668,37 @@ export function SkyView(p: Props) {
       setScale(sk);
       setCenter([c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k]);
       if (k < 1) anim.current = requestAnimationFrame(tick);
-      else p.onZoom(Math.round(s1 * 10) / 10);
+      else sendZoom(Math.round(s1 * 10) / 10);
     };
     anim.current = requestAnimationFrame(tick);
     return stopAnim;
   }, [p.focus?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------- interaction
-  const drag = useRef<{ x: number; y: number; c: [number, number]; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; v: View; moved: boolean } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ d: number; s: number; last: number } | null>(null);
+  const pinch = useRef<PinchStart | null>(null);
+  const pointerPts = (): Pt[] => [...pointers.current.values()].map((q) => [q.x, q.y]);
   const zoomTimer = useRef<number>();
   // without a map the field cannot be zoomed out much; with one, zooming out past FIELD_OUT shows the map
   const clampS = (v: number) => Math.min(Math.max(v, mapOn ? 1e-6 : fit * 0.6), MAX_SCALE);
 
-  function zoomAt(newS: number, mx: number, my: number) {
-    stopAnim();
-    const ns = clampS(newS);
-    const px = (mx - tx) / s; // layer coords under the cursor
-    const py = (my - ty) / s;
-    if (mapOn && ns < fit * FIELD_OUT) {
-      enterMap(ns, mx - px * ns, my - py * ns);
+  /** Show view v after a zoom (wheel, pinch); zoomed out past FIELD_OUT the map takes it over. */
+  function zoomTo(v: View) {
+    if (mapOn && v.s < fit * FIELD_OUT) {
+      enterMap(v.s, ...layerOrigin(v, anchor));
       p.onInteract();
       return;
     }
-    setScale(ns);
-    setCenter([(W / 2 + shiftX - (mx - px * ns)) / ns, (cy - (my - py * ns)) / ns]);
+    setView(v);
     window.clearTimeout(zoomTimer.current);
-    zoomTimer.current = window.setTimeout(() => p.onZoom(Math.abs(ns - fit) < 0.05 ? 0 : Math.round(ns * 10) / 10), 300);
+    zoomTimer.current = window.setTimeout(() => sendZoom(Math.abs(v.s - fit) < 0.05 ? 0 : Math.round(v.s * 10) / 10), 300);
     p.onInteract();
+  }
+
+  function zoomAt(newS: number, mx: number, my: number) {
+    stopAnim();
+    zoomTo(zoomAround(viewNow.current, anchor, clampS(newS), mx, my));
   }
 
   function resetView() {
@@ -564,7 +706,7 @@ export function SkyView(p: Props) {
     stopAnim();
     setCenter(null);
     setScale(0);
-    p.onZoom(0);
+    sendZoom(0);
   }
 
   function local(e: { clientX: number; clientY: number }): [number, number] {
@@ -595,12 +737,6 @@ export function SkyView(p: Props) {
     return best;
   }
 
-  function onWheel(e: React.WheelEvent) {
-    // wheel steps on the map itself arrive through the map's handler (it stops their propagation)
-    const [mx, my] = local(e);
-    wheelAt(e.deltaY, mx, my);
-  }
-
   const onMapEl = (e: { target: EventTarget | null }) => !!mapHost.current && mapHost.current.contains(e.target as Node);
 
   function onPointerDown(e: React.PointerEvent) {
@@ -619,45 +755,37 @@ export function SkyView(p: Props) {
     const [x, y] = local(e);
     pointers.current.set(e.pointerId, { x, y });
     if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      pinch.current = { d, s, last: d };
+      const [a, b] = pointerPts();
+      pinch.current = { v: viewNow.current, ...spread(a, b) };
       drag.current = null;
-    } else drag.current = { x, y, c, moved: false };
+    } else drag.current = { x, y, v: viewNow.current, moved: false };
   }
 
   function onPointerMove(e: React.PointerEvent) {
     if (!n) return;
     const [x, y] = local(e);
-    if (isMap) {
+    if (modeRef.current === "map") {
       // A drag or pinch that began on the field and zoomed out onto the map stays captured here: it
-      // moves the map from now on. Pointers that went down on the map are the map's own.
-      const prev = pointers.current.get(e.pointerId);
-      if (!prev || !skyMap) return;
+      // moves the map from now on (north-up, the grabbed sky under the pointers). Pointers that went down
+      // on the map are the map's own.
+      if (!pointers.current.has(e.pointerId) || !skyMap) return;
       pointers.current.set(e.pointerId, { x, y });
-      if (pinch.current && pointers.current.size === 2) {
-        const [a, b] = [...pointers.current.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        skyMap.zoomAt(pinch.current.last / d, (a.x + b.x) / 2, (a.y + b.y) / 2);
-        pinch.current.last = d;
-      } else if (pointers.current.size === 1) skyMap.panBy(x - prev.x, y - prev.y);
+      skyMap.gesture(pointerPts());
       return;
     }
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x, y });
     if (pinch.current && pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      pinch.current.last = d;
-      zoomAt(pinch.current.s * (d / pinch.current.d), (a.x + b.x) / 2, (a.y + b.y) / 2);
+      const [a, b] = pointerPts();
+      const now = spread(a, b);
+      stopAnim();
+      zoomTo(pinched(pinch.current, anchor, now.mid, now.d, clampS));
       return;
     }
     const dr = drag.current;
     if (dr) {
-      const dx = x - dr.x;
-      const dy = y - dr.y;
-      if (Math.hypot(dx, dy) > 4) dr.moved = true;
+      if (Math.hypot(x - dr.x, y - dr.y) > 4) dr.moved = true;
       if (dr.moved) {
-        setCenter([dr.c[0] - dx / s, dr.c[1] - dy / s]);
+        setView(dragged(dr.v, anchor, [dr.x, dr.y], [x, y]));
         setHover(null);
         p.onInteract();
       }
@@ -671,9 +799,10 @@ export function SkyView(p: Props) {
   }
 
   function onPointerUp(e: React.PointerEvent) {
-    pointers.current.delete(e.pointerId);
+    const ours = pointers.current.delete(e.pointerId);
     mapPointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
+    if (ours && modeRef.current === "map") skyMap?.gesture(pointerPts()); // the fingers left grab again, or it ends
     const dr = drag.current;
     drag.current = null;
     if (isMap || !dr || dr.moved || !n || !p.grid) return; // on the map a click is the map's (see live.click)
@@ -837,7 +966,7 @@ export function SkyView(p: Props) {
   const dim = !mapOn || isMap ? 0 : MAP_DIM * Math.min(1, Math.max(0, Math.log(s / (fit * FIELD_OUT)) / Math.log(0.8 / FIELD_OUT)));
   // Zoomed in past the map's resolution its HEALPix pixels show as diamonds: soften them in proportion.
   const mapPx = !p.grid ? 0 : isMap ? (mapFov ? (MAP_PIXEL_ARCSEC * W) / (mapFov * 3600) : 0) : (MAP_PIXEL_ARCSEC * s) / p.grid.pixscale_arcsec;
-  const mapBlur = Math.min(12, Math.max(0, 0.4 * (mapPx - 2.5)));
+  const mapBlur = Math.min(8, Math.max(0, 0.32 * (mapPx - 2)));
   const L = 14 * u; // reticle arm length in layer units
   const selWorld = p.selection ? selectionWorld(p.selection, p.year, p.targetWorld) : null;
   const selPx: [number, number] | null =
@@ -853,7 +982,6 @@ export function SkyView(p: Props) {
     <div
       className="sky"
       ref={boxRef}
-      onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -880,6 +1008,7 @@ export function SkyView(p: Props) {
       )}
       {isMap && W > 0 && (
         <svg className="overlay map-overlay" width={W} height={H} aria-hidden>
+          <g ref={mapGridRef} className="coord-grid map-grid" />
           <polygon ref={outlineRef} className="field-outline" points={outlinePts.current} />
           <circle ref={ringRef} className="field-ring" r={7} visibility="hidden" />
           {p.label && <text ref={nameRef} className="field-name" textAnchor="middle">{p.label}</text>}
@@ -1060,7 +1189,7 @@ export function SkyView(p: Props) {
 
       {/* HUD: compass + scale, epoch line, one coordinate line. Field stepping and full coordinates live in Go to. */}
       {n > 0 && (
-        <div className="hud-min">
+        <div className="hud-min" ref={hudRef}>
           <div className="hud-row">
           <button className="nav-btn hud-fit" onClick={resetView} onPointerDown={stop} onPointerUp={stop} onDoubleClick={stop} title={isMap ? "Back to the field" : "Fit the field in view"} aria-label={isMap ? "Back to the field" : "Fit the field in view"}>
             <LocateFixed size={13} />
@@ -1096,6 +1225,15 @@ export function SkyView(p: Props) {
             </div>
           )}
         </div>
+      )}
+
+      {isMap && p.mapPick && p.mapCard && (
+        <>
+          <div ref={pinRef} className="map-pin" style={{ visibility: "hidden" }} aria-hidden />
+          <div ref={pickRef} className="pick glass map-pick" style={{ visibility: "hidden" }} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop} onWheel={stop}>
+            {p.mapCard}
+          </div>
+        </>
       )}
 
       {!isMap && p.selection && selPos && p.card && (

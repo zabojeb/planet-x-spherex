@@ -5,6 +5,9 @@
                            coverage.u16    uint16  LE [epochs, 6, n, n], frames per pixel
                            flags.u32       uint32  LE [epochs, 6, n, n], OR of FLAGS bits
                            exposures.f16   float16 LE [frames, n, n], aligned single exposures (optional)
+                           clean.f32, clean_coverage.u16, clean_exposures.f16
+                                           static-sky subtracted co-adds and exposures (co-moving sequences
+                                           built with static_sky, spherex_core.solar.static_sky; optional)
                            meta.json.gz    meta.json precompressed (gzip; .br too when brotli is installed)
 
 Directories are written to "<id>.tmp" and renamed, so a complete meta.json means a complete result.
@@ -30,11 +33,15 @@ try:
     import brotli  # optional: smaller meta.json for browsers that accept br
 except ImportError:  # pragma: no cover
     brotli = None
-ARRAY_FILES = {"coadds": "coadds.f32", "coverage": "coverage.u16", "flags": "flags.u32"}
+ARRAY_FILES = {"coadds": "coadds.f32", "coverage": "coverage.u16", "flags": "flags.u32",
+               "clean": "clean.f32", "clean_coverage": "clean_coverage.u16"}
 EXPOSURES_FILE = "exposures.f16"
+CLEAN_EXPOSURES_FILE = "clean_exposures.f16"
+_EXPOSURE_FILES = {"exposures": EXPOSURES_FILE, "clean_exposures": CLEAN_EXPOSURES_FILE}
 # array name -> (numpy dtype on disk, dtype name in meta.json)
 DTYPES = {"coadds": ("<f4", "float32"), "coverage": ("<u2", "uint16"), "flags": ("<u4", "uint32"),
-          "exposures": ("<f2", "float16")}
+          "exposures": ("<f2", "float16"), "clean": ("<f4", "float32"), "clean_coverage": ("<u2", "uint16"),
+          "clean_exposures": ("<f2", "float16")}
 
 
 def clean_json(obj):
@@ -62,7 +69,7 @@ def write_result(result_dir: Path, meta: dict, arrays: dict[str, np.ndarray]) ->
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     for name, arr in arrays.items():
-        file = EXPOSURES_FILE if name == "exposures" else ARRAY_FILES[name]
+        file = _EXPOSURE_FILES.get(name) or ARRAY_FILES[name]
         arr.astype(DTYPES[name][0]).tofile(tmp / file)
     write_meta_files(tmp, json.dumps(clean_json(meta)).encode())
     shutil.rmtree(result_dir, ignore_errors=True)
@@ -114,23 +121,31 @@ def read_meta(result_dir: Path) -> dict:
 def array_path(result_dir: Path, name: str) -> Path:
     if name not in ARRAY_FILES:
         raise NotFound("unknown array")
-    return result_dir / ARRAY_FILES[name]
+    path = result_dir / ARRAY_FILES[name]
+    if name.startswith("clean") and not path.exists():
+        raise NotFound("this sequence has no static-sky subtraction (build it with static_sky)")
+    return path
 
 
 def read_array(result_dir: Path, meta: dict, name: str) -> np.ndarray:
     """A co-add cube (coadds, coverage or flags) with the shape recorded in meta.json."""
-    spec = meta["arrays"][name]
+    spec = meta["arrays"].get(name)
+    if spec is None:
+        raise NotFound(f"no {name} array in this sequence")
     return np.fromfile(array_path(result_dir, name), dtype=DTYPES[name][0]).reshape(spec["shape"])
 
 
-def read_exposures(result_dir: Path, meta: dict, epoch: int, band: str) -> tuple[np.ndarray, list[int]]:
+def read_exposures(result_dir: Path, meta: dict, epoch: int, band: str,
+                   name: str = "exposures") -> tuple[np.ndarray, list[int]]:
     """Aligned single exposures of one epoch and detector as float32 [k, n, n], plus their indices in
-    meta['exposures']. Exposures are stored sorted by (epoch, band, time), so the slice is contiguous."""
-    spec = meta["arrays"].get("exposures")
+    meta['exposures']. Exposures are stored sorted by (epoch, band, time), so the slice is contiguous.
+    name='clean_exposures' reads the static-sky subtracted ones (same order)."""
+    spec = meta["arrays"].get(name)
     if spec is None:
-        raise NotFound("single exposures are not stored for this field size")
+        raise NotFound("single exposures are not stored for this field size" if name == "exposures"
+                       else "no static-sky subtracted exposures in this sequence")
     idx = [e["index"] for e in meta["exposures"] if e["epoch"] == epoch and e["band"] == band]
     if band not in BANDS or not idx:
         raise NotFound("no exposures for this epoch and detector")
-    arr = np.memmap(result_dir / spec["file"], dtype=DTYPES["exposures"][0], mode="r", shape=tuple(spec["shape"]))
+    arr = np.memmap(result_dir / spec["file"], dtype=DTYPES[name][0], mode="r", shape=tuple(spec["shape"]))
     return np.asarray(arr[idx[0]: idx[-1] + 1], dtype="<f4"), idx

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from spherex_core.pipeline.params import SequenceParams
 
@@ -37,6 +37,7 @@ class SequenceRequest(BaseModel):
     naif_id: int | None = Field(None, description="JPL NAIF ID instead of object_name")
     obs_begin: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="MOST window start")
     obs_end: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="MOST window end")
+    static_sky: bool = Field(False, description="Co-moving only: also subtract the static sky (clean arrays)")
     force: bool = False
 
     @field_validator("bands")
@@ -47,6 +48,12 @@ class SequenceRequest(BaseModel):
         if v is not None and (not v or any(b not in BANDS for b in v)):
             raise ValueError(f"bands must be a non-empty subset of {list(BANDS)}")
         return v
+
+    @model_validator(mode="after")
+    def _static_sky_needs_object(self) -> "SequenceRequest":
+        if self.static_sky and not (self.object_name or self.naif_id is not None):
+            raise ValueError("static_sky needs a solar-system object (object_name or naif_id)")
+        return self
 
     @field_validator("date_min", "date_max")
     @classmethod
@@ -62,4 +69,5 @@ class SequenceRequest(BaseModel):
                               date_max=_mjd(self.date_max, end_of_day=True),
                               bands=tuple(sorted(set(self.bands))) if self.bands else None,
                               object_name=self.object_name or None, object_type=self.object_type,
-                              naif_id=self.naif_id, obs_begin=self.obs_begin, obs_end=self.obs_end)
+                              naif_id=self.naif_id, obs_begin=self.obs_begin, obs_end=self.obs_end,
+                              static_sky=self.static_sky)
