@@ -3,7 +3,7 @@
 * blackbody (+ near-IR extinction) grid fit over the whole spectrum and over the short-wavelength part;
   the short fit extrapolated to 3-5 um measures an infrared excess (discs, cold companions, blends);
 * template chi^2 ranking against Pickles stars and SpeX dwarf standards (0.75-2.45 um, see templates.py),
-  with relative probabilities and per-class sums;
+  with relative template weights (not probabilities) and per-class sums;
 * infrared spectral index alpha = dlog(lambda F_lambda)/dlog(lambda) over 2-5 um with the Lada classes
   (indicative only: the classical index uses 2-24 um);
 * a short summary combining the above with the methane indices, which cover the 3.3 um band templates miss.
@@ -172,6 +172,7 @@ def ir_excess(wl, f, e, short_fit: dict | None) -> dict | None:
 # atmospheres the same windows are eaten by H2O/CH4/CO bands, so they are not reported as detections there.
 CONTEXT_FEATURES = {"ice", "pah"}
 POOR_TEMPLATE_CHI2 = 20.0  # best template chi2/dof above this: not a normal stellar photosphere
+BB_MAX_CHI2 = 10.0  # blackbody chi2/dof above this: the colour temperature means nothing (eps Indi B: ~235)
 
 
 def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, excess: dict | None,
@@ -194,9 +195,10 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
     big_excess = bool(e45.get("ratio") and e45["ratio"] > 1.5 and (e45.get("significance") or 0) > 5)
     if best:
         label, family = best["sptype"], best["family"]
-    if methane and best_letter in "LT":
+    # best_letter is "" without a template, and "" in "LT" is True, so test membership in a tuple
+    if methane and best is not None and best_letter in ("L", "T"):
         label, family = f"{best['sptype']} (methane at 3.3 µm)", "brown_dwarf"
-    elif methane and best_letter not in "LT" and big_excess:
+    elif methane and best_letter not in ("L", "T") and big_excess:
         # Short wavelengths look like a warmer star, long wavelengths show methane and a 4-5 um excess.
         label = f"composite: {best['sptype'] if best else 'star'} + cold methane-rich source"
         family = "composite"
@@ -214,7 +216,7 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
         notes.append(f"No stellar template fits (best χ²/dof {best['chi2_red']:.0f}) and the 2-5 µm continuum "
                      f"rises (α = {alpha['alpha']:.2f}): hot dust around an AGN/QSO or a young star. "
                      "No QSO templates yet; check the position (high Galactic latitude favours a QSO).")
-    elif best_letter in "LT":
+    elif best_letter in ("L", "T"):
         family = "brown_dwarf"
     elif best_letter == "M" and best and best["family"] == "dwarf_standard":
         family = "late_m_dwarf"
@@ -242,9 +244,14 @@ def summarize(templates: dict | None, bb: dict | None, alpha: dict | None, exces
     det = [f["name"] for f in features if f["detected"] and not suppressed(f)]
     if det:
         notes.append("Detected features: " + ", ".join(det) + ".")
-    if bb and bb["teff_range_k"][1] / max(bb["teff_range_k"][0], 1) < 1.5:
-        notes.append(f"Blackbody fit: T ≈ {bb['teff_k']:.0f} K, A_K ≈ {bb['a_k_mag']:.1f} mag "
-                     f"(χ²/dof {bb['chi2_red']:.1f}).")
+    if bb and cool:
+        notes.append("No temperature quoted: molecular bands or a blend make a blackbody colour temperature "
+                     "meaningless here; use the template type.")
+    elif bb and bb["chi2_red"] > BB_MAX_CHI2:
+        notes.append(f"No temperature quoted: the blackbody fit is poor (χ²/dof {bb['chi2_red']:.0f}).")
+    elif bb and bb["teff_range_k"][1] / max(bb["teff_range_k"][0], 1) < 1.5:
+        notes.append(f"Blackbody colour temperature ≈ {bb['teff_k']:.0f} K, A_K ≈ {bb['a_k_mag']:.1f} mag "
+                     f"(χ²/dof {bb['chi2_red']:.1f}); not an effective temperature.")
     elif bb:
         notes.append("Temperature is not constrained by a blackbody over 0.75-5 µm (Rayleigh-Jeans regime); "
                      "use the template type.")

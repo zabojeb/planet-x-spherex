@@ -432,9 +432,9 @@ function Verdict({ r, h, located }: { r: PointAnalysis; h: ReturnType<typeof hea
   const jk = color("J", "Ks");
   const w12 = color("W1", "W2");
   const facts: [string, ReactNode, string?][] = [];
-  if (best) facts.push(["Spectral type", <>{best.sptype}{h.confidence != null && <span className="muted"> · {Math.round(h.confidence * 100)}%</span>}</>, `Best of ${cls?.templates?.ranked.length ?? 0} templates (Pickles, SpeX), χ²ᵣ ${best.chi2_red.toFixed(1)}`]);
+  if (best) facts.push(["Closest standard", <>{best.sptype}{h.confidence != null && <span className="muted"> · weight {Math.round(h.confidence * 100)}%</span>}</>, `Best of ${cls?.templates?.ranked.length ?? 0} templates (Pickles, SpeX), χ²ᵣ ${best.chi2_red.toFixed(1)}; the weight is a relative template weight, not a probability`]);
   const bb = goodBlackbody(cls);
-  if (bb) facts.push(["T (blackbody)", `${Math.round(bb.teff_k / 10) * 10} K`, `Blackbody fit over 0.75–5 µm, χ²/dof ${bb.chi2_red.toFixed(1)}`]);
+  if (bb) facts.push(["Blackbody colour T",`${Math.round(bb.teff_k / 10) * 10} K`, `Blackbody fit over 0.75–5 µm, χ²/dof ${bb.chi2_red.toFixed(1)}`]);
   if (synth.Ks?.mag != null) facts.push(["Ks", synth.Ks.mag.toFixed(2), "Synthetic 2MASS Ks from the spectrum"]);
   if (jk != null) facts.push(["J − Ks", jk.toFixed(2)]);
   if (w12 != null) facts.push(["W1 − W2", w12.toFixed(2), "Synthetic WISE colour (W2 extrapolated past 5 µm)"]);

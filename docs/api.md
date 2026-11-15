@@ -502,14 +502,21 @@ computed with a power-law extension (`extrapolated: true`, `coverage` < 1).
 ```json
 {
   "sequence": "...", "version": 1, "available": true, "reference_epoch": 1,
-  "kinds": ["relative"], "systematic": 0.03,
-  "epochs": [{"epoch": 0, "variable": true, "significant_bands": ["D2", "D3", "D5"],
+  "kinds": ["relative"], "systematic": 0.03, "ring_systematic": 0.15,
+  "epochs": [{"epoch": 0, "variable": true, "significant_bands": ["D5", "D6"],
+              "systematics_limited": false, "systematics_limited_bands": ["D2"],
               "chi2_red_constant": 14.2,
-              "per_band": {"D5": {"ratio": 1.23, "err": 0.02, "z": 9.9, "n_bins": 17, "kind": "relative"}},
+              "per_band": {"D5": {"ratio": 1.53, "err": 0.02, "z": 26.5, "z_total": 3.0, "systematic": 0.15,
+                                  "systematics_limited": false, "n_bins": 17, "kind": "relative"}},
               "ratios": [{"band": "D5", "bin": 70, "wl": 3.9, "kind": "relative", "ratio": 1.2, "err": 0.04,
                           "z": 5.1}]}]
 }
 ```
+
+`z` is the statistical significance of a detector's mean ratio. For ring (relative) photometry, `z_total` adds a
+correlated 15 % per-detector drift (`ring_systematic`, seen on the constant Barnard's Star) in log ratio, and
+`variable` / `significant_bands` use `z_total`. A detector significant on `z` alone is listed in
+`systematics_limited_bands`; `systematics_limited` is true when such detectors exist and none is significant.
 
 Unavailable: `{"available": false, "reason": "fewer than two epochs with measurements", "epochs": [...]}`.
 

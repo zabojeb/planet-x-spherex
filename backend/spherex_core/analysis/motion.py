@@ -24,6 +24,12 @@ SIGMA_FLOOR_PX = 0.02  # systematic floor per centroid (alignment scatter is ~0.
 MIN_SNR = 5.0
 
 
+def xi_arcsec(ra: float, dec: float, ra0: float) -> float:
+    """East offset from ra0 in arcsec. The RA difference is wrapped into [-180, 180) before the cos(dec)
+    projection, so RA 359.9999 -> 0.0001 at the equator is +0.72″, not -1,296,000″."""
+    return ((ra - ra0 + 180.0) % 360.0 - 180.0) * np.cos(np.radians(dec)) * 3600.0
+
+
 def centroid(img: np.ndarray, x0: float, y0: float, max_shift: float, radius: float = CENTROID_RADIUS,
              iterations: int = 4) -> dict | None:
     """Iterated flux-weighted centroid of the excess above the local background near (x0, y0)."""
@@ -144,9 +150,7 @@ def fit_motion(meta: dict, coadds: np.ndarray, grid: Grid, x: float, y: float, b
             if c is None:
                 continue
             ra, dec = (float(v) for v in grid.wcs.all_pix2world(c["x"], c["y"], 0))
-            xi = (ra - ra0) * np.cos(np.radians(dec)) * 3600.0
-            if xi > 180 * 3600:  # wrap at RA 0/360
-                xi -= 360 * 3600 * np.cos(np.radians(dec))
+            xi = xi_arcsec(ra, dec, ra0)
             points.append({"epoch": e["index"], "band": b, "mjd": info["mjd_mean"], "year": year, "x": c["x"],
                            "y": c["y"], "ra": ra, "dec": dec, "xi": float(xi), "eta": float((dec - dec0) * 3600.0),
                            "snr": c["snr"], "sigma_arcsec": c["sigma_px"] * grid.pixscale})

@@ -652,7 +652,7 @@ export function summaryText(r: PointAnalysis, h: Headline, located?: { offsetArc
   if (saturated(r)) parts.push("It is saturated: most measurements are relative ring fluxes, so there is no calibrated spectrum to classify.");
   else if (cls?.available && cls.templates?.best) {
     const b = cls.templates.best;
-    parts.push(`Its 0.75–5 µm SPHEREx spectrum matches ${/^[AEIOU]/.test(b.sptype) ? "an" : "a"} ${b.sptype} template${h.confidence != null ? ` (${Math.round(h.confidence * 100)} % for the class)` : ""}${goodBlackbody(cls) ? `, blackbody T ≈ ${Math.round(goodBlackbody(cls)!.teff_k / 10) * 10} K` : ""}.`);
+    parts.push(`Its 0.75–5 µm SPHEREx spectrum matches ${/^[AEIOU]/.test(b.sptype) ? "an" : "a"} ${b.sptype} template${h.confidence != null ? ` (relative template weight ${Math.round(h.confidence * 100)} % for the class)` : ""}${goodBlackbody(cls) ? `, blackbody colour temperature ≈${Math.round(goodBlackbody(cls)!.teff_k / 10) * 10} K` : ""}.`);
   } else if (raw && !raw.available) parts.push(raw.reason ? `No calibrated spectrum: ${raw.reason}.` : "No calibrated spectrum.");
   if (mo && (mo.significance ?? 0) >= 4) parts.push(`It moves ${pmText(mo.pm_total ?? 0)} between the epochs.`);
   else if (mo) parts.push("No motion is measurable between the epochs.");
@@ -660,8 +660,10 @@ export function summaryText(r: PointAnalysis, h: Headline, located?: { offsetArc
   return parts.join(" ");
 }
 
-/** A blackbody temperature worth quoting: the fit must be decent (χ²/dof ≤ 3), else it says little. */
-export const goodBlackbody = (c: ClassifyResult | null) => (c?.blackbody && (c.blackbody.chi2_red ?? 0) <= 3 ? c.blackbody : null);
+/** A blackbody colour temperature worth quoting: the fit must be decent (χ²/dof ≤ 3) and the spectrum free of
+ *  strong molecular bands or a blend, else it says little. */
+export const goodBlackbody = (c: ClassifyResult | null) =>
+  c?.blackbody && (c.blackbody.chi2_red ?? 0) <= 3 && !["brown_dwarf", "late_m_dwarf", "composite"].includes(c.summary?.family ?? "") ? c.blackbody : null;
 
 /** "M dwarf", "K giant", "A-type star" from a template's spectral type. */
 function starName(sp: string): string | null {

@@ -93,7 +93,7 @@ def match_catalog(sources: list[dict], position_at, radius_arcsec: float = 4.0) 
             continue
         ra_t, dec_t = position_at(year_to_mjd(s.get("epoch") or 2000.0))
         cosd = math.cos(math.radians(dec_t))
-        d = 3600 * math.hypot((s["ra"] - ra_t) * cosd, s["dec"] - dec_t)
+        d = 3600 * math.hypot(((s["ra"] - ra_t + 180.0) % 360.0 - 180.0) * cosd, s["dec"] - dec_t)
         if d < best_d:
             best, best_d = {**s, "separation_arcsec": d}, d
     return best

@@ -9,7 +9,7 @@ from astropy.io import fits
 from astropy.io.votable import parse_single_table
 
 from spherex_core.analysis.lightcurve import relative_fluxes
-from spherex_core.analysis.motion import fit_motion
+from spherex_core.analysis.motion import fit_motion, xi_arcsec
 from spherex_core.analysis.periodogram import periodogram
 from spherex_core.archive import Frame
 from spherex_core.bands import BANDS
@@ -99,6 +99,22 @@ def test_motion_fit_needs_a_source():
     meta, data, grid = _moving_coadds()
     with pytest.raises(ValueError):
         fit_motion(meta, np.random.default_rng(0).normal(0, 1, data.shape).astype(np.float32), grid, 5, 5)
+
+
+def test_motion_offset_wraps_at_ra_zero():
+    assert xi_arcsec(0.0001, 0.0, 359.9999) == pytest.approx(0.72, abs=1e-6)  # was about -1,296,000"
+    assert xi_arcsec(359.9999, 0.0, 0.0001) == pytest.approx(-0.72, abs=1e-6)
+    assert xi_arcsec(10.001, 60.0, 10.0) == pytest.approx(1.8, abs=1e-6)
+
+
+def test_known_object_match_wraps_at_ra_zero():
+    from spherex_core.field import known
+
+    t = {"detections": [{"mjd": 60000.0, "ra": 0.0001, "dec": 0.0}], "rate_arcsec_per_hr": 1.5, "pa_deg": 90.0}
+    o = {"name": "A", "kind": "asteroid", "vmag": 18, "mjd": 60000.0, "ra": 359.9999, "dec": 0.0,
+         "ra_rate": 1.5, "dec_rate": 0.0, "speed_arcsec_per_hr": 1.5, "pa_deg": 90.0}
+    m = known._rank(t, [o])
+    assert m and m[0]["sep_arcsec"] == pytest.approx(0.72, abs=0.01)
 
 
 def _sequence(tmp_path):
