@@ -30,8 +30,9 @@ existing queues.
    sequence.
 2. **Templates per exposure.** For exposure i on grid G_i (centre c_i, wavelength λ_i, resolution element dλ_i):
    - candidates: Level 2 images of the same detector covering c_i (one footprint search per 0.5° cluster of
-     centres: IRSA TAP, or IRSA MOST with a fixed-point pseudo-orbit — a = 10⁵ au, i = 90°, Ω = λ_ecl,
-     ω = β_ecl, H = −35 — when TAP fails; a cluster whose search fails twice only loses its own templates);
+     centres: the archive image search of ADR-0057 (mirror, TAP or SIA), or IRSA MOST with a fixed-point
+     pseudo-orbit — a = 10⁵ au, i = 90°, Ω = λ_ecl, ω = β_ecl, H = −35 — when all of those fail; a cluster
+     whose search fails twice only loses its own templates);
    - not the exposure's own file, and the object more than the grid half-diagonal plus a coma margin (2′ comets,
      0.5′ asteroids) away: interpolated inside a visit, extrapolated along the nearest visit up to 30 days with a
      10 % allowance for curvature, assumed gone after that;
@@ -82,9 +83,11 @@ existing queues.
 ## Consequences
 
 - The clean build reads a few hundred to a thousand extra cutouts (3I/ATLAS 16′: 576–653 templates, 1.2–2.9 GB
-  from S3 in 23–39 s). The footprint searches dominate: ~20 s per cluster on MOST when TAP is down, 8 clusters
-  for 3I/ATLAS (3 min), 109 for near-Earth Eros, which sweeps tens of degrees per visit (~20 min); TAP answers
-  in seconds when it is up, and searches are cached per position for a week.
+  from S3 in 23–39 s). On MOST the footprint searches dominate: ~20 s per cluster, 8 clusters for 3I/ATLAS
+  (3 min), 109 for near-Earth Eros, which sweeps tens of degrees per visit (~20 min); searches are cached per
+  position for a week. The archive search answers in about a second, but its rows have no footprint, so the
+  header of every same-detector candidate is read once (3I/ATLAS 16′: 2,421 headers in 17.5 s, cached on disk);
+  the whole step then takes 29 s.
 - Star residuals drop from p99 31–43σ to 1.6–2.5σ per exposure; 8–11 % of pixels are masked (dense Milky Way
   fields at the upper end), and an aperture that meets a masked star is filled from its ring, which assumes
   symmetry.
@@ -94,8 +97,8 @@ existing queues.
 - The comet production rates are proxies (Haser with ρ ≪ scale length, fixed velocity law, literature g-factors,
   no optical-depth or temperature model); the taxonomy is a complex, not a Bus–DeMeo type, because SPHEREx starts
   at 0.75 µm and measures no albedo. Both results carry their caveats.
-- The TAP → MOST fallback here is local to the static-sky search. A general TAP fallback for the archive layer is
-  separate work; when it exists, `skyframes.frames_covering` should use it.
+- The footprint search goes through `archive.query_frames`, so it gets the mirror and the TAP/SIA fallbacks of
+  ADR-0057; the MOST fixed-point search stays as the last resort here because it also returns footprints.
 
 ## Alternatives considered
 

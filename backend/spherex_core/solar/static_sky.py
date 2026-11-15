@@ -308,7 +308,31 @@ async def add_static_sky(meta: dict, arrays: dict[str, np.ndarray], aligned_by_f
             for sf in sfs:
                 if sf.frame.detector not in waves:
                     waves[sf.frame.detector] = await reader.wave_map(sf.frame.s3_url, sf.frame.detector)
-        wcs_cache: dict[str, object] = {}
+        # Frames without footprint corners (archive rows): the exposure centres of their cluster located with the
+        # header WCS, headers read concurrently (cached on disk) and each WCS evaluated once for all centres.
+        members = [np.flatnonzero(label == c) for c in range(len(cl_centres))]
+        row = np.zeros(len(exps), int)
+        for m in members:
+            row[m] = np.arange(len(m))
+        bands_of = [{exps[i]["band"] for i in m} for m in members]
+        need = {(c, sf.frame.s3_url) for c, sfs in enumerate(per_cluster) for sf in sfs
+                if sf.corners is None and sf.frame.band in bands_of[c]}
+        pix: dict[tuple[int, str], np.ndarray] = {}
+        sem_h = asyncio.Semaphore(64)
+
+        async def locate(c: int, url: str) -> None:
+            async with sem_h:
+                try:
+                    w = await _header_wcs(reader, url)
+                except Exception as ex:  # noqa: BLE001
+                    log.debug("header read failed %s %r", url, ex)
+                    return
+            idx = members[c]
+            x, y = w.all_world2pix(centres[idx, 0], centres[idx, 1], 0, quiet=True)
+            pix[(c, url)] = np.column_stack([x, y])
+
+        with logs.timed(log, "static sky headers", frames=len(need)):
+            await asyncio.gather(*(locate(c, u) for c, u in need))
 
         # 1-2. candidates and their predicted wavelength at each exposure centre
         for i, e in enumerate(exps):
@@ -328,13 +352,10 @@ async def add_static_sky(meta: dict, arrays: dict[str, np.ndarray], aligned_by_f
                     if not inside:
                         continue
                 else:
-                    try:
-                        w = wcs_cache.get(f.s3_url) or await _header_wcs(reader, f.s3_url)
-                        wcs_cache[f.s3_url] = w
-                        x, y = (float(v) for v in w.all_world2pix(ra_i, dec_i, 0, quiet=True))
-                    except Exception as ex:  # noqa: BLE001
-                        log.debug("header read failed %s %r", f.file_name, ex)
+                    xy = pix.get((int(label[i]), f.s3_url))
+                    if xy is None:
                         continue
+                    x, y = float(xy[row[i], 0]), float(xy[row[i], 1])
                     if not (0 <= x < 2040 and 0 <= y < 2040):
                         continue
                 wl_j, _ = waves[f.detector](x, y)

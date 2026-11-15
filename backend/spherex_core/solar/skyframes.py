@@ -2,14 +2,16 @@
 
 Two sources, tried in order:
 
-1. The IRSA TAP footprint search (archive.query_frames), the same as fixed-position sequences. Its rows carry no
-   footprint, so the wavelength at the point is predicted from the image header (one small read, cached).
+1. The archive image search (archive.query_frames: the file-catalogue mirror, IRSA TAP or SIA, ADR-0057), the
+   same as fixed-position sequences. Its rows carry no footprint, so the wavelength at the point is predicted from
+   the image header (one small read, cached).
 2. IRSA MOST with a pseudo-object parked at the point ("fixed point"). MOST matches an ephemeris against the
    image footprints; a circular orbit with a = 1e5 au moves < 0.01" over the mission and its parallax is 2",
    so it stands still on the sky. The MOST workspace file irsa_catalog.tbl lists every image of the search region
    with its footprint corners (pixel corners (-0.5,-0.5), (nx-0.5,-0.5), (nx-0.5,ny-0.5), (-0.5,ny-0.5) in that
    order, checked against the WCS of real files), which locate the point on the detector without reading
-   anything. MOST runs on a different IRSA service than TAP, which answered 502 for days in November 2026.
+   anything. MOST runs on a different IRSA service than TAP, which answered 502 for days in November 2026; it is
+   the last resort when every source of the archive search failed.
 
 Answers are cached on disk under <cache>/solar/.
 """
@@ -183,10 +185,10 @@ def query_fixed_point(ra: float, dec: float, collections: tuple[str, ...] | None
 
 
 def frames_covering(ra: float, dec: float, collections: tuple[str, ...] | None = None) -> tuple[list[SkyFrame], str]:
-    """Blocking (network). Images that cover (ra, dec) and which source answered ('tap' or 'most')."""
+    """Blocking (network). Images that cover (ra, dec) and which source answered ('archive' or 'most')."""
     try:
         frames = query_frames(ra, dec, collections)
-        return [SkyFrame(f) for f in frames], "tap"
-    except Exception as e:  # noqa: BLE001 - TAP down: fall back to MOST
-        log.warning("TAP footprint search failed (%s); using the MOST fixed-point search", str(e)[:120])
+        return [SkyFrame(f) for f in frames], "archive"
+    except Exception as e:  # noqa: BLE001 - archive search down: fall back to MOST
+        log.warning("archive image search failed (%s); using the MOST fixed-point search", str(e)[:120])
     return query_fixed_point(ra, dec, collections), "most"

@@ -198,8 +198,10 @@ offset; pixels where the template is bright enough that the measured residual fr
 | 433 Eros, 6′, 6 visits | 952/954 (1 of 109 searches failed) | 2,399 (5.1 GB) | 21.3 → 2.2 | 6.3 % | 436 s |
 | 16 Psyche, 6′, 2 visits | 295/295 | 670 (1.4 GB) | 32.7 → 2.2 | 8.0 % | 70 s |
 
-Searches ran on IRSA MOST (fixed-point pseudo-orbit) because IRSA TAP answered 502 during these runs; TAP takes
-seconds when it is up. In the 3I/ATLAS D5 clean stack the CO2 coma is visible to ~3′ where the plain stack shows
+Searches ran on IRSA MOST (fixed-point pseudo-orbit) because IRSA TAP answered 502 during these runs. Rebuilt on the
+archive search of ADR-0057 (file-catalogue mirror), 3I/ATLAS 16′ gives the same result (575 templates, all 160 by
+median, 35.2 → 2.1, 8.5 %) in 29 s with nothing cached but the cutouts: search 1.1 s for 8 clusters, 17.5 s for the
+headers of 2,421 frames without footprint corners (read 64 at a time, cached on disk), templates 7.7 s. In the 3I/ATLAS D5 clean stack the CO2 coma is visible to ~3′ where the plain stack shows
 star trails.
 
 **Comets.** Apertures of fixed radius in km (θ″ = ρ / (725.27 Δ_au), Δ from SPHEREx) on the clean exposures,
