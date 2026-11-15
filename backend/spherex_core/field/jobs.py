@@ -33,7 +33,8 @@ MAX_CONCURRENT = 2
 MAX_POINT_CONCURRENT = 6
 
 
-KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis"}
+KINDS = {"f": "field analysis", "k": "known objects", "s": "track & stack search", "p": "point analysis",
+         "l": "long-baseline light curve", "w": "long-period search"}
 
 
 def options_key(opts: FieldOptions) -> str:

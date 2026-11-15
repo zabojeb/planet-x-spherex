@@ -610,3 +610,140 @@ optional `SPHEREX_FILE_MIRROR_BASE`), `spherex-cutouts` (IRSA cutout service vs 
 `GET /api/releases` answers from the mirror when it is complete (with `"source": "local mirror (synced … h ago)"`)
 and falls back to it when IRSA TAP fails; `GET /api/catalogs` labels no longer name one archive, since the answer
 may come from any source of that catalogue.
+
+## Long-baseline light curves (2MASS, AllWISE, NEOWISE + SPHEREx)
+
+A homogeneous 1997–2026 light curve of the sequence target, or of any position inside its field, and a field-wide
+long-period variability search (ADR-0059). Both are field jobs with the usual lifecycle: deduplicated per sequence
+and request, `force: true` re-runs, a job nobody polls for 60 s is cancelled. Send `X-Client-Id`.
+
+### `POST /api/sequences/{id}/long-baseline`
+
+Body (all optional):
+
+```text
+{ra, dec,              # deg ICRS at ref_epoch; omit both for the sequence target (one without the other: 422)
+ pmra, pmdec,          # mas/yr (pmra with cos dec); omitted: a Gaia DR3 counterpart's motion within 3", else 0
+ ref_epoch: 2000.0, name,
+ calibrate: true,      # cross-calibrate with field stars (CatWISE2020 / AllWISE / 2MASS PSC)
+ min_period: 50,       # days
+ max_period,           # days, default baseline / 1.5 (<= 6000)
+ field_radius: 150,    # arcsec (60-360): frame windows and calibration stars around the target; larger finds
+                       # more calibration stars near bright targets but reads more frame rows the first time
+ force: false}
+```
+
+Returns the job `{id, status, stage, done, total, error, elapsed}`, with `id` = `<sequence>-l<hash>`. 404: the
+sequence is unknown or unfinished. 422: a bad body, or a position outside the field or on a solar-system
+sequence (the job fails with the reason). Stages run in order: `archive search`, `catalogues`, `frames`
+(done/total = windows read), `photometry`, `calibrate`, `analysis`.
+
+### `POST /api/sequences/{id}/long-period-search`
+
+Body `{w1_max: 15, max_sources: 150 (1-400), min_points: 8, min_period: 50, max_period: null,
+radius_arcsec: 150 (30-360), force: false}`. Returns the job, with `id` = `<sequence>-w<hash>`. Job ids include
+the result version, so a new pipeline version does not serve old results.
+
+### `GET /api/long-baseline/{job_id}` · `DELETE /api/long-baseline/{job_id}`
+
+GET answers:
+
+| Status | Meaning |
+|---|---|
+| 200 | The result (immutable, `ETag: "<job_id>"`). |
+| 202 | The job, while it runs; every GET is a heartbeat. |
+| 500 | The job failed. |
+| 410 | The job was cancelled; POST again. |
+| 404 | Unknown job, or not an `l` / `w` job. |
+
+DELETE withdraws this client: 200 with the job, or 204 if the job is unknown.
+
+Light-curve result:
+
+```text
+{ version: 2, kind: "long-baseline light curve", sequence, created,
+  target: {ra, dec, name, pmra, pmdec, ref_epoch, source}, is_sequence_target, request,
+  coverage: {first_year, last_year, baseline_years, bands: {J|H|Ks|W1|W2|D1..D6: {n, surveys, first, last}}},
+  points: [{band, survey: 2MASS|AllWISE|NEOWISE|SPHEREx, survey_id, date, mjd, mjd_min, mjd_max, year,
+            flux_mjy, err_mjy,               # null for relative points
+            mag, mag_err, mag_system,        # Vega (J..W2), AB (D1..D6), "relative" (-2.5 log10 rel)
+            rel, rel_err, relative,          # relative points (ring photometry of saturated targets)
+            method,                          # aperture | ring | psc | synthetic | synthetic-relative | narrow | narrow-relative
+            group,                           # zero-point group: band, or "<band>:<survey>-ring|-relative"
+            mag_anchored, flux_anchored_mjy, anchored,   # on the band's reference group (see analysis.anchoring)
+            n, n_rejected, saturated, flagged, calibrated, coverage, extrapolated, wl_um}],
+  methods: {"NEOWISE W1": {method: aperture|ring, saturated_share, frames, apcorr | r_in_px, r_out_px,
+                           ring_fraction, r_in_arcsec, r_out_arcsec, core_from, scale_uncertain}, ...},
+                           # core_from: "NEOWISE" when an AllWISE ring starts at the NEOWISE ring's radius;
+                           # scale_uncertain: the ring holds < 0.5% of the PSF (absolute scale off by up to ~2 mag)
+  calibration: {references: {wise: CatWISE2020|AllWISE|Gaia DR3|"", 2mass},
+                stars: [{id, ra, dec, w1, mag, g}],
+                frames: {"neowise:W1": {offset_mag, scatter_mag, err_mag, n, applied, reference, stars}, ...},
+                spherex: {W1|W2|J|H|Ks: {offset_mag, scatter_mag, n, applied, used_offset_mag,
+                                         source: "field stars"|"default", rejected_variable, stars}},
+                star_photometry: {<star id>: {neowise: {W1, W2}, spherex_synthetic: {...}, catalogue: {...}}}},
+  analysis: {n_points, bands, groups, baseline_days, first_mjd, last_mjd,
+             constant_model: {chi2_red, offsets: {group: mag}},
+             period: {period_days, period_err_days, frequency_per_day, power, false_alarm_probability, significant,
+                      cadence_alias,                     # k when P = 365.25/k d (k <= 7): not significant
+                      n_points, bands, nterms, chi2_red, min_period_days, max_period_days, baseline_days,
+                      amplitudes_mag: {band: peak-to-peak}, offsets: {group: mag}, t0_mjd,
+                      peaks: [{period_days, power}],                    # up to 5, independent
+                      periodogram: {period_days: [...], power: [...]},  # <= 1500 samples
+                      model: {phase: [0..1], mag_by_band: {band: [...]}}} | null,
+             folded: [{band, survey, group, phase, mag, mag_err, mjd}],  # when the period is significant
+             trends: {band: {slope_mag_per_year, slope_err, significance, span_years, n}},   # spans >= 3 yr
+             era_means: {band: [{survey, group, mean_mag, err_mag, n, first_mjd, last_mjd}]},
+             events: [{kind: dimming|brightening, start_mjd, end_mjd, peak_mag, bands, surveys, n_points,
+                       significance}],
+             band_stats: {band: {n, chi2_red_constant, range_5_95_mag, robust_sigma_mag, median_err_mag}},
+             anchoring: {group: {band, reference, shift_mag, fitted, absolute_scale}},
+             classification: {label: constant|variable (aperiodic)|periodic variable|long-period variable,
+                              variable, periodic, trend_bands, dimming_events, reasons: [...]}} | {error},
+  processing: {window_centre: {ra, dec}, window_radius_arcsec, max_visit_frames, spherex_bin_days, period_bands,
+               mag_floor},
+  stats: {images, frames: {frames, cached, read, not_covered, requests, bytes, errors}, spherex, seconds: {stage: s},
+          total_seconds},
+  notes: [...] }
+```
+
+Long-period search result:
+
+```text
+{ version: 3, kind: "long-period search", sequence, created, options, field: {ra, dec, radius_arcsec},
+  summary: {sources, measured, contaminated, labels: {label: n}, variable_fraction,    # over clean sources
+            long_period_candidates: [id]},
+  candidates: [{id, ra, dec, w1, w2, n_points, saturated,
+                contamination,            # AllWISE W1/W2 ccf ("hh", "d0", ...), "track" (on the moving target's
+                                          # track), "blend" (W1 > 0.5 mag off the catalogue) or null
+                score, label, variable, periodic, reasons, chi2_red: {W1, W2}, range_mag: {W1, W2},
+                period_days, period_power, period_fap, cadence_alias, amplitudes_mag, trends, events,
+                baseline_years, points: [{band, survey, mjd, mag, mag_err, group}]}],   # ranked, best first
+  ensemble: {"neowise:W1": {applied, visits, zero_point_scatter_mag}, ...},
+  stats: {images, frames, seconds: {frames, photometry, total}}, notes }
+```
+
+### `GET /api/long-baseline/{job_id}/lightcurve.csv`
+
+The finished light curve, one row per point, with three `#` comment lines first. The columns are:
+
+```text
+band, survey, date, mjd, mjd_min, mjd_max, year, flux_mjy, err_mjy, mag, mag_err, mag_system, mag_anchored,
+flux_anchored_mjy, anchored, group, method, relative, rel, rel_err, saturated, flagged, calibrated, n, coverage
+```
+
+404 for an unknown or unfinished job.
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -H 'X-Client-Id: tab1' -d '{}' \
+  https://<host>/api/sequences/<id>/long-baseline
+```
+
+```bash
+curl -s -H 'X-Client-Id: tab1' https://<host>/api/long-baseline/<job_id>
+```
+
+MCP: `long_baseline_lightcurve(sequence_id, ra?, dec?, pmra?, pmdec?, ref_epoch?)` and
+`long_period_search(sequence_id, limit?)` submit or join the same jobs. They return a compact summary once
+done, the job status while running, and `job_result(job_id)` works too. From the command line:
+`python scripts/long_baseline.py <sequence> [--ra --dec] [--png curve.png] [--out result.json] [--search]`.

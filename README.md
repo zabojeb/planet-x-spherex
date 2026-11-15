@@ -29,6 +29,7 @@ A public web tool for watching the infrared sky change. Enter an object name or 
 | Contamination flags per epoch and detector, definitions read from the files | Done |
 | HTTP API with background jobs, progress and binary arrays | Implemented |
 | Gaia DR3, CatWISE2020 and 2MASS cone searches for overlays | Implemented |
+| Long-baseline light curves 1997–2026: 2MASS / AllWISE / NEOWISE frames measured like the target, SPHEREx synthetic W1/W2 cross-calibrated on field stars, multiband period search ([ADR-0059](docs/adr/0059-long-baseline-light-curves.md)) | Implemented |
 | Web viewer: blink, difference, stack, false-colour RGB, single exposures, overlays, charts | In progress |
 | Field-of-view choice, shareable and embeddable links with the view in the URL | In progress (API supports it) |
 | MCP server so AI agents can use the tool | Planned |
