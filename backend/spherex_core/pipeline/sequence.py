@@ -315,6 +315,8 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
     breakdown of where the exposure time went (logs.py, by Max0072); meta.stats.seconds and .timings keep the same.
     """
     report = progress or (lambda stage, done, total: None)
+    if p.static_sky and not p.is_moving_object:
+        raise ValueError("static_sky needs a solar-system object (object_name or naif_id)")
     t0 = time.perf_counter()
     target = p.target
     most_result = None  # set in co-moving mode (solar-system object)
@@ -467,6 +469,11 @@ async def build_sequence(p: SequenceParams, out_dir: Path, progress: Progress | 
     t_assemble = time.perf_counter() - t0 - t_search - t_fetch
     if most_result is not None:
         patch_comoving_meta(meta, target, most_result)
+        if p.static_sky:  # optional: clean co-adds with the static sky subtracted (spherex_core.solar, ADR-0060)
+            from ..solar.static_sky import add_static_sky
+
+            aligned = {r["file"]: r["aligned"] for r in per_frame if r is not None}
+            await add_static_sky(meta, arrays, aligned, target, grid, half, p.collections, report)
     meta["stats"].update(net)
     meta["stats"]["timings"] = breakdown
     meta["stats"]["seconds"] = {"search": t_search, "fetch_and_align": t_fetch, "assemble": t_assemble,

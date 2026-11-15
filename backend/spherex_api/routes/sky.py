@@ -1,4 +1,4 @@
-"""The sky map's data (ADR-0059): a caching HiPS proxy, SPHEREx coverage at a point, exposure footprints near one."""
+"""The sky map's data (ADR-0061): a caching HiPS proxy, SPHEREx coverage at a point, exposure footprints near one."""
 
 from __future__ import annotations
 

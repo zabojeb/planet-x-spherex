@@ -866,7 +866,7 @@ export async function verifyPosition(seqId: string, body: { ra: number; dec: num
 
 export const adesUrl = (fieldId: string) => `${BASE}/api/field/${fieldId}/ades.psv`;
 
-// ---------------------------------------------------------------- sky map (ADR-0059)
+// ---------------------------------------------------------------- sky map (ADR-0061)
 
 export interface Coverage {
   ra: number;

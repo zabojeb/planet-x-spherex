@@ -7,7 +7,7 @@
  * then the SPHEREx-vs-catalogue checks, then tabs with the spectrum, variability, motion and counterparts.
  * Closing the window withdraws the job.
  */
-import { AlertTriangle, ArrowUpRight, Check, CircleSlash, Loader2, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CircleSlash, Loader2, PanelBottomOpen, RotateCcw, X } from "lucide-react";
 import { Component, useEffect, useId, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { compassPoint, formatDec, formatPm, formatRA } from "../astro";
 import { CATALOG_STYLE, STATUS } from "../colors";
@@ -137,46 +137,60 @@ function AnalysisWindow(p: Props) {
     <div className="am-backdrop" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
       <section ref={box} className="am glass" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <header className="am-head">
-          <div className="am-head-main">
+          <div className="am-topline">
             <div className="micro am-kicker">
               {kicker}
               <span className="am-subject mono">{p.subject.label}</span>
             </div>
-            <h2 id={titleId} className="am-title">
-              {title}
-              {h?.type && <span className="am-type mono">{h.type}</span>}
-            </h2>
-            <div className="am-sub mono">
-              <span>{formatRA(pos.ra)} {formatDec(pos.dec)}</span>
-              <CopyButton text={`${pos.ra.toFixed(6)} ${pos.dec >= 0 ? "+" : ""}${pos.dec.toFixed(6)}`} label="coordinates" />
-              {loc?.found && loc.offsetArcsec >= 0.5 && <span className="muted">centre {loc.offsetArcsec.toFixed(1)}″ {loc.pa} of the click</span>}
-              {loc?.found && <span className="muted">peak S/N {loc.snr >= 100 ? loc.snr.toFixed(0) : loc.snr.toFixed(1)}</span>}
-              {h?.knownAs && <span className="am-known">≈ {h.knownAs}</span>}
-            </div>
-            {(!!h?.tags.length || novelty != null) && (
-              <div className="am-tags">
-                {novelty != null && (
-                  <span className={`badge novelty${novelty >= 0.4 ? " hot" : ""}`} title="How unusual the findings are, 0 (well known) to 1 (nothing like it in the catalogues)">
-                    novelty<span className="num">{novelty.toFixed(2)}</span>
-                  </span>
-                )}
-                {h?.tags.map((t) => <span key={t} className="badge">{t}</span>)}
-              </div>
+            {records.length > 0 && p.onOpenCurves && (
+              <button className="btn ghost icon" onClick={() => p.onOpenCurves!(records, p.subject.label)} aria-label="Open in the drawer" title="Open in the drawer: light curve, periodogram and data of this source">
+                <PanelBottomOpen size={15} />
+              </button>
             )}
-          </div>
-          {checks && checks.checked > 0 && <Agreement agree={checks.agree} checked={checks.checked} />}
-          {(r || cur.error) && (
-            <button className="btn ghost icon am-rerun" onClick={() => setRerun((n) => n + 1)} aria-label="Run the analysis again" title="Run again: measure afresh instead of using the saved result">
-              <RotateCcw size={15} />
+            {(r || cur.error) && (
+              <button className="btn ghost icon" onClick={() => setRerun((n) => n + 1)} aria-label="Run the analysis again" title="Run again: measure afresh instead of using the saved result">
+                <RotateCcw size={14} />
+              </button>
+            )}
+            <button className="btn ghost icon" onClick={p.onClose} aria-label="Close analysis" title="Close (Esc)">
+              <X size={16} />
             </button>
-          )}
-          <button className="btn ghost icon am-close" onClick={p.onClose} aria-label="Close analysis" title="Close (Esc)">
-            <X size={16} />
-          </button>
+          </div>
+          <div className="am-ident">
+            {p.subject.stamp && <StampView {...p.subject.stamp} />}
+            <div className="am-head-main">
+              <h2 id={titleId} className="am-title">
+                {title}
+                {h?.type && <span className="am-type mono">{h.type}</span>}
+              </h2>
+              <div className="am-sub mono">
+                <span>{formatRA(pos.ra)} {formatDec(pos.dec)}</span>
+                <CopyButton text={`${pos.ra.toFixed(6)} ${pos.dec >= 0 ? "+" : ""}${pos.dec.toFixed(6)}`} label="coordinates" />
+              </div>
+              {h?.knownAs && <div className="am-known">≈ {h.knownAs}</div>}
+              {loc?.found && (
+                <div className="am-loc mono">
+                  {loc.offsetArcsec >= 0.5 && <>centre {loc.offsetArcsec.toFixed(1)}″ {loc.pa} of the click · </>}
+                  peak S/N {loc.snr >= 100 ? loc.snr.toFixed(0) : loc.snr.toFixed(1)}
+                </div>
+              )}
+              {(!!h?.tags.length || novelty != null || (checks && checks.checked > 0)) && (
+                <div className="am-tags">
+                  {checks && checks.checked > 0 && <Agreement agree={checks.agree} checked={checks.checked} />}
+                  {novelty != null && (
+                    <span className={`badge novelty${novelty >= 0.4 ? " hot" : ""}`} title="How unusual the findings are, 0 (well known) to 1 (nothing like it in the catalogues)">
+                      novelty<span className="num">{novelty.toFixed(2)}</span>
+                    </span>
+                  )}
+                  {h?.tags.map((t) => <span key={t} className="badge">{t}</span>)}
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
+        <div className="am-scroll">
         <div className="am-hero">
-          {p.subject.stamp && <StampView {...p.subject.stamp} />}
           <div className="am-hero-text">
             {skip ? (
               <div className="am-empty">
@@ -219,33 +233,17 @@ function AnalysisWindow(p: Props) {
                   { value: "catalogs", label: "Catalogues" },
                 ]}
               />
-              {tab === "spectrum" && (
-                <Segmented<"linear" | "log">
-                  label="Flux scale"
-                  size="sm"
-                  value={p.ylog ? "log" : "linear"}
-                  onChange={(v) => p.onYlog(v === "log")}
-                  options={[
-                    { value: "linear", label: "Lin" },
-                    { value: "log", label: "Log" },
-                  ]}
-                />
-              )}
-              {records.length > 0 && p.onOpenCurves && (
-                <button className="btn ghost small-btn am-open" onClick={() => p.onOpenCurves!(records, p.subject.label)} title="Light curve, periodogram and data of this source in the drawer">
-                  Open in drawer <ArrowUpRight size={12} />
-                </button>
-              )}
             </nav>
             <div className="am-body">
               {tab === "overview" && <Overview r={r} checks={checks!} />}
-              {tab === "spectrum" && <SpectrumTab r={r} meta={p.meta} ylog={p.ylog} />}
+              {tab === "spectrum" && <SpectrumTab r={r} meta={p.meta} ylog={p.ylog} onYlog={p.onYlog} />}
               {tab === "variability" && <VariabilityTab r={r} meta={p.meta} />}
               {tab === "motion" && <MotionTab r={r} />}
               {tab === "catalogs" && <CatalogsTab r={r} fov={p.meta.grid.fov_arcmin} />}
             </div>
           </>
         )}
+        </div>
       </section>
     </div>
   );
@@ -255,20 +253,17 @@ function AnalysisWindow(p: Props) {
 
 function Agreement({ agree, checked }: { agree: number; checked: number }) {
   const f = agree / checked;
-  const R = 15;
+  const R = 6;
   const C = 2 * Math.PI * R;
   const color = f >= 0.8 ? STATUS.good : f >= 0.5 ? STATUS.warning : STATUS.critical;
   return (
-    <div className="am-agree" title={`${agree} of ${checked} SPHEREx measurements agree with the catalogues`}>
-      <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden>
-        <circle cx="19" cy="19" r={R} className="am-agree-track" />
-        <circle cx="19" cy="19" r={R} fill="none" stroke={color} strokeWidth="3" strokeDasharray={`${C * f} ${C}`} transform="rotate(-90 19 19)" strokeLinecap="round" />
+    <span className="badge am-agree" title={`${agree} of ${checked} SPHEREx measurements agree with the catalogues`}>
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+        <circle cx="7" cy="7" r={R} className="am-agree-track" />
+        {f > 0 && <circle cx="7" cy="7" r={R} fill="none" stroke={color} strokeWidth="2" strokeDasharray={`${C * f} ${C}`} transform="rotate(-90 7 7)" />}
       </svg>
-      <div>
-        <div className="am-agree-num num">{agree}<span className="muted">/{checked}</span></div>
-        <div className="micro">match catalogues</div>
-      </div>
-    </div>
+      <span className="num">{agree}/{checked}</span> match catalogues
+    </span>
   );
 }
 
@@ -320,7 +315,7 @@ function StampView({ stamp, rgb, centre, click, pixscale }: NonNullable<Analysis
   const [cx, cy] = [sx(centre[0]), sy(centre[1])];
   const bar = 30 / pixscale;
   return (
-    <figure className="am-stamp">
+    <figure className="am-stamp" title={rgb ? "False colour: 3.8–5 / 1.6–3.8 / 0.75–1.6 µm as red / green / blue" : "S/N, all detectors"}>
       <div className="am-stamp-img">
         <canvas ref={cv} aria-label="Image around the source" />
         <svg viewBox={`0 0 ${size} ${size}`} preserveAspectRatio="none" aria-hidden>
@@ -350,7 +345,6 @@ function StampView({ stamp, rgb, centre, click, pixscale }: NonNullable<Analysis
         <span className="am-stamp-label mono am-e" style={{ right: `${((2 + 3.3) / size) * 100}%`, bottom: `${((5 - 0.4) / size) * 100}%` }}>E</span>
         <span className="am-stamp-label mono am-bar">30″</span>
       </div>
-      <figcaption className="mono">{rgb ? "false colour · 3.8–5 / 1.6–3.8 / 0.75–1.6 µm" : "S/N, all detectors"}</figcaption>
     </figure>
   );
 }
@@ -491,31 +485,21 @@ function Overview({ r, checks }: { r: PointAnalysis; checks: ReturnType<typeof c
       <section>
         <h3 className="micro">SPHEREx against the catalogues</h3>
         {checks.rows.length ? (
-          <table className="tbl compact am-checks">
-            <thead>
-              <tr>
-                <th>Quantity</th>
-                <th className="num">SPHEREx</th>
-                <th className="num">Catalogue</th>
-                <th className="num">Δ</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {checks.rows.map((c: CheckRow) => (
-                <tr key={c.key} title={c.note ?? undefined} className={c.agree === false ? "bad" : undefined}>
-                  <td>{c.label}</td>
-                  <td className="num">{c.ours}</td>
-                  <td className="num">
-                    {c.theirs}
-                    <span className="am-cat">{c.catalog}</span>
-                  </td>
-                  <td className="num">{c.delta ?? "—"}</td>
-                  <td><Mark agree={c.agree} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ul className="am-checks">
+            {checks.rows.map((c: CheckRow) => (
+              <li key={c.key} title={c.note ?? undefined} className={c.agree === false ? "bad" : undefined}>
+                <div className="am-check-head">
+                  <span>{c.label}</span>
+                  <Mark agree={c.agree} />
+                </div>
+                <div className="am-check-vals">
+                  <span><span className="am-check-k">SPHEREx</span> <span className="num">{c.ours}</span></span>
+                  <span><span className="am-check-k">{c.catalog || "catalogue"}</span> <span className="num">{c.catalog && c.theirs.startsWith(`${c.catalog} `) ? c.theirs.slice(c.catalog.length + 1) : c.theirs}</span></span>
+                  {c.delta && <span><span className="am-check-k">Δ</span> <span className="num">{c.delta}</span></span>}
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : (
           <p className="muted small">
             {saturated(r)
@@ -562,13 +546,25 @@ function Overview({ r, checks }: { r: PointAnalysis; checks: ReturnType<typeof c
   );
 }
 
-function SpectrumTab({ r, meta, ylog }: { r: PointAnalysis; meta: Meta; ylog: boolean }) {
+function SpectrumTab({ r, meta, ylog, onYlog }: { r: PointAnalysis; meta: Meta; ylog: boolean; onYlog: (v: boolean) => void }) {
   const s = ok(r.spectrum) ? r.spectrum : null;
   const c = ok(r.classification) ? r.classification : null;
   if (failed(r.classification)) return <p className="chart-empty static">{r.classification.error}</p>;
   if (!c && !s) return <p className="chart-empty static">No spectrum for this position.</p>;
   return (
     <div className="am-spectrum">
+      <div className="am-tab-tools">
+        <Segmented<"linear" | "log">
+          label="Flux scale"
+          size="sm"
+          value={ylog ? "log" : "linear"}
+          onChange={(v) => onYlog(v === "log")}
+          options={[
+            { value: "linear", label: "Lin" },
+            { value: "log", label: "Log" },
+          ]}
+        />
+      </div>
       {c ? <ClassView c={c} s={s} meta={meta} ylog={ylog} /> : s && <SpectrumView s={s} meta={meta} ylog={ylog} />}
       {c && s && (
         <details className="am-more">
@@ -675,53 +671,47 @@ function CatalogsTab({ r, fov }: { r: PointAnalysis; fov: number }) {
   const simbadName = id?.simbad?.[0] ? String(id.simbad[0].name ?? id.simbad[0].id) : null;
   const row = (m: CatalogMatch, i: number, far: boolean) => {
     const st = CATALOG_STYLE[CAT_KEY[(m.catalog ?? "").toLowerCase()] ?? ""];
+    const name = m.name ?? String(m.id);
+    const cat = m.catalog ?? "";
+    const kind = [m.type ?? m.otype, m.sp_type].filter(Boolean).join(" · ");
+    const nums = [m.mag != null ? `${m.mag_band ?? ""} ${m.mag.toFixed(2)}`.trim() : null, m.pmra != null && m.pmdec != null ? `μ ${formatPm(m.pmra, m.pmdec)}` : null].filter(Boolean);
     return (
-      <tr key={`${far ? "n" : "c"}${m.catalog}${m.id}${i}`} className={far ? "am-far" : undefined} title={far ? "Close by, but not the counterpart" : undefined}>
-        <td className="nowrap">
-          {st && <span className={`swatch ${st.shape}`} style={{ color: st.color }} />} {m.catalog}
-        </td>
-        <td>
-          <span className="mono">{m.name ?? String(m.id)}</span>
-          {(m.type || m.otype || m.sp_type) && <span className="muted"> · {[m.type ?? m.otype, m.sp_type].filter(Boolean).join(" · ")}</span>}
-        </td>
-        <td className="num">{m.mag != null ? `${m.mag_band ?? ""} ${m.mag.toFixed(2)}` : ""}</td>
-        <td className="num">{m.pmra != null && m.pmdec != null ? formatPm(m.pmra, m.pmdec) : ""}</td>
-        <td className="num">{m.sep_arcsec != null ? `${m.sep_arcsec.toFixed(1)}″` : ""}</td>
-      </tr>
+      <li key={`${far ? "n" : "c"}${cat}${m.id}${i}`} className={far ? "am-far" : undefined} title={far ? "Close by, but not the counterpart" : undefined}>
+        <div className="am-check-head">
+          <span className="am-cat-name">
+            {st && <span className={`swatch ${st.shape}`} style={{ color: st.color }} />}
+            <span className="mono">{cat && name.startsWith(`${cat} `) ? name.slice(cat.length + 1) : name}</span>
+          </span>
+          {m.sep_arcsec != null && <span className="num am-cat-sep">{m.sep_arcsec.toFixed(1)}″</span>}
+        </div>
+        <div className="am-check-vals">
+          <span className="am-check-k">{cat}</span>
+          {kind && <span className="muted">{kind}</span>}
+          {nums.length > 0 && <span className="num">{nums.join(" · ")}</span>}
+        </div>
+      </li>
     );
   };
   return (
     <div className="am-cats">
       {rows.length || nearby.length || solar.length ? (
-        <table className="tbl compact">
-          <thead>
-            <tr>
-              <th>Catalogue</th>
-              <th>Source</th>
-              <th className="num">Mag</th>
-              <th className="num">μ</th>
-              <th className="num">Sep</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m, i) => row(m, i, false))}
-            {solar.map((o) => (
-              <tr key={o.name}>
-                <td>{o.kind ?? "Solar system"}</td>
-                <td>{o.name}</td>
-                <td className="num">{o.vmag != null ? `V ${o.vmag.toFixed(1)}` : ""}</td>
-                <td />
-                <td className="num">{o.sep_arcsec != null ? `${o.sep_arcsec.toFixed(0)}″` : ""}</td>
-              </tr>
-            ))}
-            {nearby.length > 0 && (
-              <tr className="am-sep">
-                <td colSpan={5} className="micro">Also nearby, not the counterpart</td>
-              </tr>
-            )}
-            {nearby.map((m, i) => row(m, i, true))}
-          </tbody>
-        </table>
+        <ul className="am-checks">
+          {rows.map((m, i) => row(m, i, false))}
+          {solar.map((o) => (
+            <li key={o.name}>
+              <div className="am-check-head">
+                <span className="mono">{o.name}</span>
+                {o.sep_arcsec != null && <span className="num am-cat-sep">{o.sep_arcsec.toFixed(0)}″</span>}
+              </div>
+              <div className="am-check-vals">
+                <span className="am-check-k">{o.kind ?? "Solar system"}</span>
+                {o.vmag != null && <span className="num">V {o.vmag.toFixed(1)}</span>}
+              </div>
+            </li>
+          ))}
+          {nearby.length > 0 && <li className="am-sep micro">Also nearby, not the counterpart</li>}
+          {nearby.map((m, i) => row(m, i, true))}
+        </ul>
       ) : null}
       {!rows.length && <p className="muted small">No counterpart in Gaia DR3, CatWISE2020, 2MASS or SIMBAD close enough to be this source.</p>}
       {id?.errors && <p className="small err">{Object.entries(id.errors).map(([k, e]) => `${k}: ${e}`).join(" · ")}</p>}

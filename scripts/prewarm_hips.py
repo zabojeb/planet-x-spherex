@@ -1,4 +1,4 @@
-"""Fill the server's HiPS cache (ADR-0059) so the sky map never waits for IRSA.
+"""Fill the server's HiPS cache (ADR-0061) so the sky map never waits for IRSA.
 
     python scripts/prewarm_hips.py --plan                 # tile counts per order and an estimated size
     python scripts/prewarm_hips.py                        # the viewer's six frames, every order (0-5)

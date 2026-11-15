@@ -85,7 +85,7 @@ export const MAP_MAX_FOV = 180; // a hemisphere: the SIN projection's limit
  *  combined, frame = 17 × (detector − 1) + (channel − 1). Frames 50 and 51 (the dichroic channels) are blank,
  *  and Aladin opens a cube on its middle frame, so a frame is always chosen explicitly. */
 const SPHEREX_HIPS = "https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube";
-/** Our API caches every tile on its disk and serves it with immutable caching (ADR-0059): same tiles, faster and
+/** Our API caches every tile on its disk and serves it with immutable caching (ADR-0061): same tiles, faster and
  *  independent of IRSA's load. VITE_HIPS_BASE overrides it (e.g. a CDN); without an answer from the proxy within
  *  a moment the map falls back to IRSA. */
 const PROXY_HIPS = (import.meta.env.VITE_HIPS_BASE as string | undefined) || "/hips/spherex-dr1";
@@ -254,7 +254,7 @@ export async function createSkyMap(host: HTMLElement, cam: MapCamera): Promise<S
       tuneCuts();
     }
   };
-  // Black point that follows the zoom (ADR-0059). At map scale the low cut keeps the faint Milky Way glow; close
+  // Black point that follows the zoom (ADR-0061). At map scale the low cut keeps the faint Milky Way glow; close
   // to a field, where one 12.9″ HiPS pixel spans ~25 screen pixels, the same cut paints the background noise as
   // big grey diamonds that read as a placeholder texture. Raising it there leaves black sky and real stars,
   // like the field's own stretch next to it.

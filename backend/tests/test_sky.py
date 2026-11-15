@@ -1,4 +1,4 @@
-"""The sky map's backend (ADR-0059): HiPS proxy cache, coverage at a point, footprints near one."""
+"""The sky map's backend (ADR-0061): HiPS proxy cache, coverage at a point, footprints near one."""
 
 import json
 

@@ -28,7 +28,7 @@ export function Rail(p: {
   /** Guided tour of the five targets (Explore only). */
   onTour?: () => void;
   tourOn?: boolean;
-  /** Map mode (ADR-0059): the field's tools fade out while the map's own rail is shown. */
+  /** Map mode (ADR-0061): the field's tools fade out while the map's own rail is shown. */
   off?: boolean;
 }) {
   const research = p.audience === "research";

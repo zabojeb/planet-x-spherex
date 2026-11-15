@@ -1,4 +1,4 @@
-/** Card for a position picked on the zoomed-out sky map (ADR-0059): where it is, what SPHEREx has there, and the
+/** Card for a position picked on the zoomed-out sky map (ADR-0061): where it is, what SPHEREx has there, and the
  *  two things to do with it — open the SPHEREx field there, or open it and analyse the point straight away. */
 import { ScanSearch, Telescope, X } from "lucide-react";
 import { useEffect, useState } from "react";

@@ -1,4 +1,4 @@
-"""What SPHEREx has at a sky position, for the map's pick card and coverage layer (ADR-0059).
+"""What SPHEREx has at a sky position, for the map's pick card and coverage layer (ADR-0061).
 
 Answers from the local file-catalogue mirror (archive/mirror.py) whenever it has rows, stale or not: the card is
 a preview, and a fresh image search happens anyway when a sequence is built. Without a mirror it falls back to

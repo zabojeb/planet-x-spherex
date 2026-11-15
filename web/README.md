@@ -132,11 +132,12 @@ Everything goes through `src/api.ts`; each newer endpoint falls back to the olde
 
 ## Point analysis and field tools
 
-- **Analyze** (pick card of any pinned point, catalogue source or the target) opens the analysis window over the
-  sky. The source under the click and its centre are found in the browser's images first (`locate.ts`); then
+- **Analyze** (pick card of any pinned point, catalogue source or the target) opens the analysis card at the right
+  edge of the sky (460 px wide, at most 720 px tall, a sheet from the bottom on phones), so the field stays in
+  view. The source under the click and its centre are found in the browser's images first (`locate.ts`); then
   `POST /api/sequences/{id}/analyze`, polled at `GET /api/analyses/{job}` (410 re-posts, closing withdraws with
   DELETE), ticks off each step from the job's `steps` map while they run side by side. The window leads with what
-  the source is (class, type, SIMBAD name, a stamp with the located centre), then tabs: Checks (SPHEREx against
+  the source is (class, type, SIMBAD name, a stamp with the located centre), then tabs pinned under the header as the card scrolls: Checks (SPHEREx against
   Gaia, CatWISE, 2MASS and SIMBAD, findings), Spectrum, Variability, Motion, Catalogues. Steps cut off at the 60 s
   deadline and unreachable services (`timings`) are listed with **Run again** (`force: true`; its polls bypass
   the browser's immutable copy of the old result). Catalogues that timed out are asked again from the browser.

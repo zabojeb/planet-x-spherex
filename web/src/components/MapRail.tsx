@@ -1,4 +1,4 @@
-/** The tool rail of the zoomed-out sky map (ADR-0059). It replaces the field rail while the map has the view: the
+/** The tool rail of the zoomed-out sky map (ADR-0061). It replaces the field rail while the map has the view: the
  *  field's tools (detector, display, analysis ...) do nothing there, the map needs its own — where to go, what to
  *  draw over the sky, picking a point, and the way back to the field. */
 import { Globe2, Layers, LocateFixed, Maximize, Minimize, MousePointerClick, Navigation, Telescope } from "lucide-react";

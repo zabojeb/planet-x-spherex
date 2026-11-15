@@ -1,4 +1,4 @@
-"""A caching proxy for the all-sky HiPS behind the viewer's map (ADR-0059).
+"""A caching proxy for the all-sky HiPS behind the viewer's map (ADR-0061).
 
 The map draws IRSA's SPHEREx DR1 HiPS cube: 102 frames of 512-pixel PNG tiles, orders 0-5. Tiles never change
 within a release, so every tile is fetched from the source once, written under `<cache>/hips/<survey>/` with the

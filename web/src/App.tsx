@@ -130,7 +130,7 @@ const HUD_DOCK_GAP = 16;
 /** Shown where a tool waits for the full result of a build still running (a preview is on screen). */
 const WAIT_FULL = "Available once the sequence has finished loading";
 
-// ---------------------------------------------------------------- sky map (ADR-0059)
+// ---------------------------------------------------------------- sky map (ADR-0061)
 
 const MAP_LAYERS_KEY = "spherex-map-layers";
 function readMapLayers(): MapLayers {
@@ -262,7 +262,7 @@ export default function App() {
   const [sel, setSel] = useState<Selection | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ ra: number; dec: number; key: number } | null>(null);
-  // ---- the zoomed-out sky map (ADR-0059): its own rail, a picked point, layers
+  // ---- the zoomed-out sky map (ADR-0061): its own rail, a picked point, layers
   const [mapMode, setMapMode] = useState(false);
   const [mapPick, setMapPick] = useState<MapPick | null>(null);
   const [mapPicking, setMapPicking] = useState(true);
@@ -862,7 +862,7 @@ export default function App() {
     setSel(null);
     setHero(false);
   };
-  // ---- sky map actions (ADR-0059)
+  // ---- sky map actions (ADR-0061)
   /** Open the SPHEREx field at a picked point (a featured target opens as itself), flying the map towards it
    *  while it builds; the view hands over to the field when it arrives. With analyze, the point is analysed then. */
   const openAtPick = (pk: MapPick, analyze: boolean) => {

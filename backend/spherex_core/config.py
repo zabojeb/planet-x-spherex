@@ -76,7 +76,7 @@ class Settings:
     # NOIRLab Astro Data Lab TAP (CatWISE2020, 2MASS; no ADQL geometry functions, so box queries).
     datalab_tap_url: str = _env("DATALAB_TAP_URL", "https://datalab.noirlab.edu/tap/sync")
     irsa_sia_url: str = _env("IRSA_SIA_URL", "https://irsa.ipac.caltech.edu/SIA")
-    # All-sky HiPS behind the viewer's map (ADR-0059): proxied and cached on disk so the map does not depend on IRSA
+    # All-sky HiPS behind the viewer's map (ADR-0061): proxied and cached on disk so the map does not depend on IRSA
     # answering every tile; an optional mirror (e.g. R2 with the same layout) is ranked against IRSA.
     hips_spherex_base: str = _env("HIPS_SPHEREX_BASE", "https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube")
     hips_mirror_base: str = _env("HIPS_MIRROR_BASE", "")

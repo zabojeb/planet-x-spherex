@@ -100,7 +100,7 @@ interface Props {
   label?: string | null;
   /** Draw the sky map around the field (default on). Never for co-moving grids, which follow an object. */
   map?: boolean;
-  /** Called when the view hands over between the field and the zoomed-out map (ADR-0058/0059). */
+  /** Called when the view hands over between the field and the zoomed-out map (ADR-0058/0061). */
   onMapMode?: (on: boolean) => void;
   /** Map mode: a picked sky position; its card (mapCard) follows it on the map. */
   mapPick?: { ra: number; dec: number } | null;
