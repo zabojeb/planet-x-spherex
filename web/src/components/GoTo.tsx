@@ -1,6 +1,6 @@
 /** "Go to" panel: type a position in ICRS or Galactic coordinates (sexagesimal or degrees, optionally with a
  *  proper motion), or pick it on an all-sky map; recent places are one click away. */
-import { ArrowRight, ChevronDown, Clock, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Clock, Copy, LocateFixed, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { formatDec, formatDeg, formatRA, fromEcliptic, fromGalactic, normRa, parseCoordinates, toGalactic, type CoordFrame } from "../astro";
 import { safeStorage } from "../hooks";
@@ -172,8 +172,11 @@ export function GoToPanel(p: {
   fov: number;
   onGo: (place: Place) => void;
   onPreset: (id: string) => void;
+  /** Move to a new field half a field away (N/E/W/S). */
+  onStep?: (dir: "N" | "S" | "E" | "W") => void;
   close?: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
   const [frame, setFrame] = useState<CoordFrame>("icrs");
   const [a, setA] = useState("");
   const [b, setB] = useState("");
@@ -234,6 +237,45 @@ export function GoToPanel(p: {
   const gal = parsed?.ok ? toGalactic(parsed.ra, parsed.dec) : null;
   return (
     <div className="goto">
+      {p.current && (
+        <div className="goto-here">
+          <div className="micro menu-title goto-here-head">
+            <span>Here · {p.currentName || "field centre"}</span>
+            <button
+              className="btn ghost xs-text"
+              title="Copy coordinates"
+              onClick={() => {
+                const [ra, dec] = p.current!;
+                void navigator.clipboard?.writeText(`${formatRA(ra)} ${formatDec(dec)}  (${formatDeg(ra, 5)} ${formatDeg(dec, 5, true)})`);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1200);
+              }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "copied" : "copy"}
+            </button>
+          </div>
+          <div className="goto-here-body mono">
+            <span>α {formatRA(p.current[0])}  δ {formatDec(p.current[1])}</span>
+            <span className="muted">
+              {formatDeg(p.current[0], 5)} {formatDeg(p.current[1], 5, true)} · l {formatDeg(toGalactic(...p.current)[0], 3)} b {formatDeg(toGalactic(...p.current)[1], 3, true)}
+            </span>
+          </div>
+          {p.onStep && (
+            <div className="goto-step">
+              <div className="nav-pad" role="group" aria-label="Move the field">
+                {(["N", "E", "W", "S"] as const).map((dir) => (
+                  <button key={dir} className={`nav-btn nav-${dir}`} onClick={() => p.onStep!(dir)} title={`New field half a field to the ${{ N: "north", S: "south", E: "east", W: "west" }[dir]} (Shift + arrow)`} aria-label={`Move the field ${dir}`}>
+                    {dir}
+                  </button>
+                ))}
+                <span className="nav-btn nav-C" aria-hidden><LocateFixed size={12} /></span>
+              </div>
+              <span className="muted small">Step half a field; Shift + arrows on the keyboard</span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="micro menu-title">Go to coordinates</div>
       <form
         className="goto-form"

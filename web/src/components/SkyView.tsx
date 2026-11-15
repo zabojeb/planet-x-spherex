@@ -8,7 +8,7 @@
 import { LocateFixed, RotateCcw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Progress } from "../api";
-import { compassPoint, formatAngle, formatDec, formatDeg, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, toGalactic, totalPm, worldToPixel } from "../astro";
+import { formatAngle, formatDec, formatRA, gridLabel, gridStep, normRa, pixelToWorld, positionAngle, propagate, separation, totalPm, worldToPixel } from "../astro";
 import { CATALOG_IDS, CATALOG_STYLE, FLAG_OVERLAY } from "../colors";
 import type { Display } from "../display";
 import { useElementWidth, useViewportHeight } from "../hooks";
@@ -549,8 +549,6 @@ export function SkyView(p: Props) {
   const selPos = selPx ? toScreen(...selPx) : null;
   const hl = p.highlight ? markers.find((m) => sourceKey(m.cat, m.src) === p.highlight) : null;
   const readout = world ? { label: "Cursor", pos: world } : selWorld ? { label: p.selection?.kind === "point" ? "Pin" : "Selected", pos: selWorld } : p.targetWorld ? { label: "Target", pos: p.targetWorld } : null;
-  const gal = readout ? toGalactic(...readout.pos) : null;
-  const fromTarget = readout && p.targetWorld && readout.label !== "Target" ? separation(...p.targetWorld, ...readout.pos) : null;
 
   const cardLeft = selPos ? Math.max(12, Math.min(selPos[0] + 18, W - 300)) : 0;
   const cardTop = selPos ? Math.max(70, Math.min(selPos[1] - 24, H - 420)) : 0;
@@ -749,63 +747,36 @@ export function SkyView(p: Props) {
         );
       })()}
 
-      {/* HUD: navigation pad, compass and scale, date, coordinate readout */}
+      {/* HUD: compass + scale, epoch line, one coordinate line. Field stepping and full coordinates live in Go to. */}
       {n > 0 && (
         <div className="hud-min">
-          <div className="hud-nav">
-            {p.onStep && !p.shiftX && (
-              <div className="nav-pad" role="group" aria-label="Move the field" onPointerDown={stop} onPointerUp={stop} onPointerMove={stop} onDoubleClick={stop}>
-                {(["N", "E", "W", "S"] as StepDir[]).map((dir) => (
-                  <button key={dir} className={`nav-btn nav-${dir}`} onClick={() => p.onStep!(dir)} title={`New field half a field to the ${{ N: "north", S: "south", E: "east", W: "west" }[dir]} (Shift + ${{ N: "↑", S: "↓", E: "←", W: "→" }[dir]})`} aria-label={`Move the field ${dir}`}>
-                    {dir}
-                  </button>
-                ))}
-                <button className="nav-btn nav-C" onClick={resetView} title="Fit the field in view" aria-label="Fit the field in view">
-                  <LocateFixed size={13} />
-                </button>
-              </div>
-            )}
-            {p.overlays.has("compass") && bar && (
-              <svg width={bar.px + 50} height={30} className="hud-compass" aria-hidden>
-                <g transform="translate(18 24)" className="compass">
-                  <line x1={0} y1={0} x2={0} y2={-14} />
-                  <line x1={0} y1={0} x2={-14} y2={0} />
-                  <text x={0} y={-17} textAnchor="middle">N</text>
-                  <text x={-19} y={3} textAnchor="middle">E</text>
-                </g>
-                <g transform="translate(36 22)" className="scalebar">
-                  <line x1={0} y1={0} x2={bar.px} y2={0} />
-                  <text x={bar.px / 2} y={-5} textAnchor="middle">{bar.label}</text>
-                </g>
-              </svg>
-            )}
+          <div className="hud-row">
+          <button className="nav-btn hud-fit" onClick={resetView} onPointerDown={stop} onPointerUp={stop} onDoubleClick={stop} title="Fit the field in view" aria-label="Fit the field in view">
+            <LocateFixed size={13} />
+          </button>
+          {p.overlays.has("compass") && bar && (
+            <svg width={bar.px + 50} height={30} className="hud-compass" aria-hidden>
+              <g transform="translate(18 24)" className="compass">
+                <line x1={0} y1={0} x2={0} y2={-14} />
+                <line x1={0} y1={0} x2={-14} y2={0} />
+                <text x={0} y={-17} textAnchor="middle">N</text>
+                <text x={-19} y={3} textAnchor="middle">E</text>
+              </g>
+              <g transform="translate(36 22)" className="scalebar">
+                <line x1={0} y1={0} x2={bar.px} y2={0} />
+                <text x={bar.px / 2} y={-5} textAnchor="middle">{bar.label}</text>
+              </g>
+            </svg>
+          )}
           </div>
           <div className="hud-line" aria-hidden>
             <span>{p.dateLabel}</span>
           </div>
-          {readout && gal && (
+          {readout && readout.label !== "Target" && (
             <div className="readout" aria-live="off">
-              <div className="readout-head">
-                <span>{readout.label}</span>
-                {value && readout.label === "Cursor" && <span className="muted">{value}</span>}
-              </div>
-              <div className="readout-main">
-                <span><i>α</i>{formatRA(readout.pos[0])}</span>
-                <span><i>δ</i>{formatDec(readout.pos[1])}</span>
-              </div>
-              <div className="readout-sub">
-                <span>{formatDeg(readout.pos[0])}</span>
-                <span>{formatDeg(readout.pos[1], 5, true)}</span>
-              </div>
-              <div className="readout-sub">
-                <span><i>l</i>{formatDeg(gal[0], 4)}</span>
-                <span><i>b</i>{formatDeg(gal[1], 4, true)}</span>
-              </div>
-              {fromTarget != null && p.targetWorld && fromTarget > 1e-5 && (
-                <div className="readout-sub">
-                  <span>{formatAngle(fromTarget)} {compassPoint(positionAngle(...p.targetWorld, ...readout.pos))} of target</span>
-                </div>
-              )}
+              <span><i>α</i>{formatRA(readout.pos[0])}</span>
+              <span><i>δ</i>{formatDec(readout.pos[1])}</span>
+              {value && readout.label === "Cursor" && <span className="muted">{value}</span>}
             </div>
           )}
         </div>

@@ -1061,7 +1061,7 @@ export default function App() {
       <Rail
         bandLabel={bandShort}
         goTo={(close: () => void) => (
-          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} close={close} />
+          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} onStep={embed ? undefined : (d) => { stepField(d); close(); }} close={close} />
         )}
         objects={
           meta ? (
