@@ -9,7 +9,7 @@ How to run, test and deploy the project. Architecture is in [architecture.md](ar
 | `backend/` | Python package: `spherex_core` (domain library) and `spherex_api` (FastAPI) |
 | `backend/tests/` | unit tests and network tests against the real archive |
 | `web/` | web viewer (Vite + React + TypeScript), in progress |
-| `scripts/deploy.sh` | sync to the dev server, install, restart the API |
+| `scripts/deploy.sh` | build the web client, sync to the server, install, restart the API |
 | `scripts/build_sequence.py` | build sequences from the command line, warm the cache, write quick-look PNGs |
 | `scripts/build_object_index.py` | rebuild the local object index (`backend/spherex_core/targets/objects.json`) from SIMBAD |
 | `docs/` | documentation and ADRs |
@@ -163,63 +163,39 @@ cd web && npm run dev
 
 The dev server proxies `/api` to the API given by `API_URL`. `npm run build` writes `web/dist`, which the API serves at `/` after the next deploy.
 
-## Dev server
+## Production server
 
-We develop on a vast.ai instance in US-East next to the data ([ADR-0014](adr/0014-dev-compute-on-vast-ai.md)). Conventions on the server:
+Since 2026-11-15 the public site runs at **https://seekin.space** on a Google Cloud VM in us-east4, next to the data in S3 us-east-1. During the hackathon we developed on a vast.ai instance ([ADR-0014](adr/0014-dev-compute-on-vast-ai.md)), which has since been deleted. The VM layout:
 
 | Path | Content |
 |---|---|
-| `/workspace/app` | the synced repository |
-| `/workspace/venv` | Python environment (uv) |
-| `/workspace/cache` | caches and sequence results |
-| `/workspace/api.log` | API log |
-| tmux session `api` | uvicorn on container port 8000 |
+| `/srv/seekin/app` | the synced repository, with `web/dist` built locally |
+| `/srv/seekin/venv` | Python environment (uv) |
+| `/srv/seekin/cache` | caches and sequence results |
+| systemd unit `seekin-api` | uvicorn, one worker, on 127.0.0.1:8000 (the in-process job queue needs a single process) |
+| Caddy | HTTPS for seekin.space with automatic Let's Encrypt certificates; `www` redirects to the apex |
+
+Logs: `journalctl -u seekin-api -f`.
 
 ### Deploy
 
-1. Copy `.env.example` to `.env.deploy` (git-ignored) and fill in `DEPLOY_HOST`, `DEPLOY_PORT`, `DEPLOY_KEY`, `DEPLOY_DIR` and `API_URL`. vast.ai maps container ports (22, 8000, 5173) to random public ports; find them in the instance details.
+1. Copy `.env.example` to `.env.deploy` (git-ignored) and fill in the host, the SSH key and the paths above. Set `DEPLOY_SERVICE=seekin-api` to restart through systemd. Without it the script runs uvicorn in a tmux session, which suits a scratch dev box.
 2. Run:
 
 ```bash
 scripts/deploy.sh
 ```
 
-It syncs the repository with `rsync` (excluding `.git`, `node_modules`, virtual environments and `.env*`), installs the backend into `/workspace/venv`, and restarts the API in tmux. Use `scripts/deploy.sh --no-restart` to sync and install only, for example to run tests or scripts without interrupting the API.
+It builds `web/dist`, syncs the repository with `rsync` (excluding `.git`, `.claude`, `node_modules`, virtual environments and `.env*`), installs the backend into the venv and restarts the API. `--no-build` skips the web build, and `--no-restart` syncs and installs without interrupting the API, for example to run tests first.
 
 Run tests on the server:
 
 ```bash
-source .env.deploy && ssh -i "$DEPLOY_KEY" -p "$DEPLOY_PORT" "$DEPLOY_HOST" 'cd /workspace/app/backend && . /workspace/venv/bin/activate && python -m pytest -q'
+source .env.deploy && ssh -i "$DEPLOY_KEY" -p "$DEPLOY_PORT" "$DEPLOY_HOST" "cd $DEPLOY_DIR/backend && . $DEPLOY_VENV/bin/activate && python -m pytest -q -m 'not network'"
 ```
 
-Rules: never put GitHub tokens or other secrets on the instance; it is a marketplace host, not a data centre. Keep host details out of the repository.
-
-### Team access
-
-Each teammate sends their **public** SSH key; the owner of the vast.ai account attaches it:
-
-```bash
-vastai attach ssh <instance-id> "ssh-ed25519 AAAA... name"
-```
+Rules: never put GitHub tokens or other secrets on the server. Keep IP addresses and other host details out of the repository.
 
 ### Cost and lifecycle
 
-The instance bills about $0.273 per hour while running and about $0.02 per hour for its 150 GB disk while stopped.
-
-Stop it when nobody is using it (disk and cache are kept):
-
-```bash
-vastai stop instance <instance-id>
-```
-
-Start it again (the public IP and ports may change; update `.env.deploy`):
-
-```bash
-vastai start instance <instance-id>
-```
-
-Destroy it after the hackathon. This deletes the disk and every cached result and cannot be undone:
-
-```bash
-vastai destroy instance <instance-id>
-```
+The VM (e2-standard-4, 250 GB balanced disk, static IP) costs roughly $110–125 a month, paid from free credit. It stays up for about a month after the hackathon. After that, delete the VM, its disk and the static IP, and remove the DNS records at the registrar.
