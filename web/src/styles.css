@@ -505,7 +505,7 @@ canvas.smooth { image-rendering: auto; }
   .search-row .cmdk-list { width: calc(100vw - 24px); }
   .cmdk-shortcut { display: none; }
   .random-main { padding: 0 6px 0 12px; }
-  .random-menu { left: auto; right: 0; }
+  .random-menu.popover { left: auto; right: 0; max-width: calc(100vw - 2 * var(--gutter, 12px)); } /* opens leftwards from the button, beats .popover.left */
   .rail { right: 10px; top: 112px; transform: none; }
   .rail-btn { width: 36px !important; height: 36px; }
   .drawer-open .rail { display: none; } /* the drawer is a focused mode on phones; close it to get the controls back */
@@ -951,3 +951,6 @@ button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opa
 @media (min-width: 761px) {
   .hero { bottom: max(110px, calc(var(--hud-clear, 0px) + 20px)); }
 }
+
+/* menus that drop down from the top bar (search suggestions, Random, the coordinate box) stay above the tool rail */
+.topleft { z-index: 33; }
