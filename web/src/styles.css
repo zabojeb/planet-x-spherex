@@ -556,17 +556,15 @@ canvas.smooth { image-rendering: auto; }
 .pin circle, .pin line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; }
 .pin circle.halo { stroke: rgba(0, 0, 0, 0.7); stroke-width: 3.5; }
 
-.hud-nav { display: flex; align-items: flex-end; gap: 8px; }
 .nav-pad { pointer-events: auto; display: grid; grid-template-columns: repeat(3, 22px); grid-template-rows: repeat(3, 22px); gap: 2px; text-shadow: none; }
 .nav-btn { display: grid; place-items: center; padding: 0; border: 1px solid var(--hair-2); border-radius: 6px; background: rgba(10, 10, 10, 0.58); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: var(--text-2); font-family: var(--mono); font-size: 10px; transition: color var(--t) var(--ease), border-color var(--t) var(--ease), background-color var(--t); }
 .nav-btn:hover { color: var(--accent); border-color: var(--accent-ring); background: rgba(20, 16, 4, 0.8); }
 .nav-N { grid-area: 1 / 2; } .nav-E { grid-area: 2 / 1; } .nav-C { grid-area: 2 / 2; } .nav-W { grid-area: 2 / 3; } .nav-S { grid-area: 3 / 2; }
-.readout { display: flex; flex-direction: column; gap: 1px; min-width: 214px; }
+.readout { display: flex; gap: 14px; align-items: baseline; font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.readout .muted { color: var(--text-3); font-size: 11px; }
+.hud-row { display: flex; align-items: flex-end; gap: 8px; }
+.hud-fit { pointer-events: auto; width: 22px; height: 22px; text-shadow: none; }
 .readout i { font-style: normal; color: var(--text-3); margin-right: 5px; }
-.readout-head { display: flex; justify-content: space-between; gap: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
-.readout-head .muted { text-transform: none; letter-spacing: 0.02em; }
-.readout-main { display: flex; gap: 14px; font-size: 12px; color: var(--text-1); font-variant-numeric: tabular-nums; }
-.readout-sub { display: flex; gap: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 .pick { width: 288px; padding: 12px 14px 10px; max-height: calc(100vh - 90px); overflow: auto; }
 .pick-card { display: flex; flex-direction: column; gap: 6px; }
@@ -664,13 +662,12 @@ canvas.smooth { image-rendering: auto; }
 
 @media (max-width: 760px) {
   .readout { min-width: 0; }
-  .readout-sub:nth-of-type(n + 4) { display: none; }
   .pick { left: 10px !important; right: 10px; top: auto !important; bottom: 150px; width: auto; max-height: 52vh; }
 }
 /* with the drawer open the HUD sits above it, reduced to the date and α δ */
 @media (min-width: 761px) {
   .app.earth.drawer-open .hud-min { bottom: calc(46vh + 28px); }
-  .drawer-open .nav-pad, .drawer-open .readout-sub, .drawer-open .hud-compass { display: none; }
+  .drawer-open .hud-fit, .drawer-open .hud-compass { display: none; }
 }
 
 /* ---- 3D views (Sky3D): the canvas fills the sky; the bar floats top-right */
@@ -954,6 +951,64 @@ button.coordfield:hover .cf-hint, button.coordfield:focus-visible .cf-hint { opa
 @media (min-width: 761px) {
   .hero { bottom: max(110px, calc(var(--hud-clear, 0px) + 20px)); }
 }
+
+/* ------------------------------------------------------------------ easter egg: "claude" + Enter in the search */
+.egg {
+  --clay: #d97757;
+  position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 24px; overflow: hidden; cursor: pointer; user-select: none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(217, 119, 87, 0.16), rgba(0, 0, 0, 0.88) 62%);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: fade 500ms var(--ease) both;
+}
+.egg.leaving { animation: egg-out 420ms var(--ease) forwards; }
+@keyframes egg-out { from { opacity: 1; } to { opacity: 0; } }
+.egg-dust { position: absolute; border-radius: 50%; background: var(--text-1); opacity: 0.15; animation: egg-twinkle var(--d) ease-in-out var(--w) infinite alternate; }
+@keyframes egg-twinkle { to { opacity: 0.8; } }
+.egg-meteor {
+  position: absolute; width: 160px; height: 1px; opacity: 0; transform-origin: 100% 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 243, 234, 0.9));
+  animation: egg-meteor 7s ease-in var(--delay) infinite;
+}
+@keyframes egg-meteor {
+  0% { opacity: 0; transform: rotate(22deg) translateX(0); }
+  2% { opacity: 1; }
+  12% { opacity: 0; transform: rotate(22deg) translateX(520px); }
+  100% { opacity: 0; transform: rotate(22deg) translateX(520px); }
+}
+.egg-sky { width: min(56vmin, 430px); height: min(56vmin, 430px); flex: none; overflow: visible; }
+.egg-spin { animation: spin 120s linear 2.4s infinite; }
+.egg-star { fill: #fff3ea; transform-box: fill-box; transform-origin: center; animation: egg-gather 1500ms var(--ease) var(--delay) both; }
+.egg-star.tip { fill: #ffe6d6; animation: egg-gather 1500ms var(--ease) var(--delay) both, egg-glint 2.4s ease-in-out calc(var(--delay) + 1700ms) infinite alternate; }
+@keyframes egg-gather {
+  from { opacity: 0; transform: translate(var(--fx), var(--fy)) scale(0.4); }
+  35% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes egg-glint { from { opacity: 1; } to { opacity: 0.45; } }
+.egg-line { fill: none; stroke: var(--clay); stroke-width: 0.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0.85; animation: egg-draw 800ms var(--ease) var(--delay) forwards; }
+@keyframes egg-draw { to { stroke-dashoffset: 0; } }
+.egg-core { transform-box: fill-box; transform-origin: center; animation: egg-bloom 1200ms var(--ease) 1300ms both, egg-breathe 3.2s ease-in-out 2500ms infinite alternate; }
+@keyframes egg-bloom { from { opacity: 0; transform: scale(0); } 60% { opacity: 1; transform: scale(1.35); } to { opacity: 1; transform: none; } }
+@keyframes egg-breathe { from { transform: none; } to { transform: scale(1.18); } }
+.egg-caption { text-align: center; max-width: 600px; animation: egg-rise 900ms var(--ease) 2300ms both; }
+@keyframes egg-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.egg-kicker { color: var(--clay); }
+.egg-title { margin: 12px 0 0; font-family: var(--display); font-weight: 400; font-size: clamp(40px, 6vw, 76px); line-height: 1; letter-spacing: -0.015em; }
+.egg-sub { margin: 4px 0 0; font-family: var(--display); font-style: italic; font-size: clamp(20px, 2.6vw, 32px); line-height: 1.2; color: var(--text-2); }
+.egg-data { margin-top: 18px; font-size: 11.5px; letter-spacing: 0.02em; color: var(--text-3); }
+.egg-hint { margin-top: 22px; animation: egg-rise 900ms var(--ease) 3600ms both; }
+@media (prefers-reduced-motion: reduce) {
+  .egg, .egg * { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* Go to → Here: current position, copy, step the field */
+.goto-here { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--hair-1, rgba(255,255,255,0.08)); }
+.goto-here-head { display: flex; justify-content: space-between; align-items: center; }
+.goto-here-body { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.goto-here-body .muted { font-size: 11px; }
+.goto-step { display: flex; align-items: center; gap: 12px; }
+.goto-step .nav-pad { display: grid; }
 
 /* menus that drop down from the top bar (search suggestions, Random, the coordinate box) stay above the tool rail */
 .topleft { z-index: 33; }

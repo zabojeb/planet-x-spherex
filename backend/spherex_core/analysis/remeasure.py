@@ -17,7 +17,7 @@ from .. import cache
 from ..bands import NATIVE_PIXSCALE
 from ..config import settings
 from ..flags import ARTIFACTS, MASK_DEFAULT, PHOT_BAD, RING_BAD, RING_CORE, SATURATION
-from ..io import Cutout, Level2Reader, RangeClient, WaveMap
+from ..io import Cutout, EPSFTable, Level2Reader, RangeClient, WaveMap
 from ..photometry import ab_mag, measure, radial_profile
 from ..pipeline.assemble import apply_rings
 from ..pipeline.sequence import cpu_pool
@@ -61,23 +61,78 @@ def _record(index: int, epoch: int, r: dict) -> dict:
             "ring_r_in": ph.get("ring_r_in"), "ring_r_out": ph.get("ring_r_out")}
 
 
+_TABLES: dict[str, object] = {}  # per worker process: wave maps and ePSF tables by cache path
+
+
+def _table(path: str, kind: str):
+    if path not in _TABLES:
+        with np.load(path) as z:
+            _TABLES[path] = (WaveMap(z["x"], z["y"], z["values"]) if kind == "wave" else
+                             EPSFTable(z["xcenter"], z["ycenter"], z["psf"], int(z["oversampling"]), z["cwave"],
+                                       z["neff"]))
+    return _TABLES[path]
+
+
+def measure_cached(cut_path: str, wave_path: str, epsf_path: str, band: str, mjd_hint: float,
+                   target: Target) -> dict | None:
+    """measure_exposure on a cached cutout, done entirely in a pool worker: loading the npz, parsing the header
+    and building the WCS cost ~25 ms per exposure, which serialised on the event loop made a re-measure of
+    hundreds of exposures take 10 s. Returns None when the cache entry is unusable (the caller fetches it)."""
+    from astropy.io import fits
+
+    from ..io import slim_header
+
+    try:
+        with np.load(cut_path, allow_pickle=False) as z:
+            if int(z["x0"]) < 0:
+                return {"off_frame": True}
+            cut = Cutout("", slim_header(fits.Header.fromstring(str(z["header"]))), int(z["x0"]), int(z["y0"]),
+                         z["image"], z["variance"], z["flags"])
+    except Exception:  # noqa: BLE001 - missing or damaged cache entry
+        return None
+    wave, epsf = _table(wave_path, "wave"), _table(epsf_path, "epsf")
+    ra_t, dec_t = target.position_at(mjd_hint)
+    xt, yt = cut.wcs.all_world2pix(ra_t, dec_t, 0, quiet=True)
+    psf_os, _ = epsf.nearest(float(xt), float(yt))  # zone of the new position, not the cutout centre
+    return measure_exposure(cut, band, mjd_hint, target, wave, psf_os, epsf.oversampling)
+
+
 async def measure_position(ctx: SequenceContext, target: Target) -> dict:
-    """Photometry records for `target` in every exposure of the sequence, plus stats."""
+    """Photometry records for `target` in every exposure of the sequence, plus stats.
+
+    Exposures whose cutout is in the disk cache (all of them, for a sequence built here) are measured wholly in
+    the process pool; only missing ones go through the reader (S3 range reads)."""
     t0 = time.perf_counter()
     exposures = ctx.meta["exposures"]
     frames = await asyncio.to_thread(sequence_frames, ctx)
     half = cutout_half(ctx.grid)
     loop = asyncio.get_running_loop()
     pool = cpu_pool()
+    layout = cache.layout()
     per: list[dict | None] = [None] * len(exposures)
     async with RangeClient(settings.max_connections) as client:
-        reader = Level2Reader(client, cache.layout().root)
+        reader = Level2Reader(client, layout.root)
         sem = asyncio.Semaphore(settings.max_frames_in_flight)
+        # One wave map and ePSF table per detector, cached on disk for the workers (loaded once per process).
+        first = {}
+        for f in frames:
+            if f is not None:
+                first.setdefault(f.detector, f)
+        await asyncio.gather(*(reader.wave_map(f.s3_url, d) for d, f in first.items()),
+                             *(reader.epsf_table(f.s3_url, d) for d, f in first.items()))
 
         async def one(i: int) -> None:
             f = frames[i]
             if f is None:
                 return
+            cpath = layout.cutout(f.s3_url, ctx.grid.ra, ctx.grid.dec, half)
+            if cpath.exists():
+                r = await loop.run_in_executor(pool, measure_cached, str(cpath), str(layout.wave(f.detector)),
+                                               str(layout.epsf(f.detector)), exposures[i]["band"],
+                                               exposures[i]["mjd"], target)
+                if r is not None:
+                    per[i] = None if r.get("off_frame") else r
+                    return
             async with sem:
                 cut = await reader.cutout(f.s3_url, ctx.grid.ra, ctx.grid.dec, half)
                 if cut is None:

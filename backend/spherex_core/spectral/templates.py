@@ -103,8 +103,19 @@ def integrate(wl_um: np.ndarray, flam: np.ndarray, grid: BinGrid = GRID) -> np.n
 
 
 def _get(url: str, timeout: float = 60.0) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read()
+    from .. import netpolicy
+
+    service = url.split("/")[2]
+    netpolicy.check(service)
+    timeout, _ = netpolicy.timeouts(timeout, 1)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            data = r.read()
+    except Exception as e:
+        netpolicy.failed(service, e)
+        raise
+    netpolicy.succeeded(service)
+    return data
 
 
 def _download_pickles() -> list[tuple[str, str, str, np.ndarray, np.ndarray]]:

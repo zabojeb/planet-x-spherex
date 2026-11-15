@@ -177,7 +177,10 @@ def catalog_cone(name: str, ra: float, dec: float, radius_arcmin: float) -> list
     remote service fails."""
     if name not in catalogs.CATALOGS:
         raise NotFound("unknown catalog")
-    return catalogs.cone(name, ra, dec, radius_arcmin / 60.0)
+    from . import netpolicy
+
+    with netpolicy.fast():  # an overlay layer: short timeouts, and skip a service that just failed
+        return catalogs.cone(name, ra, dec, radius_arcmin / 60.0)
 
 
 # ---------------------------------------------------------------- analyses, exports, releases (agent B)
@@ -574,3 +577,20 @@ async def verify_candidate(seq_id: str, ra: float, dec: float, mjd_ref: float | 
 
     ctx, fd = await asyncio.to_thread(_field_data, seq_id)
     return await verify(ctx, fd, ra, dec, mjd_ref, rate, pa, epoch, max_exposures)
+
+
+# ---------------------------------------------------------------- point analysis ("click a point -> Analyze")
+async def point_analysis_submit(seq_id: str, ra: float, dec: float, pmra: float | None = None,
+                                pmdec: float | None = None, ref_epoch: float = 2000.0, name: str | None = None,
+                                client: str | None = None, force: bool = False) -> dict:
+    """Start or join every automatic analysis of one position (a job; poll with field_status)."""
+    from .analysis.point import PointRequest, analyze_point
+    from .field import jobs as fj
+
+    req = PointRequest(ra=ra, dec=dec, pmra=pmra, pmdec=pmdec, ref_epoch=ref_epoch, name=name)
+    jid = fj.make_id(seq_id, "p", req.key())
+
+    def work(ctx, progress, check):
+        return analyze_point(ctx, req, progress, check)
+
+    return await fj.field_jobs().submit_work(seq_id, jid, work, client, force)

@@ -26,7 +26,7 @@ import { Hero, ProgressBar } from "./components/Progress";
 import { SharePanel, TopLeft } from "./components/TopBar";
 import { Dock, PlaybackOptions } from "./components/Transport";
 import { bandLabel, computeDisplay, effectiveRef, isPartial, planesNeeded, planesNeeded3d, playableEpochs, rgbLabel, slices3d, stackEpochs, stepEpoch, type Display, type ExposureView } from "./display";
-import { safeStorage, useMediaQuery } from "./hooks";
+import { safeStorage, useFullscreen, useMediaQuery } from "./hooks";
 import { Derived, percentiles, type BandSel } from "./render";
 import { describe, loadRecents, pickFor, randomField, randomObject, saveRecent, searchSpace, type Facet, type ObjectIndex, type Pick, type Recent } from "./search";
 import { DEFAULT_VIEW, EMBED_VIEW3D, MODES, defaultFlagBits, parseUrl, viewLink, writeUrl, type TargetSpec, type View3D, type ViewState } from "./state";
@@ -87,8 +87,8 @@ function normalizeView(v: ViewState, data: SequenceData, keep: boolean, target: 
 
 /** Space taken by the floating chrome where the image must not go under it (keep in sync with styles.css):
  * phones stack the top bar, HUD and a two-row dock; mid widths put the HUD above a one-row dock. */
-const MOBILE_FRAME = { top: 108, bottom: 290 };
-const MID_FRAME = { top: 160, bottom: 264 }; // top: below the coordinate box
+const MOBILE_FRAME = { top: 108, bottom: 254 }; // bottom: dock + compact HUD, plus a line for the cursor/selection readout
+const MID_FRAME = { top: 160, bottom: 168 }; // top: below the coordinate box; bottom: lifted HUD + readout line
 /** The HUD's left edge and the clearance it keeps from the dock before it moves above it. */
 const HUD_LEFT = 20;
 const HUD_DOCK_GAP = 16;
@@ -163,6 +163,7 @@ export default function App() {
   const keepView = useRef(initial.hasParams);
   const metaId = useRef<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
+  const fullscreen = useFullscreen();
   const [planesTick, setPlanesTick] = useState(0);
   const [planesBusy, setPlanesBusy] = useState(false);
   const [tablesTick, setTablesTick] = useState(0);
@@ -542,6 +543,7 @@ export default function App() {
       } else if (e.key === "0") set({ band: "all" });
       else if (e.key.toLowerCase() === "v") toggle3d();
       else if (e.key.toLowerCase() === "g") toggleOverlay("grid");
+      else if (e.key.toLowerCase() === "f") fullscreen.toggle();
       else {
         const m = MODES.find((x) => x.key === e.key.toLowerCase());
         if (m) set({ mode: m.id });
@@ -1107,7 +1109,7 @@ export default function App() {
       <Rail
         bandLabel={bandShort}
         goTo={(close: () => void) => (
-          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} close={close} />
+          <GoToPanel current={targetWorld ?? (meta ? [meta.grid.ra, meta.grid.dec] : null)} currentName={targetName} presets={presets} fov={fov} onGo={goTo} onPreset={choosePreset} onStep={embed ? undefined : (d) => { stepField(d); close(); }} close={close} />
         )}
         objects={
           meta ? (
@@ -1156,6 +1158,7 @@ export default function App() {
         onDetails={meta ? () => openDetails("spectrum") : undefined}
         is3d={is3d}
         on3d={meta ? toggle3d : undefined}
+        fullscreen={fullscreen.supported ? fullscreen : undefined}
       />
       {is3d && meta && <View3DBar view={view} set={set} spin={spin} onSpin={setSpin} />}
       <div className="floating-bottom">{dock}</div>
